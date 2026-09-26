@@ -1,0 +1,12 @@
+{
+  "name": "panamedia-installer-ui",
+  "version": "1.0.0",
+  "description": "Panamedia Custom Installer UI",
+  "author": "Panamedia",
+  "main": "main.cjs",
+  "private": true,
+  "devDependencies": {
+    "electron": "42.4.1",
+    "electron-builder": "26.15.3"
+  }
+}

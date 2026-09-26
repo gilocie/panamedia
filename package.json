@@ -1,0 +1,50 @@
+{
+  "name": "panamedia",
+  "productName": "Panamedia",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Panamedia – All-in-One Media Manager & Downloader",
+  "main": "electron.cjs",
+  "type": "module",
+  "author": {
+    "name": "Panamedia",
+    "email": "gilocie@gmail.com"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "start": "electron . --disable-gpu --disable-gpu-sandbox --no-sandbox",
+    "electron-dev": "node dev.cjs",
+    "dist:nsis": "npm run build && npx electron-builder --config electron-builder.json --publish never",
+    "dist": "node scripts/build-custom-installer.cjs",
+    "dist-installer": "node scripts/build-custom-installer.cjs",
+    "dist:installer": "node scripts/build-custom-installer.cjs",
+    "dist:dir": "npm run build && npx electron-builder --config electron-builder.json --dir",
+    "installer": "node scripts/build-custom-installer.cjs",
+    "test:installer": "electron installer-ui/main.cjs"
+  },
+  "dependencies": {
+    "lucide-react": "^1.21.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.0.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "electron": "^42.4.1",
+    "electron-builder": "^26.15.3",
+    "eslint": "^10.5.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.6.0",
+    "rolldown": "^1.1.2",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.61.1",
+    "vite": "^8.0.16"
+  }
+}

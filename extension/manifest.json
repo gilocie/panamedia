@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "net-downloader Integration",
+  "version": "1.0",
+  "description": "Integrates net-downloader with Chrome/Edge. Hijacks default downloads and handles high-speed multi-threaded downloading.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAu7x2gBdC/TZq+JKIZ9GX0F822P3todWVk2wv/fu+fvXMVZCt4Rpl57jNjUrytMqmlpZ4JP68w5X2OiQnBgbs7lQfPHbDRsUx6f2R+v1pw/jeJYfmRWpYJbXKcDFvwcgaDujJZtVlyVT2ryFyh2hIzWGoaUtK15tQGSKH8tFiPMxVtilJi7G9L5rOMtjptFDSCC1BxbkTXudC1wv+lp+u0jzrGGFmuLLT7etRd2Z/VgkYAxOJ0YySG10T7dklaYpDj4KDNqi96PrCXJ/lfOCzQ4Je2l8wuME8QbF5z7nzZQ3wx1C+C4H6EKQoCGWNd+rn8AVg+rPqzo9QSKZVW+UYIwIDAQAB",
+  "permissions": [
+    "downloads",
+    "downloads.shelf",
+    "cookies",
+    "nativeMessaging",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.youtube.com/watch*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_end"
+    }
+  ]
+}

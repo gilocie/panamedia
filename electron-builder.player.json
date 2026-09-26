@@ -1,0 +1,74 @@
+{
+  "appId": "com.panamedia.player",
+  "productName": "Player",
+  "copyright": "Copyright © 2025 Panamedia",
+  "icon": "public/player.ico",
+  "directories": {
+    "output": "dist-electron",
+    "buildResources": "build"
+  },
+  "files": [
+    "dist/**/*",
+    "electron.cjs",
+    "panamedia-downloader/**/*",
+    "dev.cjs",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "src-cpp/build/bin/Release/",
+      "to": "bin/",
+      "filter": ["*.exe", "*.dll"]
+    }
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "public/player.ico",
+    "requestedExecutionLevel": "asInvoker"
+  },
+  "fileAssociations": [
+    { "ext": "mp4", "name": "Panamedia Video", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "mkv", "name": "Panamedia Video", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "webm", "name": "Panamedia Video", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "avi", "name": "Panamedia Video", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "mov", "name": "Panamedia Video", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "flv", "name": "Panamedia Video", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "wmv", "name": "Panamedia Video", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "vob", "name": "Panamedia Video", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "3gp", "name": "Panamedia Video", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "ts", "name": "Panamedia Video", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "mp3", "name": "Panamedia Audio", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "m4a", "name": "Panamedia Audio", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "wav", "name": "Panamedia Audio", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "flac", "name": "Panamedia Audio", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "ogg", "name": "Panamedia Audio", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "aac", "name": "Panamedia Audio", "role": "Viewer", "icon": "public/player.ico" }
+  ],
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "allowElevation": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Panamedia Player",
+    "installerIcon": "public/player.ico",
+    "uninstallerIcon": "public/player.ico",
+    "installerHeaderIcon": "public/player.ico",
+    "deleteAppDataOnUninstall": false
+  },
+  "mac": {
+    "target": "dmg",
+    "icon": "public/player.ico",
+    "category": "public.app-category.entertainment"
+  },
+  "linux": {
+    "target": "AppImage",
+    "icon": "public/player.ico",
+    "category": "AudioVideo"
+  }
+}
