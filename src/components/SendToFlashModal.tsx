@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Send, ChevronLeft, HardDrive, MoveRight, 
   Loader2, ChevronRight, Heart, Lock, CheckCircle2, AlertCircle,
-  Folder, FolderPlus, Plus
+  Folder, FolderPlus, Plus, Minimize2, Sparkles
 } from 'lucide-react';
 import { electron } from './panamedia/types';
 import { 
@@ -48,8 +48,14 @@ export function SendToFlashModal({
   const [copyProgress, setCopyProgress] = useState(0);
   const [currentFileIndex, setCurrentFileIndex] = useState(0);
   const [errorMsg, setErrorMsg] = useState('');
-  const [activeSection, setActiveSection] = useState<'main' | 'prepare' | 'drives' | 'sendtray_progress' | 'sendtray_destination'>('main');
-  const [pendingAction, setPendingAction] = useState<'drive' | 'sendtray'>('drive');
+  const isDirectConverter = Boolean((window as any).__openConverterProDirect);
+  const [activeSection, setActiveSection] = useState<'main' | 'prepare' | 'drives' | 'sendtray_progress' | 'sendtray_destination'>(() => {
+    if ((window as any).__openConverterProDirect) {
+      return 'prepare';
+    }
+    return 'main';
+  });
+  const [pendingAction, setPendingAction] = useState<'drive' | 'sendtray' | 'convert'>('convert');
   const [destinationFolders, setDestinationFolders] = useState<SendtrayFolder[]>(() => getSendtrayFolders());
   const [isCreatingDestFolder, setIsCreatingDestFolder] = useState(false);
   const [newDestFolderName, setNewDestFolderName] = useState('');
@@ -60,8 +66,165 @@ export function SendToFlashModal({
     keepOriginal: true
   });
 
-  const allFiles = isBatch ? sendTrayItems : [filePath];
-  const hasVideo = allFiles.some(f => isVideoFile(f));
+  const [queuedFiles, setQueuedFiles] = useState<string[]>(() => {
+    let baseList: string[] = [];
+    try {
+      const saved = JSON.parse(localStorage.getItem('converter_queue') || '[]');
+      if (Array.isArray(saved)) baseList = saved;
+    } catch (e) {}
+    if (isBatch && sendTrayItems && sendTrayItems.length > 0) {
+      return Array.from(new Set([...baseList, ...sendTrayItems]));
+    }
+    if (filePath && filePath !== 'media') {
+      return Array.from(new Set([...baseList, filePath]));
+    }
+    return baseList;
+  });
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const isPausedRef = useRef(false);
+
+  useEffect(() => {
+    if ((window as any).__openConverterProDirect) {
+      setActiveSection('prepare');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (filePath && filePath !== 'media') {
+      setQueuedFiles(prev => {
+        const next = Array.from(new Set([...prev, filePath]));
+        localStorage.setItem('converter_queue', JSON.stringify(next));
+        return next;
+      });
+    }
+  }, [filePath]);
+
+  useEffect(() => {
+    if (!electron) return;
+    const handleRestore = () => {
+      setActiveSection('prepare');
+      setIsMinimized(false);
+    };
+    const handleDirectOpen = () => {
+      setActiveSection('prepare');
+      setIsMinimized(false);
+    };
+    const handleClose = () => {
+      setIsMinimized(false);
+      onClose();
+    };
+    const handlePause = () => {
+      setIsPaused(true);
+      isPausedRef.current = true;
+    };
+    const handleResume = () => {
+      setIsPaused(false);
+      isPausedRef.current = false;
+    };
+    electron.ipcRenderer.on('converter-open-request', handleDirectOpen);
+    electron.ipcRenderer.on('converter-restore-request', handleRestore);
+    electron.ipcRenderer.on('converter-close-request', handleClose);
+    electron.ipcRenderer.on('converter-pause-request', handlePause);
+    electron.ipcRenderer.on('converter-resume-request', handleResume);
+    return () => {
+      electron.ipcRenderer.removeListener('converter-open-request', handleDirectOpen);
+      electron.ipcRenderer.removeListener('converter-restore-request', handleRestore);
+      electron.ipcRenderer.removeListener('converter-close-request', handleClose);
+      electron.ipcRenderer.removeListener('converter-pause-request', handlePause);
+      electron.ipcRenderer.removeListener('converter-resume-request', handleResume);
+    };
+  }, [onClose]);
+
+
+  const handleAddFilesToQueue = async () => {
+    if (electron) {
+      try {
+        const selected = await electron.ipcRenderer.invoke('select-media-files');
+        if (Array.isArray(selected) && selected.length > 0) {
+          setQueuedFiles(prev => {
+            const next = Array.from(new Set([...prev, ...selected]));
+            localStorage.setItem('converter_queue', JSON.stringify(next));
+            return next;
+          });
+        }
+      } catch (err) {
+        console.error('File selection error:', err);
+      }
+    } else {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.accept = 'video/*,audio/*';
+      input.onchange = (e: any) => {
+        const files = Array.from(e.target.files || []) as File[];
+        const paths = files.map((f: any) => f.path || f.name).filter(Boolean);
+        if (paths.length > 0) {
+          setQueuedFiles(prev => {
+            const next = Array.from(new Set([...prev, ...paths]));
+            localStorage.setItem('converter_queue', JSON.stringify(next));
+            return next;
+          });
+        }
+      };
+      input.click();
+    }
+  };
+
+  const handleRemoveFromQueue = (indexToRemove: number) => {
+    setQueuedFiles(prev => {
+      const next = prev.filter((_, idx) => idx !== indexToRemove);
+      localStorage.setItem('converter_queue', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const handleClearQueue = () => {
+    setQueuedFiles([]);
+    localStorage.removeItem('converter_queue');
+    if (electron) {
+      electron.ipcRenderer.send('converter-minimize-state', {
+        minimized: false,
+        queueCount: 0,
+        converting: false
+      });
+    }
+  };
+
+  const [directSendFiles, setDirectSendFiles] = useState<string[] | null>(null);
+  const [isFromConverter, setIsFromConverter] = useState(false);
+
+  const effectiveFiles = (directSendFiles && directSendFiles.length > 0)
+    ? directSendFiles
+    : (queuedFiles.length > 0 ? queuedFiles : (filePath ? [filePath] : []));
+  const allFiles = effectiveFiles.filter(Boolean);
+
+  // Sync minimize state and conversion progress with PlayerTitleBar
+  useEffect(() => {
+    if (!electron) return;
+    if (isMinimized && activeSection !== 'prepare') {
+      const activeFile = allFiles[currentFileIndex] || filePath || '';
+      const cleanFileName = activeFile ? activeFile.split(/[/\\]/).pop() : '';
+      electron.ipcRenderer.send('converter-minimize-state', {
+        minimized: true,
+        converting: copyStatus === 'copying',
+        isPaused,
+        progress: Math.round(copyProgress * 100),
+        currentFile: cleanFileName,
+        queueCount: allFiles.length,
+        status: copyStatus,
+        statusText: isPaused
+          ? 'Conversion Paused'
+          : copyStatus === 'completed'
+          ? 'Conversion Complete!'
+          : copyStatus === 'failed'
+          ? 'Conversion Failed'
+          : copyStatus === 'copying'
+          ? (allFiles.length > 1 ? `Converting [${currentFileIndex + 1}/${allFiles.length}]` : 'Converting Media...')
+          : 'Converter Pro'
+      });
+    }
+  }, [isMinimized, copyProgress, copyStatus, currentFileIndex, allFiles, filePath, isPaused, activeSection]);
 
   useEffect(() => {
     if (!electron) { 
@@ -74,7 +237,7 @@ export function SendToFlashModal({
     });
 
     const handleProgress = (_event: any, data: any) => {
-      if (data.filePath === allFiles[currentFileIndex]) {
+      if (allFiles[currentFileIndex] && data.filePath === allFiles[currentFileIndex]) {
         setCopyProgress(data.progress);
         if (data.status === 'completed') {
           if (currentFileIndex < allFiles.length - 1) {
@@ -86,7 +249,7 @@ export function SendToFlashModal({
           }
         } else if (data.status === 'failed') {
           setCopyStatus('failed');
-          setErrorMsg(data.error || 'Copy failed');
+          setErrorMsg(data.error || 'Operation failed');
         }
       }
     };
@@ -96,7 +259,7 @@ export function SendToFlashModal({
     return () => { 
       electron?.ipcRenderer.removeListener('copy-progress', handleProgress); 
     };
-  }, [filePath, currentFileIndex, isBatch, sendTrayItems]);
+  }, [allFiles, currentFileIndex, isBatch, sendTrayItems]);
 
   const handleSend = async (driveLetter: string) => {
     if (!electron) return;
@@ -144,57 +307,145 @@ export function SendToFlashModal({
     handleMoveToSendtray(created.id);
   };
 
+  const handleMoveFileToSendtray = (targetPath: string, folderId?: string) => {
+    if (setSendTrayItems) {
+      setSendTrayItems(prev => prev.includes(targetPath) ? prev : [...prev, targetPath]);
+    }
+    if (folderId) {
+      assignFileToSendtrayFolder(targetPath, folderId);
+    }
+  };
+
   const handleProceedFromPreparation = async (options: SendConvertOptions) => {
     setSendConvertOptions(options);
-    if (pendingAction === 'drive') {
+    const dest = options.exportDestination || (pendingAction === 'drive' ? 'drive' : 'sendtray');
+
+    if (dest === 'drive' && !options.exportDriveLetter) {
       setActiveSection('drives');
-    } else {
-      if (options.mode === 'original') {
-        handleMoveToSendtray(options.targetFolderId);
-      } else {
-        if (!electron) return;
-        setActiveSection('sendtray_progress');
-        setCopyStatus('copying');
+      return;
+    }
+
+    if (dest === 'sendtray' && options.mode === 'original') {
+      allFiles.forEach(f => handleMoveFileToSendtray(f, options.targetFolderId));
+      onClose();
+      return;
+    }
+
+    if (!electron) return;
+    setActiveSection('sendtray_progress');
+    setCopyStatus('copying');
+    setCopyProgress(0.01);
+    setCurrentFileIndex(0);
+    setErrorMsg('');
+
+    try {
+      for (let i = 0; i < allFiles.length; i++) {
+        while (isPausedRef.current) {
+          await new Promise(r => setTimeout(r, 400));
+        }
+        setCurrentFileIndex(i);
+        const target = allFiles[i];
         setCopyProgress(0.05);
+
+        // Record persistent event state so status is retained across power loss / restarts
         try {
+          localStorage.setItem('converter_active_progress', JSON.stringify({
+            status: 'converting',
+            currentFileIndex: i,
+            totalFiles: allFiles.length,
+            currentFile: target,
+            timestamp: Date.now()
+          }));
+        } catch (e) {}
+
+        const itemOpt = options.perFileOptions?.[target] || {
+          mode: options.mode,
+          format: options.format,
+          bitrate: options.bitrate
+        };
+
+        if (dest === 'drive' && options.exportDriveLetter) {
+          if (options.mode === 'original') {
+            const res = await electron.ipcRenderer.invoke('copy-file-to-drive', {
+              filePath: target,
+              driveLetter: options.exportDriveLetter
+            });
+            if (!res.success) throw new Error(res.error || 'Copy to drive failed');
+          } else {
+            const res = await electron.ipcRenderer.invoke('convert-and-send-to-drive', {
+              filePath: target,
+              driveLetter: options.exportDriveLetter,
+              options: {
+                mode: itemOpt.mode,
+                format: itemOpt.format,
+                bitrate: itemOpt.bitrate
+              }
+            });
+            if (!res.success) throw new Error(res.error || 'Conversion to drive failed');
+          }
+        } else {
+          // Export to Sendtray or custom folder
+          const targetDir = dest === 'folder' ? options.exportCustomPath : undefined;
           const res = await electron.ipcRenderer.invoke('convert-media-file', {
-            filePath,
+            filePath: target,
+            targetDir,
             options: {
-              mode: options.mode,
-              format: options.format,
-              bitrate: options.bitrate
+              mode: itemOpt.mode,
+              format: itemOpt.format,
+              bitrate: itemOpt.bitrate
             }
           });
           if (res.success && res.outputPath) {
-            setCopyStatus('completed');
-            if (setSendTrayItems && !sendTrayItems.includes(res.outputPath)) {
-              setSendTrayItems(prev => [...prev, res.outputPath]);
+            if (dest === 'sendtray') {
+              handleMoveFileToSendtray(res.outputPath, options.targetFolderId);
             }
-            if (options.targetFolderId) {
-              assignFileToSendtrayFolder(res.outputPath, options.targetFolderId);
-            }
-            setTimeout(() => {
-              onClose();
-            }, 1200);
+            setCopyProgress(1);
+
+            // Save completed event
+            try {
+              const history = JSON.parse(localStorage.getItem('converter_event_history') || '[]');
+              history.unshift({
+                file: target,
+                output: res.outputPath || options.exportDriveLetter || 'Saved',
+                timestamp: new Date().toISOString(),
+                status: 'completed'
+              });
+              localStorage.setItem('converter_event_history', JSON.stringify(history.slice(0, 50)));
+            } catch (e) {}
           } else {
             setCopyStatus('failed');
-            setErrorMsg(res.error || 'Conversion failed');
+            setErrorMsg(res.error || `Conversion failed for ${target.split(/[\\/]/).pop()}`);
+            return;
           }
-        } catch (err: any) {
-          setCopyStatus('failed');
-          setErrorMsg(err.message || 'Conversion failed');
         }
       }
+      setCopyStatus('completed');
+      try {
+        localStorage.removeItem('converter_active_progress');
+        localStorage.setItem('converter_last_event', JSON.stringify({
+          status: 'completed',
+          completedAt: Date.now(),
+          totalFiles: allFiles.length
+        }));
+      } catch (e) {}
+      setTimeout(() => {
+        onClose();
+      }, 1500);
+    } catch (err: any) {
+      setCopyStatus('failed');
+      setErrorMsg(err.message || 'Conversion failed');
+      try {
+        localStorage.setItem('converter_active_progress', JSON.stringify({
+          status: 'failed',
+          error: err.message,
+          timestamp: Date.now()
+        }));
+      } catch (e) {}
     }
   };
 
   const handleMoveToSendtray = (folderId?: string) => {
-    if (setSendTrayItems && !sendTrayItems.includes(filePath)) {
-      setSendTrayItems(prev => [...prev, filePath]);
-    }
-    if (folderId) {
-      assignFileToSendtrayFolder(filePath, folderId);
-    }
+    allFiles.forEach(f => handleMoveFileToSendtray(f, folderId));
     onClose();
   };
 
@@ -256,45 +507,69 @@ export function SendToFlashModal({
     }] : []),
   ];
 
-  const bottomOptions = [
-    {
-      id: 'drives',
-      icon: <HardDrive size={20} />,
-      label: 'Hard Drives & USB',
-      desc: allFiles.length > 1 ? `Copy ${allFiles.length} files to drive` : 'Copy to removable flash drives or local drives',
-      fullTitle: 'Copy to removable flash drives or local drives',
-      color: '#6366f1',
-      action: () => {
-        if (hasVideo) {
-          setPendingAction('drive');
-          setActiveSection('prepare');
-        } else {
-          setActiveSection('drives');
-        }
-      }
-    },
-    ...(!isBatch ? [{
-      id: 'sendtray',
-      icon: <MoveRight size={20} style={{ color: '#f59e0b' }} />,
-      label: 'Move to Sendtray',
-      desc: 'Hold in tray for batch sending later',
-      fullTitle: 'Move to Sendtray (Hold in tray for batch sending later)',
-      color: '#f59e0b',
-      action: () => {
-        if (hasVideo) {
-          setPendingAction('sendtray');
-          setActiveSection('prepare');
-        } else {
-          setDestinationFolders(getSendtrayFolders());
-          setActiveSection('sendtray_destination');
-        }
-      }
-    }] : [])
+  const driveOption = {
+    id: 'drives',
+    icon: <HardDrive size={20} />,
+    label: 'Hard Drives & USB',
+    desc: allFiles.length > 1 ? `Copy ${allFiles.length} files to drive` : 'Copy to removable flash drives or local drives',
+    fullTitle: 'Copy to removable flash drives or local drives',
+    color: '#6366f1',
+    action: () => {
+      setSendConvertOptions(prev => ({ ...prev, mode: 'original' }));
+      setActiveSection('drives');
+    }
+  };
+
+  const trayOption = !isBatch ? {
+    id: 'sendtray',
+    icon: <MoveRight size={18} style={{ color: '#f59e0b' }} />,
+    label: 'Move to Sendtray',
+    desc: 'Hold in tray for later',
+    fullTitle: 'Move to Sendtray (Hold in tray for batch sending later)',
+    color: '#f59e0b',
+    action: () => {
+      setDestinationFolders(getSendtrayFolders());
+      setActiveSection('sendtray_destination');
+    }
+  } : null;
+
+  const convertOption = {
+    id: 'convert',
+    icon: <Sparkles size={18} style={{ color: '#c084fc' }} />,
+    label: 'Convert',
+    desc: 'Tools & export',
+    fullTitle: 'Convert Media (Audio extraction, video format conversion & export)',
+    color: '#a855f7',
+    action: () => {
+      setPendingAction('convert');
+      setActiveSection('prepare');
+    }
+  };
+
+  const bottomRowOptions = [
+    ...(trayOption ? [trayOption] : []),
+    ...(!isFromConverter ? [convertOption] : [])
   ];
 
-  const allMainOptions = [...topRowOptions, ...bottomOptions];
+  const allMainOptions = [
+    ...topRowOptions,
+    driveOption,
+    ...bottomRowOptions
+  ];
 
   const [selectedIndex, setSelectedIndex] = useState(0);
+
+  const handleCancelOrClose = React.useCallback(() => {
+    if (isFromConverter) {
+      setIsFromConverter(false);
+      setDirectSendFiles(null);
+      setActiveSection('prepare');
+    } else {
+      setIsMinimized(false);
+      (window as any).__openConverterProDirect = false;
+      onClose();
+    }
+  }, [isFromConverter, onClose]);
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -309,8 +584,10 @@ export function SendToFlashModal({
         if (copyStatus === 'copying') return;
         if (activeSection === 'prepare') {
           setActiveSection('main');
-        } else if (activeSection === 'drives') {
-          setActiveSection(hasVideo ? 'prepare' : 'main');
+        } else if (activeSection === 'drives' || activeSection === 'sendtray_destination') {
+          setActiveSection('main');
+        } else if (activeSection === 'main' && isFromConverter) {
+          handleCancelOrClose();
         } else {
           onClose();
         }
@@ -324,8 +601,10 @@ export function SendToFlashModal({
         if (copyStatus === 'copying') return;
         if (activeSection === 'prepare') {
           setActiveSection('main');
-        } else if (activeSection === 'drives') {
-          setActiveSection(hasVideo ? 'prepare' : 'main');
+        } else if (activeSection === 'drives' || activeSection === 'sendtray_destination') {
+          setActiveSection('main');
+        } else if (activeSection === 'main' && isFromConverter) {
+          handleCancelOrClose();
         } else if (activeSection === 'main') {
           onClose();
         }
@@ -334,34 +613,41 @@ export function SendToFlashModal({
 
       // Navigation in main options list
       if (activeSection === 'main') {
-        const maxIndex = allMainOptions.length - 1;
+        const topLen = topRowOptions.length;
+        const driveIdx = topLen;
+        const bottomLen = bottomRowOptions.length;
+
         if (e.key === 'ArrowDown') {
           e.preventDefault();
           e.stopImmediatePropagation();
-          if (topRowOptions.length === 2 && (selectedIndex === 0 || selectedIndex === 1)) {
-            setSelectedIndex(Math.min(2, maxIndex));
-          } else {
-            setSelectedIndex(prev => (prev < maxIndex ? prev + 1 : prev));
+          if (selectedIndex < topLen) {
+            setSelectedIndex(driveIdx);
+          } else if (selectedIndex === driveIdx) {
+            if (bottomLen > 0) setSelectedIndex(driveIdx + 1);
           }
         } else if (e.key === 'ArrowUp') {
           e.preventDefault();
           e.stopImmediatePropagation();
-          if (topRowOptions.length === 2 && selectedIndex === 2) {
-            setSelectedIndex(0);
-          } else {
-            setSelectedIndex(prev => (prev > 0 ? prev - 1 : prev));
+          if (selectedIndex >= driveIdx + 1) {
+            setSelectedIndex(driveIdx);
+          } else if (selectedIndex === driveIdx) {
+            if (topLen > 0) setSelectedIndex(0);
           }
         } else if (e.key === 'ArrowRight') {
           e.preventDefault();
           e.stopImmediatePropagation();
-          if (topRowOptions.length === 2 && selectedIndex === 0) {
+          if (topLen === 2 && selectedIndex === 0) {
             setSelectedIndex(1);
+          } else if (bottomLen === 2 && selectedIndex === driveIdx + 1) {
+            setSelectedIndex(driveIdx + 2);
           }
         } else if (e.key === 'ArrowLeft') {
           e.preventDefault();
           e.stopImmediatePropagation();
-          if (topRowOptions.length === 2 && selectedIndex === 1) {
+          if (topLen === 2 && selectedIndex === 1) {
             setSelectedIndex(0);
+          } else if (bottomLen === 2 && selectedIndex === driveIdx + 2) {
+            setSelectedIndex(driveIdx + 1);
           }
         } else if (e.key === 'Enter') {
           e.preventDefault();
@@ -392,19 +678,59 @@ export function SendToFlashModal({
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [activeSection, selectedIndex, drives, allMainOptions, topRowOptions.length, copyStatus, onClose, hasVideo]);
+  }, [activeSection, selectedIndex, drives, allMainOptions, topRowOptions.length, bottomRowOptions.length, copyStatus, onClose]);
+
+
+  const defaultDisplayName = (allFiles[0] || filePath || '').split(/[/\\]/).pop() || 'Media File';
 
   return (
-    <div className="modal-backdrop send-to-flash-modal" data-modal="send" style={{ zIndex: 12000 }} onClick={onClose}>
+    <div 
+      className="modal-backdrop send-to-flash-modal" 
+      data-modal="send" 
+      style={{ 
+        zIndex: 12000, 
+        display: isMinimized ? 'none' : 'flex' 
+      }} 
+      onClick={onClose}
+    >
       {activeSection === 'prepare' ? (
         <SendConvertPreparationModal
-          fileName={filename}
+          fileName={allFiles.length > 1 ? `${allFiles.length} files queued` : defaultDisplayName}
           targetAction={pendingAction}
-          isBatch={isBatch}
+          isBatch={allFiles.length > 1 || isBatch}
           batchCount={allFiles.length}
+          queuedFiles={allFiles}
+          onAddFiles={handleAddFilesToQueue}
+          onRemoveFile={handleRemoveFromQueue}
+          onClearQueue={handleClearQueue}
+          drives={drives}
           onProceed={handleProceedFromPreparation}
-          onBack={() => setActiveSection('main')}
-          onClose={onClose}
+          onDirectSend={(target) => {
+            if (Array.isArray(target) && target.length > 0) {
+              setDirectSendFiles(target);
+              setIsFromConverter(true);
+              setActiveSection('main');
+            } else if (target === 'drive') {
+              setActiveSection('drives');
+            } else {
+              setActiveSection('sendtray_destination');
+            }
+          }}
+          onMinimizeChange={setIsMinimized}
+          onBack={() => {
+            setIsMinimized(false);
+            if (isDirectConverter) {
+              (window as any).__openConverterProDirect = false;
+              onClose();
+            } else {
+              setActiveSection('main');
+            }
+          }}
+          onClose={() => {
+            setIsMinimized(false);
+            (window as any).__openConverterProDirect = false;
+            onClose();
+          }}
         />
       ) : (
         <div 
@@ -423,18 +749,18 @@ export function SendToFlashModal({
           {/* Header */}
           <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(99,102,241,0.06)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              {(activeSection === 'drives' || activeSection === 'sendtray_destination') && (
+              {((activeSection === 'drives' || activeSection === 'sendtray_destination') || (isFromConverter && activeSection === 'main')) && (
                 <button 
                   onClick={() => { 
-                    if (activeSection === 'drives') {
-                      setActiveSection(hasVideo ? 'prepare' : 'main');
+                    if (isFromConverter && activeSection === 'main') {
+                      handleCancelOrClose();
                     } else {
                       setActiveSection('main');
+                      setCopyStatus('idle'); 
                     }
-                    setCopyStatus('idle'); 
                   }} 
                   style={{ background: 'rgba(255,255,255,0.06)', border: 'none', color: '#fff', cursor: 'pointer', padding: '5px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  title="Back (Backspace)"
+                  title="Back"
                 >
                   <ChevronLeft size={16} />
                 </button>
@@ -453,7 +779,31 @@ export function SendToFlashModal({
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{totalLabel}</div>
               </div>
             </div>
-            <button className="modal-close-btn" onClick={onClose} disabled={copyStatus === 'copying'}>✕</button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {copyStatus === 'copying' && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setIsMinimized(true); }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    background: 'rgba(168, 85, 247, 0.16)',
+                    border: '1px solid rgba(168, 85, 247, 0.4)',
+                    color: '#e9d5ff',
+                    borderRadius: '7px',
+                    padding: '4px 8px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                  title="Minimize & continue working in background"
+                >
+                  <Minimize2 size={12} /> Minimize
+                </button>
+              )}
+              <button className="modal-close-btn" onClick={handleCancelOrClose} disabled={copyStatus === 'copying'}>✕</button>
+            </div>
           </div>
 
         <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -535,10 +885,11 @@ export function SendToFlashModal({
                 </div>
               )}
 
-              {/* Bottom Options: Hard Drives & Sendtray */}
-              {bottomOptions.map((opt, bIdx) => {
-                const idx = topRowOptions.length + bIdx;
+              {/* Row 2: Hard Drives & USB (Removable Disk) */}
+              {(() => {
+                const idx = topRowOptions.length;
                 const isSelected = idx === selectedIndex;
+                const opt = driveOption;
                 return (
                   <button
                     key={opt.id}
@@ -583,13 +934,86 @@ export function SendToFlashModal({
                     <ChevronRight size={14} style={{ color: isSelected ? '#fff' : 'var(--text-muted)', flexShrink: 0, transition: 'transform 0.18s ease', transform: isSelected ? 'translateX(2px)' : 'none' }} />
                   </button>
                 );
-              })}
+              })()}
+
+              {/* Row 3: Move to Sendtray & Convert side-by-side */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: bottomRowOptions.length === 2 ? '1fr 1fr' : '1fr',
+                gap: '10px'
+              }}>
+                {bottomRowOptions.map((opt, bIdx) => {
+                  const idx = topRowOptions.length + 1 + bIdx;
+                  const isSelected = idx === selectedIndex;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={opt.action}
+                      onMouseEnter={() => setSelectedIndex(idx)}
+                      title={opt.fullTitle}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        padding: '11px 12px',
+                        background: isSelected ? `${opt.color}15` : 'rgba(255,255,255,0.03)',
+                        border: `1px solid ${isSelected ? opt.color + '75' : 'rgba(255,255,255,0.07)'}`,
+                        borderRadius: '12px',
+                        cursor: 'pointer',
+                        width: '100%',
+                        textAlign: 'left',
+                        transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
+                        boxShadow: isSelected ? `0 4px 16px ${opt.color}25` : 'none',
+                        transform: isSelected ? 'translateY(-1px)' : 'none',
+                      }}
+                    >
+                      <div style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '10px',
+                        background: `${opt.color}1a`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: opt.color,
+                        flexShrink: 0,
+                        transition: 'transform 0.18s ease',
+                        transform: isSelected ? 'scale(1.08)' : 'scale(1)'
+                      }}>
+                        {opt.icon}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{
+                          fontWeight: '600',
+                          fontSize: '12.5px',
+                          color: '#fff',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
+                        }}>
+                          {opt.label}
+                        </div>
+                        <div style={{
+                          fontSize: '10.5px',
+                          color: 'var(--text-muted)',
+                          marginTop: '2px',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
+                        }}>
+                          {opt.desc}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
                 <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace' }}>
                   ↑ ↓ ← → navigate • ↵ select • ⌫ back
                 </span>
-                <button className="btn-secondary" onClick={onClose} style={{ fontSize: '12px', padding: '6px 14px', borderRadius: '8px' }}>Cancel</button>
+                <button className="btn-secondary" onClick={handleCancelOrClose} style={{ fontSize: '12px', padding: '6px 14px', borderRadius: '8px' }}>Cancel</button>
               </div>
             </>
           )}
@@ -863,6 +1287,30 @@ export function SendToFlashModal({
                     }} 
                   />
                 </div>
+                {copyStatus === 'copying' && (
+                  <button
+                    type="button"
+                    onClick={() => setIsMinimized(true)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      width: '100%',
+                      padding: '8px 14px',
+                      borderRadius: '8px',
+                      background: 'rgba(168, 85, 247, 0.12)',
+                      border: '1px solid rgba(168, 85, 247, 0.35)',
+                      color: '#e9d5ff',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      marginTop: '6px'
+                    }}
+                  >
+                    <Minimize2 size={13} /> Minimize &amp; Process in Background
+                  </button>
+                )}
                 {copyStatus === 'failed' && (
                   <div style={{ color: 'var(--danger)', fontSize: '12px', marginTop: '4px' }}>
                     {errorMsg}
@@ -938,7 +1386,7 @@ export function SendToFlashModal({
               )}
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
-                <button className="btn-secondary" onClick={() => setActiveSection(hasVideo ? 'prepare' : 'main')} style={{ fontSize: '12px', padding: '6px 14px' }}>
+                <button className="btn-secondary" onClick={() => setActiveSection('main')} style={{ fontSize: '12px', padding: '6px 14px' }}>
                   ⌫ Back
                 </button>
                 {(copyStatus === 'completed' || copyStatus === 'failed') && (

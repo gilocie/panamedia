@@ -626,9 +626,24 @@ function cleanUpDownloadManager() {
   activeDownloads = {};
 }
 
+function removeDownloadByPath(filePath) {
+  if (!filePath) return false;
+  const norm = filePath.toLowerCase().replace(/[\\/]/g, '/');
+  const initialLength = downloadsList.length;
+  const toRemove = downloadsList.filter(t => (t.filePath || t.path || '').toLowerCase().replace(/[\\/]/g, '/') === norm);
+  toRemove.forEach(t => killTask(t.id));
+  downloadsList = downloadsList.filter(t => (t.filePath || t.path || '').toLowerCase().replace(/[\\/]/g, '/') !== norm);
+  if (downloadsList.length !== initialLength) {
+    saveState();
+    return true;
+  }
+  return false;
+}
+
 module.exports = {
   initDownloadManager,
   cleanUpDownloadManager,
   getDownloadsList: () => downloadsList,
+  removeDownloadByPath,
   saveState
 };

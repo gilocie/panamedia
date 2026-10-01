@@ -1077,10 +1077,26 @@ export function PlaylistPanel({
   // ─── Folders View for Normal Library ──────────────────────────────
   if (playerViewMode === 'folders' || sidebarTab === 'primary') {
     const groups: Record<string, typeof filtered> = {};
-    const folderFiltered = filtered;
+    const isDlFolder = (dirPath: string) => {
+      if (!dirPath) return false;
+      const norm = dirPath.replace(/[\\/]/g, '/').toLowerCase();
+      const folderName = (norm.split('/').pop() || '').toLowerCase();
+      return folderName === 'download' || folderName === 'downloads';
+    };
+
+    const folderFiltered = filtered.filter((item: any) => {
+      if (sidebarTab === 'videos' || sidebarTab === 'audios') {
+        const dir = item.path.substring(0, item.path.lastIndexOf('\\')) || item.path.substring(0, item.path.lastIndexOf('/')) || '';
+        if (isDlFolder(dir)) return false;
+      }
+      return true;
+    });
 
     folderFiltered.forEach((item: any) => {
       const dir = item.path.substring(0, item.path.lastIndexOf('\\')) || item.path.substring(0, item.path.lastIndexOf('/')) || 'Unknown';
+      if ((sidebarTab === 'videos' || sidebarTab === 'audios') && isDlFolder(dir)) {
+        return;
+      }
       if (!groups[dir]) groups[dir] = [];
       groups[dir].push(item);
     });

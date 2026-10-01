@@ -92,7 +92,7 @@ const {
   ffprobePath,
   resolveBinary
 } = require('./panamedia-downloader/youtube.cjs');
-const { initDownloadManager, cleanUpDownloadManager, getDownloadsList } = require('./panamedia-downloader/downloadManager.cjs');
+const { initDownloadManager, cleanUpDownloadManager, getDownloadsList, removeDownloadByPath } = require('./panamedia-downloader/downloadManager.cjs');
 const { getUniversalWebFormats } = require('./panamedia-downloader/web-downloader/webExtractor.cjs');
 const { convertAndSendToDrive, convertMediaFile } = require('./panamedia-downloader/mediaConverter.cjs');
 
@@ -1740,6 +1740,25 @@ ipcMain.handle('select-directory', async () => {
   return result.filePaths[0];
 });
 
+ipcMain.handle('select-media-files', async () => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Media Files', extensions: ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', 'ts', 'm4v', 'mp3', 'm4a', 'wav', 'flac', 'aac', 'ogg', 'opus', 'wma'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+    if (result.canceled) {
+      return [];
+    }
+    return result.filePaths || [];
+  } catch (err) {
+    console.error('[select-media-files error]:', err);
+    return [];
+  }
+});
+
 ipcMain.handle('get-streaming-port', () => {
   return useCppEngine ? cppStreamingPort : 52321;
 });
@@ -2493,6 +2512,24 @@ function setWindowsClipboardFiles(filePaths) {
   });
 }
 
+ipcMain.handle('select-export-directory', async (event) => {
+  try {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const dialogResult = await dialog.showOpenDialog(win || undefined, {
+      title: 'Select Export Destination Folder',
+      properties: ['openDirectory', 'createDirectory'],
+      buttonLabel: 'Select Folder'
+    });
+    if (dialogResult.canceled || !dialogResult.filePaths || dialogResult.filePaths.length === 0) {
+      return { canceled: true, targetPath: null };
+    }
+    return { canceled: false, targetPath: dialogResult.filePaths[0] };
+  } catch (err) {
+    console.error('[select-export-directory error]:', err);
+    return { canceled: true, error: err.message };
+  }
+});
+
 function checkInternetConnection() {
   return new Promise((resolve) => {
     dns.lookup('google.com', (err) => {
@@ -2769,6 +2806,91 @@ ipcMain.handle('show-item-in-folder', async (_event, filePath) => {
   return false;
 });
 
+// Converter default paths: Documents/Panamedia/Video Output and Documents/Panamedia/Audio Output
+ipcMain.handle('get-converter-output-paths', async () => {
+  try {
+    const documentsDir = app.getPath('documents');
+    const panamediaDir = path.join(documentsDir, 'Panamedia');
+    const videoOutputDir = path.join(panamediaDir, 'Video Output');
+    const audioOutputDir = path.join(panamediaDir, 'Audio Output');
+
+    if (!fs.existsSync(panamediaDir)) fs.mkdirSync(panamediaDir, { recursive: true });
+    if (!fs.existsSync(videoOutputDir)) fs.mkdirSync(videoOutputDir, { recursive: true });
+    if (!fs.existsSync(audioOutputDir)) fs.mkdirSync(audioOutputDir, { recursive: true });
+
+    return {
+      documentsDir,
+      panamediaDir,
+      videoOutputDir,
+      audioOutputDir
+    };
+  } catch (err) {
+    console.error('[Electron] Error creating converter default folders in Documents:', err);
+    return null;
+  }
+});
+
+ipcMain.handle('select-converter-output-folder', async (_event, defaultPath) => {
+  try {
+    const win = BrowserWindow.getFocusedWindow() || mainWindow;
+    const res = await dialog.showOpenDialog(win, {
+      title: 'Select Output Location for Converter',
+      defaultPath: defaultPath && fs.existsSync(defaultPath) ? defaultPath : app.getPath('documents'),
+      properties: ['openDirectory', 'createDirectory']
+    });
+    if (!res.canceled && res.filePaths && res.filePaths.length > 0) {
+      return res.filePaths[0];
+    }
+    return null;
+  } catch (err) {
+    console.error('[Electron] select-converter-output-folder error:', err);
+    return null;
+  }
+});
+
+ipcMain.handle('open-converter-folder', async (_event, folderPath) => {
+  try {
+    if (folderPath && fs.existsSync(folderPath)) {
+      shell.openPath(folderPath);
+      return true;
+    }
+  } catch (err) {
+    console.error('[Electron] open-converter-folder error:', err);
+  }
+  return false;
+});
+
+ipcMain.handle('get-converter-output-files', async (_event, dirPath) => {
+  try {
+    if (!dirPath || !fs.existsSync(dirPath)) return [];
+    const files = fs.readdirSync(dirPath);
+    const results = [];
+    for (const f of files) {
+      try {
+        const full = path.join(dirPath, f);
+        const stat = fs.statSync(full);
+        if (stat.isFile() && !f.startsWith('.')) {
+          const ext = path.extname(f).toLowerCase().replace('.', '');
+          const sizeMb = (stat.size / (1024 * 1024)).toFixed(1) + ' MB';
+          results.push({
+            name: f,
+            path: full,
+            size: sizeMb,
+            format: ext.toUpperCase(),
+            date: new Date(stat.mtime).toLocaleString()
+          });
+        }
+      } catch (e) {}
+    }
+    results.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return results;
+  } catch (err) {
+    console.error('[Electron] get-converter-output-files error:', err);
+    return [];
+  }
+});
+
+
 // IPC Player State sync
 ipcMain.handle('get-player-state', () => {
   if (playerWindow && !playerWindow.isDestroyed() && playerState) {
@@ -2842,11 +2964,132 @@ ipcMain.handle('player-restore', () => {
 
 // Relay remote commands from main window sidebar mini-player controls to the player window
 // Commands: 'toggle-play', 'prev', 'next', 'mute'
-ipcMain.on('player-remote-command', (event, command) => {
+ipcMain.on('player-remote-command', (event, command, ...args) => {
   if (playerWindow && !playerWindow.isDestroyed()) {
-    playerWindow.webContents.send('player-remote-command', command);
+    playerWindow.webContents.send('player-remote-command', command, ...args);
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('player-remote-command', command, ...args);
   }
 });
+
+// Converter Pro minimized state synchronization between Converter and Player Header
+let converterMinimizedState = null;
+function getConverterStateFilePath() {
+  try {
+    const userData = app.getPath ? app.getPath('userData') : path.join(process.env.APPDATA || '', 'panamedia');
+    return path.join(userData, 'converter_minimized_state.json');
+  } catch (e) {
+    return null;
+  }
+}
+
+try {
+  const sf = getConverterStateFilePath();
+  if (sf && fs.existsSync(sf)) {
+    converterMinimizedState = JSON.parse(fs.readFileSync(sf, 'utf8'));
+  }
+} catch (e) {}
+
+ipcMain.on('converter-minimize-state', (_event, state) => {
+  converterMinimizedState = state;
+  try {
+    const sf = getConverterStateFilePath();
+    if (sf) fs.writeFileSync(sf, JSON.stringify(state));
+  } catch (e) {}
+  if (playerWindow && !playerWindow.isDestroyed()) {
+    playerWindow.webContents.send('converter-state-changed', state);
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('converter-state-changed', state);
+  }
+});
+
+ipcMain.handle('get-converter-minimize-state', () => {
+  if (!converterMinimizedState) {
+    try {
+      const sf = getConverterStateFilePath();
+      if (sf && fs.existsSync(sf)) {
+        converterMinimizedState = JSON.parse(fs.readFileSync(sf, 'utf8'));
+      }
+    } catch (e) {}
+  }
+  return converterMinimizedState;
+});
+
+ipcMain.on('converter-restore-request', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('converter-restore-request');
+    mainWindow.show();
+    mainWindow.focus();
+  }
+  if (playerWindow && !playerWindow.isDestroyed()) {
+    playerWindow.webContents.send('converter-restore-request');
+  }
+});
+
+ipcMain.on('converter-close-request', () => {
+  converterMinimizedState = { minimized: false, queueCount: 0 };
+  try {
+    const sf = getConverterStateFilePath();
+    if (sf) fs.writeFileSync(sf, JSON.stringify(converterMinimizedState));
+  } catch (e) {}
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('converter-close-request');
+  }
+  if (playerWindow && !playerWindow.isDestroyed()) {
+    playerWindow.webContents.send('converter-close-request');
+    playerWindow.webContents.send('converter-state-changed', { minimized: false, queueCount: 0 });
+  }
+});
+
+ipcMain.on('converter-run-request', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('converter-run-request');
+  }
+  if (playerWindow && !playerWindow.isDestroyed()) {
+    playerWindow.webContents.send('converter-run-request');
+  }
+});
+
+ipcMain.on('converter-pause-request', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('converter-pause-request');
+  }
+  if (playerWindow && !playerWindow.isDestroyed()) {
+    playerWindow.webContents.send('converter-pause-request');
+  }
+});
+
+ipcMain.on('converter-resume-request', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('converter-resume-request');
+  }
+  if (playerWindow && !playerWindow.isDestroyed()) {
+    playerWindow.webContents.send('converter-resume-request');
+  }
+});
+
+ipcMain.on('converter-open-request', () => {
+  if (playerWindow && !playerWindow.isDestroyed()) {
+    playerWindow.webContents.send('converter-open-request');
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('converter-open-request');
+  }
+});
+
+ipcMain.handle('remove-media-path', async (_event, filePath) => {
+  if (!filePath) return { success: false };
+  try {
+    const removed = removeDownloadByPath(filePath);
+    return { success: true, removed };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+
 
 const dirCache = new Map();
 const cacheFile = path.join(dataDir, 'dirCache.json');

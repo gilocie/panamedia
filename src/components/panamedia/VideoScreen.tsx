@@ -1,5 +1,5 @@
 import React, { type RefObject, useEffect, useRef } from 'react';
-import { PlayCircle, Lock, ShieldCheck, KeyRound, Eye, EyeOff, Film, Music, AlertCircle, RefreshCw, SkipForward, FolderOpen, X } from 'lucide-react';
+import { PlayCircle, Lock, ShieldCheck, KeyRound, Eye, EyeOff, Film, Music, AlertCircle, RefreshCw, SkipForward, FolderOpen, Trash2, X } from 'lucide-react';
 import playerBg from '../../assets/playerbg.jpg';
 import { type VideoFilters, electron } from './types';
 
@@ -48,6 +48,7 @@ interface VideoScreenProps {
   onRetryPlayback?: () => void;
   onNextTrack?: () => void;
   onDismissError?: () => void;
+  onRemoveMissingMedia?: (filePath: string) => void;
 }
 
 export function VideoScreen({
@@ -95,6 +96,7 @@ export function VideoScreen({
   onRetryPlayback,
   onNextTrack,
   onDismissError,
+  onRemoveMissingMedia,
 }: VideoScreenProps) {
   const [thumbLoaded, setThumbLoaded] = React.useState(false);
   const [hasStartedRendering, setHasStartedRendering] = React.useState(false);
@@ -553,12 +555,17 @@ export function VideoScreen({
             display: isMediaLocked ? 'none' : videoStyle.display,
           }}
           loop={repeatMode === 'one' && !mediaUrl.includes('/transcode')}
-          onLoadStart={() => setHasStartedRendering(false)}
+          onLoadStart={() => {
+            setHasStartedRendering(false);
+          }}
           onTimeUpdate={() => {
             handleTimeUpdate();
             if (videoRef.current && (videoRef.current.currentTime > 0 || videoRef.current.readyState >= 3)) {
               setHasStartedRendering(true);
               setIsBuffering(false);
+              if (playbackError?.hasError) {
+                onDismissError?.();
+              }
             }
           }}
           onLoadedMetadata={() => {
@@ -572,12 +579,18 @@ export function VideoScreen({
             if (videoRef.current && (videoRef.current.videoWidth > 0 || isAudioFile)) {
               setIsBuffering(false);
               setHasStartedRendering(true);
+              if (playbackError?.hasError && videoRef.current && videoRef.current.readyState >= 2) {
+                onDismissError?.();
+              }
             }
           }}
           onCanPlay={() => {
             if (videoRef.current && (videoRef.current.videoWidth > 0 || isAudioFile)) {
               setIsBuffering(false);
               setHasStartedRendering(true);
+              if (playbackError?.hasError) {
+                onDismissError?.();
+              }
             }
           }}
           onEnded={handleVideoEnded}
@@ -589,12 +602,18 @@ export function VideoScreen({
           onPlaying={() => {
             setIsBuffering(false);
             setHasStartedRendering(true);
+            if (playbackError?.hasError) {
+              onDismissError?.();
+            }
           }}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
           onPlay={() => {
             setPlaying(true);
             setIsBuffering(false);
+            if (playbackError?.hasError) {
+              onDismissError?.();
+            }
             initAudio();
             if ((window as any).__panaAudioContext && (window as any).__panaAudioContext.state === 'suspended') {
               (window as any).__panaAudioContext.resume();
@@ -605,6 +624,15 @@ export function VideoScreen({
           }}
           onPause={() => setPlaying(false)}
           onError={() => {
+            const err = videoRef.current?.error;
+            // 1. Ignore MEDIA_ERR_ABORTED (code 1) when switching files/streams
+            if (err && err.code === 1) {
+              return;
+            }
+            // 2. Ignore error if media has already begun playback
+            if (videoRef.current && (videoRef.current.currentTime > 0.3 || videoRef.current.readyState >= 3) && !videoRef.current.paused) {
+              return;
+            }
             setIsBuffering(false);
             onMediaError?.();
           }}
@@ -714,7 +742,7 @@ export function VideoScreen({
         )}
 
         {/* Playback Error Overlay — shown when media fails to play instead of a blank screen */}
-        {playbackError?.hasError && !isIdle && (
+        {playbackError?.hasError && !isIdle && !(videoRef.current && videoRef.current.currentTime > 0.4 && !videoRef.current.paused) && (
           <div style={{
             position: 'absolute',
             inset: 0,
@@ -894,6 +922,42 @@ export function VideoScreen({
                   >
                     <SkipForward size={15} />
                     Next Track
+                  </button>
+                )}
+
+                {playbackError.filePath && onRemoveMissingMedia && (
+                  <button
+                    onClick={() => {
+                      if (playbackError.filePath && onRemoveMissingMedia) {
+                        onRemoveMissingMedia(playbackError.filePath);
+                      }
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '10px 16px',
+                      background: 'rgba(244, 63, 94, 0.15)',
+                      border: '1px solid rgba(244, 63, 94, 0.35)',
+                      borderRadius: '12px',
+                      color: '#fb7185',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(244, 63, 94, 0.25)';
+                      e.currentTarget.style.transform = 'translateY(-1px)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'rgba(244, 63, 94, 0.15)';
+                      e.currentTarget.style.transform = 'translateY(0)';
+                    }}
+                    title="Remove this missing media from playlist and skip to next track"
+                  >
+                    <Trash2 size={15} />
+                    Delete from Playlist
                   </button>
                 )}
 

@@ -730,7 +730,7 @@ export default function App() {
   // Browser state
   const [browserUrl] = useState('https://www.youtube.com');
   const [helpSubTab, setHelpSubTab] = useState<'guide' | 'license'>('guide');
-  const APP_VERSION = '1.0.0';
+  const APP_VERSION = '1.0.1';
   const [showReleaseDialog, setShowReleaseDialog] = useState(false);
   const [releaseCheckStatus, setReleaseCheckStatus] = useState<'idle' | 'checking' | 'up-to-date' | 'update-available' | 'no-internet' | 'downloading' | 'download-complete' | 'installing' | 'error'>('idle');
   const [latestReleaseVersion, setLatestReleaseVersion] = useState(APP_VERSION);
@@ -875,9 +875,10 @@ export default function App() {
       setReleaseDownloadUrl(dlUrl);
       setReleaseNotes(notes);
 
-      if (foundUpdate || compareVersions(foundVersion, APP_VERSION) > 0) {
+      const isActuallyNewer = compareVersions(foundVersion, APP_VERSION) > 0;
+      if (isActuallyNewer) {
         setReleaseCheckStatus('update-available');
-        // Show the dialogue automatically if found
+        // Only show dialogue automatically if there is genuinely a newer version!
         setShowReleaseDialog(true);
       } else {
         setReleaseCheckStatus('up-to-date');
@@ -6314,49 +6315,117 @@ Email: gilocie@gmail.com | gosavesite@gamil.com`}
             )}
 
             {/* 3. UPDATE AVAILABLE STATE */}
-            {releaseCheckStatus === 'update-available' && compareVersions(latestReleaseVersion, APP_VERSION) > 0 && (
+            {releaseCheckStatus === 'update-available' && (
+              compareVersions(latestReleaseVersion, APP_VERSION) > 0 ? (
+                <div style={{ zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+                  <div style={{
+                    width: '68px', height: '68px', borderRadius: '50%',
+                    background: 'rgba(168, 85, 247, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    marginBottom: '18px', border: '1px solid rgba(168, 85, 247, 0.3)', boxShadow: '0 0 25px rgba(168, 85, 247, 0.25)'
+                  }}>
+                    <CloudDownload size={34} style={{ color: '#c084fc' }} />
+                  </div>
+                  <h2 style={{ fontSize: '19px', fontWeight: 'bold', color: '#fff', marginBottom: '8px' }}>New Version Available!</h2>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.5', marginBottom: '18px' }}>
+                    A new release of Panamedia is available. Download and install the update to get the latest features and improvements.
+                  </p>
+                  {releaseNotes && (
+                    <p style={{ fontSize: '11px', color: 'rgba(192,132,252,0.7)', lineHeight: '1.4', marginBottom: '12px', maxWidth: '340px', fontStyle: 'italic' }}>
+                      {releaseNotes.length > 150 ? releaseNotes.substring(0, 150) + '...' : releaseNotes}
+                    </p>
+                  )}
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '24px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'rgba(255,255,255,0.04)', padding: '5px 12px', borderRadius: '8px', fontSize: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Current:</span>
+                      <strong style={{ color: '#fff' }}>v{APP_VERSION}</strong>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'rgba(168, 85, 247, 0.12)', padding: '5px 12px', borderRadius: '8px', fontSize: '12px', border: '1px solid rgba(168, 85, 247, 0.3)' }}>
+                      <span style={{ color: '#c084fc' }}>Latest:</span>
+                      <strong style={{ color: '#e9d5ff' }}>v{latestReleaseVersion}</strong>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+                    <button onClick={() => setShowReleaseDialog(false)} className="btn-secondary" style={{ flex: 1, padding: '10px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold' }}>
+                      Later
+                    </button>
+                    <button
+                      onClick={startUpdateDownload}
+                      className="btn-primary"
+                      style={{
+                        flex: 1, padding: '10px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold',
+                        background: 'linear-gradient(135deg, var(--primary), #a855f7)',
+                        boxShadow: '0 4px 15px rgba(99, 102, 241, 0.3)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
+                      }}
+                    >
+                      <CloudDownload size={14} /> Download Update
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+                  <div style={{
+                    width: '68px', height: '68px', borderRadius: '50%',
+                    background: 'rgba(16, 185, 129, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    marginBottom: '18px', border: '1px solid rgba(16, 185, 129, 0.3)', boxShadow: '0 0 25px rgba(16, 185, 129, 0.25)'
+                  }}>
+                    <CheckCircle2 size={36} style={{ color: '#10b981' }} />
+                  </div>
+                  <h2 style={{ fontSize: '19px', fontWeight: 'bold', color: '#fff', marginBottom: '8px' }}>You're Up to Date!</h2>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.5', marginBottom: '18px', maxWidth: '320px' }}>
+                    You have the latest version of Panamedia installed. No new version is required.
+                  </p>
+                  <div style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '8px',
+                    background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.22)',
+                    borderRadius: '10px', padding: '6px 14px', marginBottom: '24px'
+                  }}>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Installed Version:</span>
+                    <strong style={{ fontSize: '13px', color: '#fff' }}>v{APP_VERSION}</strong>
+                    <span style={{
+                      fontSize: '10px', background: 'rgba(16, 185, 129, 0.2)', color: '#34d399',
+                      padding: '2px 7px', borderRadius: '5px', fontWeight: '700', letterSpacing: '0.3px',
+                      display: 'flex', alignItems: 'center', gap: '4px'
+                    }}>
+                      <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#10b981', display: 'inline-block' }} />
+                      Latest
+                    </span>
+                  </div>
+                  <button onClick={() => setShowReleaseDialog(false)} className="btn-secondary" style={{ padding: '10px 24px', borderRadius: '8px', fontSize: '12px', fontWeight: '600', width: '100%' }}>
+                    Close
+                  </button>
+                </div>
+              )
+            )}
+
+            {/* IDLE / DEFAULT STATE */}
+            {releaseCheckStatus === 'idle' && (
               <div style={{ zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
                 <div style={{
                   width: '68px', height: '68px', borderRadius: '50%',
-                  background: 'rgba(168, 85, 247, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  marginBottom: '18px', border: '1px solid rgba(168, 85, 247, 0.3)', boxShadow: '0 0 25px rgba(168, 85, 247, 0.25)'
+                  background: 'rgba(99, 102, 241, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  marginBottom: '18px', border: '1px solid rgba(99, 102, 241, 0.3)', boxShadow: '0 0 25px rgba(99, 102, 241, 0.2)'
                 }}>
-                  <CloudDownload size={34} style={{ color: '#c084fc' }} />
+                  <CloudDownload size={34} style={{ color: '#818cf8' }} />
                 </div>
-                <h2 style={{ fontSize: '19px', fontWeight: 'bold', color: '#fff', marginBottom: '8px' }}>New Version Available!</h2>
+                <h2 style={{ fontSize: '19px', fontWeight: 'bold', color: '#fff', marginBottom: '8px' }}>Panamedia Updates</h2>
                 <p style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.5', marginBottom: '18px' }}>
-                  A new release of Panamedia is available. Download and install the update to get the latest features and improvements.
+                  Check if a newer release of Panamedia is available for download.
                 </p>
-                {releaseNotes && (
-                  <p style={{ fontSize: '11px', color: 'rgba(192,132,252,0.7)', lineHeight: '1.4', marginBottom: '12px', maxWidth: '340px', fontStyle: 'italic' }}>
-                    {releaseNotes.length > 150 ? releaseNotes.substring(0, 150) + '...' : releaseNotes}
-                  </p>
-                )}
-                <div style={{ display: 'flex', gap: '10px', marginBottom: '24px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'rgba(255,255,255,0.04)', padding: '5px 12px', borderRadius: '8px', fontSize: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>Current:</span>
-                    <strong style={{ color: '#fff' }}>v{APP_VERSION}</strong>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'rgba(168, 85, 247, 0.12)', padding: '5px 12px', borderRadius: '8px', fontSize: '12px', border: '1px solid rgba(168, 85, 247, 0.3)' }}>
-                    <span style={{ color: '#c084fc' }}>Latest:</span>
-                    <strong style={{ color: '#e9d5ff' }}>v{latestReleaseVersion}</strong>
-                  </div>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(255,255,255,0.04)', padding: '6px 14px', borderRadius: '8px', fontSize: '12px', border: '1px solid rgba(255,255,255,0.06)', marginBottom: '24px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Installed Version:</span>
+                  <strong style={{ color: '#fff' }}>v{APP_VERSION}</strong>
                 </div>
                 <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
-                  <button onClick={() => setShowReleaseDialog(false)} className="btn-secondary" style={{ flex: 1, padding: '10px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold' }}>
-                    Later
+                  <button onClick={() => setShowReleaseDialog(false)} className="btn-secondary" style={{ flex: 1, padding: '10px', borderRadius: '8px', fontSize: '12px', fontWeight: '600' }}>
+                    Close
                   </button>
-                  <button
-                    onClick={startUpdateDownload}
-                    className="btn-primary"
-                    style={{
-                      flex: 1, padding: '10px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold',
-                      background: 'linear-gradient(135deg, var(--primary), #a855f7)',
-                      boxShadow: '0 4px 15px rgba(99, 102, 241, 0.3)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
-                    }}
-                  >
-                    <CloudDownload size={14} /> Download Update
+                  <button onClick={() => checkReleaseUpdate(true)} className="btn-primary" style={{
+                    flex: 1.3, padding: '10px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold',
+                    background: 'linear-gradient(135deg, var(--primary), #a855f7)', boxShadow: '0 4px 15px rgba(99,102,241,0.3)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
+                  }}>
+                    <RefreshCw size={13} /> Check Now
                   </button>
                 </div>
               </div>

@@ -2,7 +2,7 @@
   "name": "panamedia",
   "productName": "Panamedia",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Panamedia – All-in-One Media Manager & Downloader",
   "main": "electron.cjs",
   "type": "module",

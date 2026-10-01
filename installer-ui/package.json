@@ -1,6 +1,6 @@
 {
   "name": "panamedia-installer-ui",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Panamedia Custom Installer UI",
   "author": "Panamedia",
   "main": "main.cjs",

@@ -146,17 +146,35 @@ export function usePlayerShortcuts({
   useEffect(() => {
     if (!electron) return;
 
-    const handleRemoteCommand = (_event: any, command: string) => {
+    const handleRemoteCommand = (_event: any, command: string, arg?: any) => {
       if (callbackRef.current.isMediaLocked) return;
-      const { togglePlay, handlePrev, handleNext, toggleMute } = callbackRef.current;
+      const { togglePlay, handlePrev, handleNext, toggleMute, seekTo, currentTime } = callbackRef.current;
+      const video = videoRef.current;
       if (command === 'toggle-play') {
         togglePlay();
+      } else if (command === 'pause') {
+        if (video && !video.paused) {
+          togglePlay();
+        }
+      } else if (command === 'play') {
+        if (video && video.paused) {
+          togglePlay();
+        }
       } else if (command === 'prev') {
         handlePrev();
       } else if (command === 'next') {
         handleNext();
-      } else if (command === 'mute') {
+      } else if (command === 'mute' || command === 'toggle-mute') {
         toggleMute();
+      } else if ((command === 'volume' || command === 'set-volume') && typeof arg === 'number') {
+        const { adjustVolume } = callbackRef.current;
+        if (adjustVolume) adjustVolume(arg);
+      } else if (command === 'seek' && typeof arg === 'number') {
+        if (seekTo) seekTo(currentTime + arg);
+        else if (video) video.currentTime = Math.max(0, video.currentTime + arg);
+      } else if (command === 'seek-to' && typeof arg === 'number') {
+        if (seekTo) seekTo(arg);
+        else if (video) video.currentTime = Math.max(0, arg);
       }
     };
 
@@ -196,9 +214,11 @@ export function usePlayerShortcuts({
         (activeEl as HTMLElement).blur();
       }
 
-      // Check if send dialog is active or if any modal backdrop is displayed
+      // Check if send dialog is active or if any modal backdrop is displayed and visible
+      const modal = document.querySelector('.send-to-flash-modal, [data-modal="send"], .modal-backdrop') as HTMLElement | null;
+      const isModalVisible = modal ? (modal.style.display !== 'none' && modal.offsetParent !== null) : false;
       const currentTarget = callbackRef.current.flashDriveTarget;
-      const isSendActive = Boolean(currentTarget) || Boolean(document.querySelector('.send-to-flash-modal, [data-modal="send"], .modal-backdrop'));
+      const isSendActive = (Boolean(currentTarget) && isModalVisible) || isModalVisible;
       if (isSendActive) {
         return;
       }

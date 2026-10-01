@@ -1,985 +1,855 @@
 /**
  * SendConvertPreparationModal.tsx
  * ================================
- * Two-panel companion modal for preparing and converting media
- * before sending to Flash Drive or Sendtray.
+ * VideoProc-style high-performance Media Converter UI for Panamedia.
+ * Modular orchestrator utilizing components from ./converter-pro/
  */
 
-import React, { useState } from 'react';
-import { 
-  ChevronLeft, X, Film, Music, Tv, Sliders, Sparkles, 
-  Folder, Plus, Check, CheckCircle2, ShieldCheck, ArrowRight,
-  Disc3
-} from 'lucide-react';
-import { 
-  getSendtrayFolders, 
-  createSendtrayFolder, 
-  type SendtrayFolder 
-} from './panamedia/sendtrayUtils';
+import React, { useState, useEffect, useCallback } from 'react';
+import { electron } from './panamedia/types';
+import {
+  type SendConvertOptions,
+  type SendConvertPreparationModalProps,
+  type MediaToolItem,
+  isVideoFile,
+  formatSeconds,
+  VIDEO_FORMATS,
+  AUDIO_FORMATS,
+  ConverterHeader,
+  TopTabsBar,
+  ConvertQueueList,
+  OutputHistoryList,
+  PreviewMonitor,
+  ExportSettingsPanel,
+  ConverterBottomDock,
+  FormatSettingsModal,
+  CutTrimTool,
+  CropTool,
+  SubtitleTool,
+  EffectTool,
+  RotateTool,
+  WatermarkTool,
+  CompressTool,
+  ToolInfoModal
+} from './converter-pro';
 
-export interface SendConvertOptions {
-  mode: 'original' | 'extract_audio' | 'convert';
-  format: string;
-  bitrate: string;
-  keepOriginal?: boolean;
-  targetFolderId?: string;
-}
-
-export function isVideoFile(filePath: string): boolean {
-  if (!filePath) return false;
-  const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
-  return ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'm4v', 'webm', 'ts', 'mts', 'm2ts'].includes(ext);
-}
-
-interface SendConvertPreparationModalProps {
-  fileName: string;
-  targetAction: 'drive' | 'sendtray';
-  isBatch?: boolean;
-  batchCount?: number;
-  onProceed: (options: SendConvertOptions) => void;
-  onBack: () => void;
-  onClose: () => void;
-}
-
-type ConvertMode = SendConvertOptions['mode'];
+export { isVideoFile, formatSeconds, type SendConvertOptions };
 
 export function SendConvertPreparationModal({
   fileName,
-  targetAction,
-  isBatch = false,
-  batchCount = 1,
+  targetAction = 'convert',
+  isBatch: _isBatch = false,
+  batchCount: _batchCount = 1,
+  queuedFiles,
+  onAddFiles,
+  onRemoveFile,
+  onClearQueue,
+  drives = [],
+  streamingPort = 52321,
   onProceed,
+  onDirectSend,
+  onMinimizeChange,
   onBack,
   onClose,
 }: SendConvertPreparationModalProps) {
-  const [mode, setMode] = useState<ConvertMode>('extract_audio');
-  const [format, setFormat] = useState('mp3');
-  const [bitrate, setBitrate] = useState('192k');
-  const [videoFormat, setVideoFormat] = useState('mp4');
-  const [videoQuality, setVideoQuality] = useState('1080p');
+  const initialFiles = queuedFiles && queuedFiles.length > 0 ? queuedFiles : (fileName && fileName !== 'media' ? [fileName] : []);
+  const [localQueue, setLocalQueue] = useState<string[]>(() => {
+    let saved: string[] = [];
+    try {
+      const parsed = JSON.parse(localStorage.getItem('converter_queue') || '[]');
+      if (Array.isArray(parsed)) saved = parsed;
+    } catch (e) {}
+    const incoming = queuedFiles && queuedFiles.length > 0 ? queuedFiles : (fileName && fileName !== 'media' ? [fileName] : []);
+    const merged = Array.from(new Set([...saved, ...incoming]));
+    if (merged.length > 0) {
+      localStorage.setItem('converter_queue', JSON.stringify(merged));
+    }
+    return merged.length > 0 ? merged : initialFiles;
+  });
+  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
+
+  // Window states: Expand/Maximize to fit device screen, Minimize to background
+  const [isExpanded, setIsExpanded] = useState<boolean>(false);
+  const [isMinimized, setIsMinimized] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (onMinimizeChange) {
+      onMinimizeChange(isMinimized);
+    }
+  }, [isMinimized, onMinimizeChange]);
+
+  // Top Tabs: Convert Tab, Video Output, Audio Output
+  const [activeMainTab, setActiveMainTab] = useState<'convert' | 'video_output' | 'audio_output'>('convert');
+
+  // Format modal mode: video or audio
+  const [formatModalMode, setFormatModalMode] = useState<'video' | 'audio'>('video');
+
+  // Media type per card (user can toggle Video vs Audio - fully persisted across app restarts & power loss)
+  const [mediaTypes, setMediaTypes] = useState<Record<string, 'video' | 'audio'>>(() => {
+    let saved: Record<string, 'video' | 'audio'> = {};
+    try {
+      saved = JSON.parse(localStorage.getItem('converter_media_types') || '{}');
+    } catch (e) {}
+    const map: Record<string, 'video' | 'audio'> = { ...saved };
+    initialFiles.forEach(f => {
+      if (!map[f]) {
+        map[f] = isVideoFile(f) ? 'video' : 'audio';
+      }
+    });
+    return map;
+  });
+
+  // Converted outputs history
+  const [convertedVideos, setConvertedVideos] = useState<Array<{
+    name: string;
+    path: string;
+    size?: string;
+    format: string;
+    resolutionOrBitrate?: string;
+    date: string;
+  }>>([]);
+
+  const [convertedAudios, setConvertedAudios] = useState<Array<{
+    name: string;
+    path: string;
+    size?: string;
+    format: string;
+    resolutionOrBitrate?: string;
+    date: string;
+  }>>([]);
+
+  // Sync if queuedFiles prop changes: append newly added files under previous ones and keep stored types
+  useEffect(() => {
+    if (queuedFiles && queuedFiles.length > 0) {
+      setLocalQueue(prev => {
+        const next = Array.from(new Set([...prev, ...queuedFiles]));
+        localStorage.setItem('converter_queue', JSON.stringify(next));
+        return next;
+      });
+      setMediaTypes(prev => {
+        let saved: Record<string, 'video' | 'audio'> = {};
+        try {
+          saved = JSON.parse(localStorage.getItem('converter_media_types') || '{}');
+        } catch (e) {}
+        const next = { ...saved, ...prev };
+        queuedFiles.forEach(f => {
+          if (!next[f]) next[f] = isVideoFile(f) ? 'video' : 'audio';
+        });
+        localStorage.setItem('converter_media_types', JSON.stringify(next));
+        return next;
+      });
+    }
+  }, [queuedFiles]);
+
+  // Format Presets - persisted across sessions & reboots
+  const [selectedVideoFmt, setSelectedVideoFmt] = useState<string>(() => {
+    return localStorage.getItem('converter_video_fmt') || 'mp4';
+  });
+  const [videoQuality, setVideoQuality] = useState<string>(() => {
+    return localStorage.getItem('converter_video_quality') || '1080p';
+  });
+  const [selectedAudioFmt, setSelectedAudioFmt] = useState<string>(() => {
+    return localStorage.getItem('converter_audio_fmt') || 'mp3';
+  });
+  const [audioBitrate, setAudioBitrate] = useState<string>(() => {
+    return localStorage.getItem('converter_audio_bitrate') || '320k';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('converter_video_fmt', selectedVideoFmt);
+  }, [selectedVideoFmt]);
+  useEffect(() => {
+    localStorage.setItem('converter_video_quality', videoQuality);
+  }, [videoQuality]);
+  useEffect(() => {
+    localStorage.setItem('converter_audio_fmt', selectedAudioFmt);
+  }, [selectedAudioFmt]);
+  useEffect(() => {
+    localStorage.setItem('converter_audio_bitrate', audioBitrate);
+  }, [audioBitrate]);
+
+  const activeVideoPreset = VIDEO_FORMATS.find(f => f.id === selectedVideoFmt) || VIDEO_FORMATS[0];
+  const activeAudioPreset = AUDIO_FORMATS.find(f => f.id === selectedAudioFmt) || AUDIO_FORMATS[0];
+
+  // Format Settings Dialog Modal & Active Feature Tool Dialog
+  const [showFormatModal, setShowFormatModal] = useState<boolean>(false);
+  const [activeTool, setActiveTool] = useState<MediaToolItem | null>(null);
+
+  // Preview & Queue Navigation
+  const [selectedFileIdx, setSelectedFileIdx] = useState<number>(0);
+
+  // Corner player state synced from Electron main player
+  const [appPlayerState, setAppPlayerState] = useState<{
+    filePath: string;
+    filename: string;
+    playing: boolean;
+    currentTime: number;
+    duration: number;
+    volume: number;
+    minimized: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!electron) return;
+    const handlePlayerState = (_event: any, state: any) => {
+      setAppPlayerState(state);
+    };
+    electron.ipcRenderer.on('player-state-changed', handlePlayerState);
+    electron.ipcRenderer.invoke('get-player-state').then((state: any) => {
+      if (state) setAppPlayerState(state);
+    }).catch(() => {});
+
+    // Ensure player is paused by default when converter opens
+    electron.ipcRenderer.send('player-remote-command', 'pause');
+
+    return () => {
+      electron.ipcRenderer.removeListener('player-state-changed', handlePlayerState);
+    };
+  }, []);
+
+  // Sync minimized state to Electron and Player Titlebar progress card
+  useEffect(() => {
+    if (!electron) return;
+    if (isMinimized) {
+      const activeFile = (localQueue[selectedFileIdx] || fileName).split(/[\\/]/).pop() || '';
+      electron.ipcRenderer.send('converter-minimize-state', {
+        minimized: true,
+        converting: false,
+        isPaused: false,
+        progress: 0,
+        queueCount: localQueue.length,
+        currentFile: activeFile,
+        statusText: 'Converter Pro'
+      });
+    }
+  }, [isMinimized, localQueue.length, selectedFileIdx, fileName]);
+
+  // Listen for restore requests from Player Header progress card
+  useEffect(() => {
+    if (!electron) return;
+    const handleRestoreRequest = () => {
+      setIsMinimized(false);
+    };
+    electron.ipcRenderer.on('converter-restore-request', handleRestoreRequest);
+    return () => {
+      electron.ipcRenderer.removeListener('converter-restore-request', handleRestoreRequest);
+    };
+  }, []);
+
+  // Engine Settings
+  const [useHwAccel, setUseHwAccel] = useState<boolean>(() => localStorage.getItem('converter_useHwAccel') !== 'false');
+  useEffect(() => {
+    localStorage.setItem('converter_useHwAccel', String(useHwAccel));
+  }, [useHwAccel]);
+
+  const handleDone = () => {
+    const activeFile = (localQueue[selectedFileIdx] || fileName).split(/[\\/]/).pop() || '';
+    localStorage.setItem('converter_queue', JSON.stringify(localQueue));
+    localStorage.setItem('converter_media_types', JSON.stringify(mediaTypes));
+    if (electron) {
+      electron.ipcRenderer.send('converter-minimize-state', {
+        minimized: true,
+        converting: false,
+        isPaused: false,
+        progress: 0,
+        queueCount: localQueue.length,
+        currentFile: activeFile,
+        statusText: localQueue.length > 1 ? `${localQueue.length} files queued` : 'Ready to Convert',
+        useHwAccel: useHwAccel,
+        queue: localQueue,
+        mediaTypes: mediaTypes,
+        options: {
+          videoFormat: selectedVideoFmt,
+          videoQuality: videoQuality,
+          audioFormat: selectedAudioFmt,
+          audioBitrate: audioBitrate,
+          useHwAccel: useHwAccel,
+          destination: exportDestination,
+          driveLetter: selectedDriveLetter,
+          customFolder: customExportFolder,
+          videoOutputDir: videoOutputPath,
+          audioOutputDir: audioOutputPath
+        }
+      });
+      electron.ipcRenderer.send('player-remote-command', 'play');
+    }
+    if (onClose) onClose();
+    else if (onBack) onBack();
+  };
+
+  // Engine Settings - persisted across reboots & power loss
+  const [useHqEngine, setUseHqEngine] = useState<boolean>(() => {
+    return localStorage.getItem('converter_useHqEngine') !== 'false';
+  });
+  const [deinterlacing, setDeinterlacing] = useState<boolean>(() => {
+    return localStorage.getItem('converter_deinterlacing') !== 'false';
+  });
+  const [autoCopy, setAutoCopy] = useState<boolean>(() => {
+    return localStorage.getItem('converter_autoCopy') === 'true';
+  });
+  const [mergeFiles, setMergeFiles] = useState<boolean>(() => {
+    return localStorage.getItem('converter_mergeFiles') === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('converter_useHqEngine', String(useHqEngine));
+  }, [useHqEngine]);
+  useEffect(() => {
+    localStorage.setItem('converter_deinterlacing', String(deinterlacing));
+  }, [deinterlacing]);
+  useEffect(() => {
+    localStorage.setItem('converter_autoCopy', String(autoCopy));
+  }, [autoCopy]);
+  useEffect(() => {
+    localStorage.setItem('converter_mergeFiles', String(mergeFiles));
+  }, [mergeFiles]);
+
+  // Output Destination Settings - persisted across reboots & power loss
+  const [exportDestination, setExportDestination] = useState<'sendtray' | 'drive' | 'folder'>(() => {
+    const saved = localStorage.getItem('converter_export_dest') as 'sendtray' | 'drive' | 'folder';
+    if (saved) return saved;
+    return targetAction === 'drive' ? 'drive' : 'sendtray';
+  });
+  useEffect(() => {
+    localStorage.setItem('converter_export_dest', exportDestination);
+  }, [exportDestination]);
+
+  const [selectedDriveLetter, setSelectedDriveLetter] = useState<string>(
+    drives && drives.length > 0 ? drives[0].letter : ''
+  );
+  const [customExportFolder, setCustomExportFolder] = useState<string>(() => {
+    return localStorage.getItem('converter_custom_export_folder') || '';
+  });
+  useEffect(() => {
+    if (customExportFolder) {
+      localStorage.setItem('converter_custom_export_folder', customExportFolder);
+    }
+  }, [customExportFolder]);
+
   const [selectedFolderId, setSelectedFolderId] = useState<string | undefined>(undefined);
-  const [folders, setFolders] = useState<SendtrayFolder[]>(() => getSendtrayFolders());
-  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
-  const [newFolderName, setNewFolderName] = useState('');
-  const [showFolderDropdown, setShowFolderDropdown] = useState(false);
 
-  const baseFileName = fileName.replace(/\.[^/.]+$/, '');
-  const destinationLabel = targetAction === 'drive' ? 'Flash Drive' : 'Send Tray';
+  // Dedicated Video & Audio Output Folders in Documents\Panamedia
+  const [videoOutputPath, setVideoOutputPath] = useState<string>(() => {
+    return localStorage.getItem('panamedia_video_output_dir') || '';
+  });
+  const [audioOutputPath, setAudioOutputPath] = useState<string>(() => {
+    return localStorage.getItem('panamedia_audio_output_dir') || '';
+  });
 
-  const handleProceed = () => {
-    onProceed({
-      mode,
-      format: mode === 'extract_audio' ? format : mode === 'convert' ? videoFormat : 'original',
-      bitrate: mode === 'extract_audio' ? bitrate : videoQuality,
-      keepOriginal: true,
-      targetFolderId: selectedFolderId
+  const refreshOutputFiles = useCallback(() => {
+    if (!electron) return;
+    const vPath = videoOutputPath || localStorage.getItem('panamedia_video_output_dir');
+    const aPath = audioOutputPath || localStorage.getItem('panamedia_audio_output_dir');
+    if (vPath) {
+      electron.ipcRenderer.invoke('get-converter-output-files', vPath).then((files: any) => {
+        if (Array.isArray(files)) setConvertedVideos(files);
+      }).catch(() => {});
+    }
+    if (aPath) {
+      electron.ipcRenderer.invoke('get-converter-output-files', aPath).then((files: any) => {
+        if (Array.isArray(files)) setConvertedAudios(files);
+      }).catch(() => {});
+    }
+  }, [videoOutputPath, audioOutputPath]);
+
+  // Fetch or create default Documents\Panamedia\Video Output & Audio Output folders
+  useEffect(() => {
+    if (!electron) return;
+    electron.ipcRenderer.invoke('get-converter-output-paths').then((paths: any) => {
+      if (paths) {
+        if (!localStorage.getItem('panamedia_video_output_dir') && paths.videoOutputDir) {
+          setVideoOutputPath(paths.videoOutputDir);
+        }
+        if (!localStorage.getItem('panamedia_audio_output_dir') && paths.audioOutputDir) {
+          setAudioOutputPath(paths.audioOutputDir);
+        }
+        refreshOutputFiles();
+      }
+    }).catch(() => {});
+  }, [refreshOutputFiles]);
+
+  useEffect(() => {
+    refreshOutputFiles();
+  }, [refreshOutputFiles, activeMainTab]);
+
+  const handleChangeVideoOutputPath = async () => {
+    if (!electron) return;
+    try {
+      const chosen = await electron.ipcRenderer.invoke('select-converter-output-folder', videoOutputPath);
+      if (chosen) {
+        setVideoOutputPath(chosen);
+        localStorage.setItem('panamedia_video_output_dir', chosen);
+        refreshOutputFiles();
+      }
+    } catch (err) {
+      console.error('Error selecting video output directory:', err);
+    }
+  };
+
+  const handleChangeAudioOutputPath = async () => {
+    if (!electron) return;
+    try {
+      const chosen = await electron.ipcRenderer.invoke('select-converter-output-folder', audioOutputPath);
+      if (chosen) {
+        setAudioOutputPath(chosen);
+        localStorage.setItem('panamedia_audio_output_dir', chosen);
+        refreshOutputFiles();
+      }
+    } catch (err) {
+      console.error('Error selecting audio output directory:', err);
+    }
+  };
+
+  const currentFile = localQueue[selectedFileIdx] || fileName;
+
+  // Toggle media type on a card (Video <-> Audio) with immediate localStorage persistence
+  const toggleMediaType = (fPath: string) => {
+    setMediaTypes(prev => {
+      const curr = prev[fPath] || (isVideoFile(fPath) ? 'video' : 'audio');
+      const nextType: 'video' | 'audio' = curr === 'video' ? 'audio' : 'video';
+      const next = { ...prev, [fPath]: nextType };
+      localStorage.setItem('converter_media_types', JSON.stringify(next));
+      return next;
     });
   };
 
-  const handleCreateFolder = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newFolderName.trim()) return;
-    const created = createSendtrayFolder(newFolderName.trim());
-    const updated = getSendtrayFolders();
-    setFolders(updated);
-    setSelectedFolderId(created.id);
-    setNewFolderName('');
-    setIsCreatingFolder(false);
-    setShowFolderDropdown(false);
-  };
+  // Queue Selection & Removal Handlers
+  const isAllSelected = localQueue.length > 0 && selectedIndices.size === localQueue.length;
 
-  const getAudioFormatDesc = (fmt: string) => {
-    switch (fmt) {
-      case 'mp3': return '• MP3: Universal support for cars, TVs, phones & USB';
-      case 'aac': return '• AAC: High fidelity audio standard for Apple & mobile devices';
-      case 'm4a': return '• M4A: Apple-native MPEG-4 AAC audio container';
-      case 'wav': return '• WAV: Uncompressed studio-grade lossless audio';
-      default: return `• ${fmt.toUpperCase()}: Audio track format`;
+  const handleToggleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedIndices(new Set());
+    } else {
+      setSelectedIndices(new Set(localQueue.map((_, i) => i)));
     }
   };
 
-  const getBitrateDesc = (br: string) => {
-    switch (br) {
-      case '128k': return '• 128 kbps: Compact size, good for speech & voice';
-      case '192k': return '• 192 kbps: Recommended balance of fidelity and space';
-      case '256k': return '• 256 kbps: High fidelity audio for quality headphones';
-      case '320k': return '• 320 kbps: Maximum MP3 bitrate for audiophile listening';
-      default: return `• ${br}: Bitrate encoding rate`;
+  const handleToggleSelectCard = (idx: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedIndices(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) {
+        next.delete(idx);
+      } else {
+        next.add(idx);
+      }
+      return next;
+    });
+  };
+
+  const handleRemoveCard = (idx: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onRemoveFile) {
+      onRemoveFile(idx);
+    }
+    const removedFile = localQueue[idx];
+    const nextQueue = localQueue.filter((_, i) => i !== idx);
+    setLocalQueue(nextQueue);
+    localStorage.setItem('converter_queue', JSON.stringify(nextQueue));
+    if (removedFile) {
+      setMediaTypes(prev => {
+        const nextMap = { ...prev };
+        delete nextMap[removedFile];
+        localStorage.setItem('converter_media_types', JSON.stringify(nextMap));
+        return nextMap;
+      });
+    }
+    if (electron) {
+      electron.ipcRenderer.send('converter-minimize-state', {
+        minimized: nextQueue.length > 0,
+        converting: false,
+        isPaused: false,
+        progress: 0,
+        queueCount: nextQueue.length,
+        currentFile: nextQueue[0] ? nextQueue[0].split(/[\\/]/).pop() : '',
+        statusText: nextQueue.length > 1 ? `${nextQueue.length} files queued` : (nextQueue.length === 1 ? 'Ready to Convert' : 'Idle')
+      });
+    }
+    if (selectedFileIdx >= nextQueue.length) {
+      setSelectedFileIdx(Math.max(0, nextQueue.length - 1));
+    }
+    setSelectedIndices(prev => {
+      const next = new Set<number>();
+      prev.forEach(i => {
+        if (i < idx) next.add(i);
+        else if (i > idx) next.add(i - 1);
+      });
+      return next;
+    });
+  };
+
+  const handleClearAll = () => {
+    if (onClearQueue) {
+      onClearQueue();
+    }
+    setLocalQueue([]);
+    setMediaTypes({});
+    localStorage.removeItem('converter_queue');
+    localStorage.removeItem('converter_media_types');
+    if (electron) {
+      electron.ipcRenderer.send('converter-minimize-state', {
+        minimized: false,
+        converting: false,
+        isPaused: false,
+        progress: 0,
+        queueCount: 0,
+        currentFile: '',
+        statusText: 'Idle'
+      });
+    }
+    setSelectedIndices(new Set());
+    setSelectedFileIdx(0);
+  };
+
+  const handleRemoveSelected = () => {
+    if (selectedIndices.size === 0) return;
+    if (selectedIndices.size === localQueue.length) {
+      handleClearAll();
+      return;
+    }
+    const removedFiles = localQueue.filter((_, i) => selectedIndices.has(i));
+    const nextQueue = localQueue.filter((_, i) => !selectedIndices.has(i));
+    setLocalQueue(nextQueue);
+    localStorage.setItem('converter_queue', JSON.stringify(nextQueue));
+    setMediaTypes(prev => {
+      const nextMap = { ...prev };
+      removedFiles.forEach(f => delete nextMap[f]);
+      localStorage.setItem('converter_media_types', JSON.stringify(nextMap));
+      return nextMap;
+    });
+    if (electron) {
+      electron.ipcRenderer.send('converter-minimize-state', {
+        minimized: nextQueue.length > 0,
+        converting: false,
+        isPaused: false,
+        progress: 0,
+        queueCount: nextQueue.length,
+        currentFile: nextQueue[0] ? nextQueue[0].split(/[\\/]/).pop() : '',
+        statusText: nextQueue.length > 1 ? `${nextQueue.length} files queued` : (nextQueue.length === 1 ? 'Ready to Convert' : 'Idle')
+      });
+    }
+    setSelectedIndices(new Set());
+    setSelectedFileIdx(0);
+  };
+
+  const handleProceed = () => {
+    const perFileOptions: Record<string, { mode: 'original' | 'convert' | 'extract_audio'; format: string; bitrate: string }> = {};
+    localQueue.forEach(f => {
+      const mType = mediaTypes[f] || (isVideoFile(f) ? 'video' : 'audio');
+      perFileOptions[f] = {
+        mode: mType === 'video' ? (autoCopy ? 'original' : 'convert') : 'extract_audio',
+        format: mType === 'video' ? selectedVideoFmt : selectedAudioFmt,
+        bitrate: mType === 'video' ? videoQuality : audioBitrate
+      };
+    });
+
+    const hasVideos = localQueue.some(f => (mediaTypes[f] || (isVideoFile(f) ? 'video' : 'audio')) === 'video');
+    const defaultOutputPath = hasVideos ? videoOutputPath : audioOutputPath;
+
+    onProceed({
+      mode: hasVideos ? (autoCopy ? 'original' : 'convert') : 'extract_audio',
+      format: hasVideos ? selectedVideoFmt : selectedAudioFmt,
+      bitrate: hasVideos ? videoQuality : audioBitrate,
+      keepOriginal: true,
+      targetFolderId: selectedFolderId,
+      exportDestination,
+      exportDriveLetter: exportDestination === 'drive' ? selectedDriveLetter : undefined,
+      exportCustomPath: exportDestination === 'folder' ? (customExportFolder || defaultOutputPath) : undefined,
+      perFileOptions
+    });
+  };
+
+  const handleDirectSend = (files?: string[]) => {
+    if (onDirectSend) {
+      if (files && files.length > 0) {
+        onDirectSend(files);
+      } else {
+        onDirectSend(exportDestination === 'drive' ? 'drive' : 'sendtray');
+      }
+    } else {
+      handleProceed();
     }
   };
 
-  const getVideoFormatDesc = (fmt: string) => {
-    switch (fmt) {
-      case 'mp4': return '• MP4: Universal H.264/AAC video compatible with TVs and USB';
-      case 'mkv': return '• MKV: High quality container preserving multi-audio tracks';
-      case 'webm': return '• WEBM: Open web standard with efficient VP9 video compression';
-      case 'avi': return '• AVI: Legacy video container compatible with older car headunits';
-      default: return `• ${fmt.toUpperCase()}: Video output format`;
-    }
-  };
+  useEffect(() => {
+    if (!electron) return;
+    const handleRunRequest = () => {
+      handleProceed();
+    };
+    const handleCloseRequest = () => {
+      setIsMinimized(false);
+      onClose();
+    };
+    electron.ipcRenderer.on('converter-run-request', handleRunRequest);
+    electron.ipcRenderer.on('converter-close-request', handleCloseRequest);
+    return () => {
+      electron.ipcRenderer.removeListener('converter-run-request', handleRunRequest);
+      electron.ipcRenderer.removeListener('converter-close-request', handleCloseRequest);
+    };
+  }, [handleProceed, onClose]);
 
-  const getVideoQualityDesc = (q: string) => {
-    switch (q) {
-      case '480p': return '• 480p: Standard definition, ultra-compact file size';
-      case '720p': return '• 720p: High Definition (HD), fast playback on all screens';
-      case '1080p': return '• 1080p: Full HD crisp detail for smart TVs & PC screens';
-      case 'Original': return '• Original: Preserve exact source resolution and aspect ratio';
-      default: return `• ${q}: Resolution preset`;
-    }
-  };
-
-  const selectedFolderName = selectedFolderId
-    ? folders.find(f => f.id === selectedFolderId)?.name || 'Custom Folder'
-    : 'Main Tray (No Folder)';
 
   return (
     <div 
-      className="send-convert-container" 
+      className="videoproc-converter-modal glass-panel"
       onClick={(e) => e.stopPropagation()}
       style={{
+        width: isExpanded ? '100vw' : '1060px',
+        maxWidth: isExpanded ? '100vw' : '96vw',
+        height: isExpanded ? '100vh' : '760px',
+        maxHeight: isExpanded ? '100vh' : '92vh',
+        background: 'linear-gradient(180deg, #121320 0%, #0a0b12 100%)',
+        border: isExpanded ? 'none' : '1px solid rgba(255, 255, 255, 0.1)',
+        borderRadius: isExpanded ? '0px' : '18px',
+        boxShadow: isExpanded ? 'none' : '0 25px 80px rgba(0, 0, 0, 0.9), 0 0 50px rgba(99, 102, 241, 0.12)',
         display: 'flex',
-        alignItems: 'flex-start',
-        justifyContent: 'center',
-        gap: '16px',
-        maxWidth: '96vw',
-        maxHeight: '90vh'
+        flexDirection: 'column',
+        overflow: 'hidden',
+        animation: 'panamediaMenuPop 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
+        color: '#fff',
+        fontFamily: 'inherit',
+        position: isExpanded ? 'fixed' : 'relative',
+        inset: isExpanded ? 0 : undefined,
+        zIndex: isExpanded ? 9999 : undefined,
+        transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
       }}
     >
-      {/* ─── LEFT PANEL: Preparation Mode Selection ─── */}
-      <div 
-        className="glass-panel send-convert-left-panel"
-        style={{
-          width: '390px',
-          background: 'linear-gradient(145deg, #181824 0%, #0e0e16 100%)',
-          border: '1px solid rgba(255, 255, 255, 0.08)',
-          borderRadius: '18px',
-          padding: '20px',
+      {/* ─── 1. TOP TITLEBAR (Converter Header with Window Controls) ─── */}
+      <ConverterHeader
+        queueCount={localQueue.length}
+        isExpanded={isExpanded}
+        useHwAccel={useHwAccel}
+        onToggleExpand={() => setIsExpanded(prev => !prev)}
+        onMinimize={handleDone}
+        onBack={handleDone}
+        onClose={handleDone}
+      />
+
+      {/* ─── 2. MAIN CENTER WORKSPACE (Split Left 65% / Right 35%) ─── */}
+      <div style={{
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        background: 'rgba(0, 0, 0, 0.25)',
+        borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
+      }}>
+        {/* ── LEFT PANEL: Tabs + Media Items Queue ── */}
+        <div style={{
+          flex: 1,
+          minWidth: 0,
+          borderRight: '1px solid rgba(255, 255, 255, 0.07)',
           display: 'flex',
           flexDirection: 'column',
-          gap: '14px',
-          boxShadow: '0 24px 60px rgba(0, 0, 0, 0.75)'
-        }}
-      >
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <button
-              type="button"
-              onClick={onBack}
-              style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '8px',
-                background: 'rgba(255, 255, 255, 0.06)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                color: '#fff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease'
-              }}
-              title="Back"
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <div>
-              <div style={{ fontSize: '15px', fontWeight: 700, color: '#fff' }}>
-                Send &amp; Convert
-              </div>
-              <div style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.5)', marginTop: '1px' }}>
-                Choose preparation mode
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '50%',
-              background: 'rgba(255, 255, 255, 0.06)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              color: 'rgba(255, 255, 255, 0.6)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer'
-            }}
-            title="Close"
-          >
-            <X size={15} />
-          </button>
-        </div>
-
-        {/* Media Filename Pill */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          background: 'rgba(30, 41, 59, 0.35)',
-          border: '1px solid rgba(255, 255, 255, 0.07)',
-          borderRadius: '12px',
-          padding: '8px 12px',
-          gap: '8px'
+          background: 'rgba(15, 16, 26, 0.55)'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-            <Disc3 size={15} style={{ color: '#818cf8', flexShrink: 0 }} />
-            <span style={{
-              fontSize: '11.5px',
-              color: '#e2e8f0',
-              fontWeight: 500,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis'
-            }}>
-              {isBatch ? `${batchCount} files selected` : fileName}
-            </span>
-          </div>
-          <span style={{
-            fontSize: '10.5px',
-            fontWeight: 700,
-            background: 'rgba(99, 102, 241, 0.2)',
-            border: '1px solid rgba(99, 102, 241, 0.4)',
-            color: '#a5b4fc',
-            padding: '2px 8px',
-            borderRadius: '6px',
-            flexShrink: 0
-          }}>
-            {destinationLabel}
-          </span>
-        </div>
+          {/* Top Subheader: Clean 3 Main Tabs (No duplicate settings buttons) */}
+          <TopTabsBar
+            activeMainTab={activeMainTab}
+            onSelectTab={setActiveMainTab}
+            queueCount={localQueue.length}
+            videoOutputCount={convertedVideos.length}
+            audioOutputCount={convertedAudios.length}
+          />
 
-        {/* 3 Preparation Mode Cards */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {/* 1. Original Video */}
-          <div
-            onClick={() => setMode('original')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '12px 14px',
-              borderRadius: '12px',
-              background: mode === 'original' ? 'rgba(59, 130, 246, 0.08)' : 'rgba(255, 255, 255, 0.02)',
-              border: mode === 'original' ? '1px solid #3b82f6' : '1px solid rgba(255, 255, 255, 0.07)',
-              boxShadow: mode === 'original' ? '0 0 16px rgba(59, 130, 246, 0.22)' : 'none',
-              cursor: 'pointer',
-              transition: 'all 0.18s ease'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
-              <div style={{
-                width: '36px',
-                height: '36px',
-                borderRadius: '8px',
-                background: 'rgba(255, 255, 255, 0.06)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#fff',
-                flexShrink: 0
-              }}>
-                <Film size={18} />
-              </div>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>Original Video</span>
-                  <span style={{
-                    fontSize: '9.5px',
-                    fontWeight: 700,
-                    background: 'rgba(16, 185, 129, 0.18)',
-                    color: '#34d399',
-                    padding: '2px 6px',
-                    borderRadius: '4px'
-                  }}>
-                    Fastest
-                  </span>
-                </div>
-                <div style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.45)', marginTop: '2px' }}>
-                  Send video exactly as it is without re-encoding
-                </div>
-              </div>
-            </div>
-            <div style={{
-              width: '18px',
-              height: '18px',
-              borderRadius: '50%',
-              border: mode === 'original' ? 'none' : '2px solid rgba(255, 255, 255, 0.25)',
-              background: mode === 'original' ? '#3b82f6' : 'transparent',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0
-            }}>
-              {mode === 'original' && <Check size={12} color="#fff" strokeWidth={3} />}
-            </div>
-          </div>
-
-          {/* 2. Extract Audio */}
-          <div
-            onClick={() => setMode('extract_audio')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '12px 14px',
-              borderRadius: '12px',
-              background: mode === 'extract_audio' ? 'rgba(236, 72, 153, 0.08)' : 'rgba(255, 255, 255, 0.02)',
-              border: mode === 'extract_audio' ? '1px solid #ec4899' : '1px solid rgba(255, 255, 255, 0.07)',
-              boxShadow: mode === 'extract_audio' ? '0 0 16px rgba(236, 72, 153, 0.25)' : 'none',
-              cursor: 'pointer',
-              transition: 'all 0.18s ease'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
-              <div style={{
-                width: '36px',
-                height: '36px',
-                borderRadius: '8px',
-                background: 'rgba(236, 72, 153, 0.15)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#ec4899',
-                flexShrink: 0
-              }}>
-                <Music size={18} />
-              </div>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>Extract Audio</span>
-                  <span style={{
-                    fontSize: '9.5px',
-                    fontWeight: 700,
-                    background: 'rgba(236, 72, 153, 0.2)',
-                    color: '#f472b6',
-                    padding: '2px 6px',
-                    borderRadius: '4px'
-                  }}>
-                    Save Space • {format.toUpperCase()}
-                  </span>
-                </div>
-                <div style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.45)', marginTop: '2px' }}>
-                  Soundtrack only - Ideal for car, phone &amp; MP3 players
-                </div>
-              </div>
-            </div>
-            <div style={{
-              width: '18px',
-              height: '18px',
-              borderRadius: '50%',
-              border: mode === 'extract_audio' ? 'none' : '2px solid rgba(255, 255, 255, 0.25)',
-              background: mode === 'extract_audio' ? '#ec4899' : 'transparent',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0
-            }}>
-              {mode === 'extract_audio' && <Check size={12} color="#fff" strokeWidth={3} />}
-            </div>
-          </div>
-
-          {/* 3. Convert Video */}
-          <div
-            onClick={() => setMode('convert')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '12px 14px',
-              borderRadius: '12px',
-              background: mode === 'convert' ? 'rgba(168, 85, 247, 0.08)' : 'rgba(255, 255, 255, 0.02)',
-              border: mode === 'convert' ? '1px solid #a855f7' : '1px solid rgba(255, 255, 255, 0.07)',
-              boxShadow: mode === 'convert' ? '0 0 16px rgba(168, 85, 247, 0.25)' : 'none',
-              cursor: 'pointer',
-              transition: 'all 0.18s ease'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
-              <div style={{
-                width: '36px',
-                height: '36px',
-                borderRadius: '8px',
-                background: 'rgba(168, 85, 247, 0.15)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#c084fc',
-                flexShrink: 0
-              }}>
-                <Tv size={18} />
-              </div>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>Convert Video</span>
-                  <span style={{
-                    fontSize: '9.5px',
-                    fontWeight: 700,
-                    background: 'rgba(168, 85, 247, 0.2)',
-                    color: '#c084fc',
-                    padding: '2px 6px',
-                    borderRadius: '4px'
-                  }}>
-                    TV &amp; Older Players
-                  </span>
-                </div>
-                <div style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.45)', marginTop: '2px' }}>
-                  Universal H.264/AAC for Smart TVs and older cars
-                </div>
-              </div>
-            </div>
-            <div style={{
-              width: '18px',
-              height: '18px',
-              borderRadius: '50%',
-              border: mode === 'convert' ? 'none' : '2px solid rgba(255, 255, 255, 0.25)',
-              background: mode === 'convert' ? '#a855f7' : 'transparent',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0
-            }}>
-              {mode === 'convert' && <Check size={12} color="#fff" strokeWidth={3} />}
-            </div>
-          </div>
-        </div>
-
-        {/* Green Safe Preservation Badge */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          background: 'rgba(16, 185, 129, 0.08)',
-          border: '1px solid rgba(16, 185, 129, 0.25)',
-          borderRadius: '10px',
-          padding: '8px 12px'
-        }}>
-          <ShieldCheck size={15} style={{ color: '#10b981', flexShrink: 0 }} />
-          <span style={{ fontSize: '11.5px', color: '#34d399', fontWeight: 500 }}>
-            Original file is 100% preserved and untouched.
-          </span>
-        </div>
-
-        {/* Left Panel Footer */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginTop: 'auto',
-          paddingTop: '6px'
-        }}>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              type="button"
-              onClick={onClose}
-              style={{
-                padding: '7px 14px',
-                borderRadius: '8px',
-                fontSize: '12px',
-                fontWeight: 600,
-                background: 'rgba(255, 255, 255, 0.04)',
-                border: '1px solid rgba(255, 255, 255, 0.09)',
-                color: '#cbd5e1',
-                cursor: 'pointer'
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={onBack}
-              style={{
-                padding: '7px 14px',
-                borderRadius: '8px',
-                fontSize: '12px',
-                fontWeight: 600,
-                background: 'rgba(255, 255, 255, 0.04)',
-                border: '1px solid rgba(255, 255, 255, 0.09)',
-                color: '#cbd5e1',
-                cursor: 'pointer'
-              }}
-            >
-              &lt; Back
-            </button>
-          </div>
-          <span style={{ fontSize: '11.5px', color: 'rgba(192, 132, 252, 0.8)', fontWeight: 500 }}>
-            Configure on right &gt;
-          </span>
-        </div>
-      </div>
-
-      {/* ─── RIGHT PANEL: Configuration Details ─── */}
-      <div 
-        className="glass-panel send-convert-right-panel"
-        style={{
-          width: '350px',
-          background: 'linear-gradient(145deg, #181824 0%, #0e0e16 100%)',
-          border: mode === 'extract_audio'
-            ? '1px solid rgba(236, 72, 153, 0.3)'
-            : mode === 'convert'
-            ? '1px solid rgba(168, 85, 247, 0.3)'
-            : '1px solid rgba(59, 130, 246, 0.3)',
-          borderRadius: '18px',
-          padding: '20px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '14px',
-          boxShadow: '0 24px 60px rgba(0, 0, 0, 0.75)'
-        }}
-      >
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '10px',
-              background: mode === 'extract_audio'
-                ? 'rgba(236, 72, 153, 0.15)'
-                : mode === 'convert'
-                ? 'rgba(168, 85, 247, 0.15)'
-                : 'rgba(59, 130, 246, 0.15)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: mode === 'extract_audio' ? '#ec4899' : mode === 'convert' ? '#c084fc' : '#60a5fa',
-              flexShrink: 0
-            }}>
-              {mode === 'extract_audio' ? <Music size={18} /> : mode === 'convert' ? <Tv size={18} /> : <Film size={18} />}
-            </div>
-            <div>
-              <div style={{ fontSize: '14.5px', fontWeight: 700, color: '#fff' }}>
-                {mode === 'extract_audio' ? 'Audio Extraction' : mode === 'convert' ? 'Video Conversion' : 'Direct Transfer'}
-              </div>
-              <div style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.5)', marginTop: '1px' }}>
-                {mode === 'extract_audio' ? 'Custom soundtrack format' : mode === 'convert' ? 'Universal video format' : 'Loss-free stream copy'}
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            style={{
-              padding: '4px 10px',
-              borderRadius: '6px',
-              background: 'rgba(236, 72, 153, 0.12)',
-              border: '1px solid rgba(236, 72, 153, 0.25)',
-              color: '#f472b6',
-              fontSize: '11px',
-              fontWeight: 600,
-              cursor: 'default'
-            }}
-          >
-            Settings
-          </button>
-        </div>
-
-        {/* Section 1: AUDIO / VIDEO FORMAT */}
-        {mode === 'extract_audio' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#f472b6', fontWeight: 700, letterSpacing: '0.4px' }}>
-              <Sliders size={13} /> AUDIO FORMAT
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
-              {['mp3', 'aac', 'm4a', 'wav'].map((fmt) => {
-                const isSelected = format === fmt;
-                return (
-                  <button
-                    key={fmt}
-                    type="button"
-                    onClick={() => setFormat(fmt)}
-                    style={{
-                      padding: '8px 0',
-                      borderRadius: '8px',
-                      fontSize: '11.5px',
-                      fontWeight: 700,
-                      background: isSelected ? 'linear-gradient(135deg, #db2777, #be185d)' : 'rgba(255, 255, 255, 0.04)',
-                      border: isSelected ? '1px solid #f472b6' : '1px solid rgba(255, 255, 255, 0.08)',
-                      color: isSelected ? '#fff' : 'rgba(255, 255, 255, 0.7)',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease',
-                      boxShadow: isSelected ? '0 0 10px rgba(236, 72, 153, 0.35)' : 'none'
-                    }}
-                  >
-                    {fmt.toUpperCase()}
-                  </button>
-                );
-              })}
-            </div>
-            <div style={{ fontSize: '10.5px', color: 'rgba(255, 255, 255, 0.45)', lineHeight: '1.4', marginTop: '2px' }}>
-              {getAudioFormatDesc(format)}
-            </div>
-          </div>
-        )}
-
-        {mode === 'convert' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#c084fc', fontWeight: 700, letterSpacing: '0.4px' }}>
-              <Sliders size={13} /> VIDEO FORMAT
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
-              {['mp4', 'mkv', 'webm', 'avi'].map((fmt) => {
-                const isSelected = videoFormat === fmt;
-                return (
-                  <button
-                    key={fmt}
-                    type="button"
-                    onClick={() => setVideoFormat(fmt)}
-                    style={{
-                      padding: '8px 0',
-                      borderRadius: '8px',
-                      fontSize: '11.5px',
-                      fontWeight: 700,
-                      background: isSelected ? 'linear-gradient(135deg, #9333ea, #7e22ce)' : 'rgba(255, 255, 255, 0.04)',
-                      border: isSelected ? '1px solid #c084fc' : '1px solid rgba(255, 255, 255, 0.08)',
-                      color: isSelected ? '#fff' : 'rgba(255, 255, 255, 0.7)',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease',
-                      boxShadow: isSelected ? '0 0 10px rgba(168, 85, 247, 0.35)' : 'none'
-                    }}
-                  >
-                    {fmt.toUpperCase()}
-                  </button>
-                );
-              })}
-            </div>
-            <div style={{ fontSize: '10.5px', color: 'rgba(255, 255, 255, 0.45)', lineHeight: '1.4', marginTop: '2px' }}>
-              {getVideoFormatDesc(videoFormat)}
-            </div>
-          </div>
-        )}
-
-        {/* Section 2: BITRATE QUALITY / RESOLUTION */}
-        {mode === 'extract_audio' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#f472b6', fontWeight: 700, letterSpacing: '0.4px' }}>
-              <Sparkles size={13} /> BITRATE QUALITY
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
-              {[
-                { key: '128k', label: '128 kbps' },
-                { key: '192k', label: '192 kbps' },
-                { key: '256k', label: '256 kbps' },
-                { key: '320k', label: '320 kbps' }
-              ].map((item) => {
-                const isSelected = bitrate === item.key;
-                return (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => setBitrate(item.key)}
-                    style={{
-                      padding: '8px 0',
-                      borderRadius: '8px',
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      background: isSelected ? 'linear-gradient(135deg, #db2777, #be185d)' : 'rgba(255, 255, 255, 0.04)',
-                      border: isSelected ? '1px solid #f472b6' : '1px solid rgba(255, 255, 255, 0.08)',
-                      color: isSelected ? '#fff' : 'rgba(255, 255, 255, 0.7)',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease',
-                      boxShadow: isSelected ? '0 0 10px rgba(236, 72, 153, 0.35)' : 'none'
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                );
-              })}
-            </div>
-            <div style={{ fontSize: '10.5px', color: 'rgba(255, 255, 255, 0.45)', lineHeight: '1.4', marginTop: '2px' }}>
-              {getBitrateDesc(bitrate)}
-            </div>
-          </div>
-        )}
-
-        {mode === 'convert' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#c084fc', fontWeight: 700, letterSpacing: '0.4px' }}>
-              <Sparkles size={13} /> RESOLUTION QUALITY
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
-              {['480p', '720p', '1080p', 'Original'].map((res) => {
-                const isSelected = videoQuality === res;
-                return (
-                  <button
-                    key={res}
-                    type="button"
-                    onClick={() => setVideoQuality(res)}
-                    style={{
-                      padding: '8px 0',
-                      borderRadius: '8px',
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      background: isSelected ? 'linear-gradient(135deg, #9333ea, #7e22ce)' : 'rgba(255, 255, 255, 0.04)',
-                      border: isSelected ? '1px solid #c084fc' : '1px solid rgba(255, 255, 255, 0.08)',
-                      color: isSelected ? '#fff' : 'rgba(255, 255, 255, 0.7)',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    {res}
-                  </button>
-                );
-              })}
-            </div>
-            <div style={{ fontSize: '10.5px', color: 'rgba(255, 255, 255, 0.45)', lineHeight: '1.4', marginTop: '2px' }}>
-              {getVideoQualityDesc(videoQuality)}
-            </div>
-          </div>
-        )}
-
-        {mode === 'original' && (
-          <div style={{
-            background: 'rgba(59, 130, 246, 0.06)',
-            border: '1px solid rgba(59, 130, 246, 0.2)',
-            borderRadius: '10px',
-            padding: '12px',
-            fontSize: '11.5px',
-            color: '#93c5fd',
-            lineHeight: '1.5'
-          }}>
-            • Direct stream copy bypasses re-encoding entirely.<br />
-            • Instantaneous file preparation with zero loss in visual or audio quality.
-          </div>
-        )}
-
-        {/* Section 3: SENDTRAY FOLDER */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#f59e0b', fontWeight: 700, letterSpacing: '0.4px' }}>
-              <Folder size={13} /> {targetAction === 'drive' ? 'TARGET DESTINATION' : 'SENDTRAY FOLDER'}
-            </div>
-            {targetAction === 'sendtray' && (
-              <button
-                type="button"
-                onClick={() => setIsCreatingFolder(!isCreatingFolder)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#fbbf24',
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '3px'
-                }}
-              >
-                <Plus size={12} /> New Folder
-              </button>
-            )}
-          </div>
-
-          {isCreatingFolder ? (
-            <form onSubmit={handleCreateFolder} style={{ display: 'flex', gap: '6px' }}>
-              <input
-                type="text"
-                placeholder="Folder name..."
-                value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                autoFocus
-                style={{
-                  flex: 1,
-                  padding: '6px 10px',
-                  borderRadius: '8px',
-                  border: '1px solid rgba(245, 158, 11, 0.5)',
-                  background: 'rgba(0, 0, 0, 0.4)',
-                  color: '#fff',
-                  fontSize: '11.5px',
-                  outline: 'none'
-                }}
-              />
-              <button
-                type="submit"
-                style={{
-                  padding: '6px 10px',
-                  borderRadius: '8px',
-                  background: '#f59e0b',
-                  border: 'none',
-                  color: '#000',
-                  fontWeight: 700,
-                  fontSize: '11px',
-                  cursor: 'pointer'
-                }}
-              >
-                Add
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsCreatingFolder(false)}
-                style={{
-                  padding: '6px 8px',
-                  borderRadius: '8px',
-                  background: 'transparent',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  color: 'rgba(255,255,255,0.6)',
-                  fontSize: '11px',
-                  cursor: 'pointer'
-                }}
-              >
-                Cancel
-              </button>
-            </form>
+          {/* Tab Views */}
+          {activeMainTab === 'convert' ? (
+            <ConvertQueueList
+              localQueue={localQueue}
+              selectedIndices={selectedIndices}
+              selectedFileIdx={selectedFileIdx}
+              mediaTypes={mediaTypes}
+              streamingPort={streamingPort}
+              activeVideoPreset={activeVideoPreset}
+              activeAudioPreset={activeAudioPreset}
+              videoQuality={videoQuality}
+              audioBitrate={audioBitrate}
+              onSelectFile={setSelectedFileIdx}
+              onToggleSelectAll={handleToggleSelectAll}
+              onToggleSelectCard={handleToggleSelectCard}
+              onRemoveCard={handleRemoveCard}
+              onRemoveSelected={handleRemoveSelected}
+              onClearAll={handleClearAll}
+              onToggleMediaType={toggleMediaType}
+              onAddFiles={onAddFiles}
+            />
+          ) : activeMainTab === 'video_output' ? (
+            <OutputHistoryList
+              type="video"
+              items={convertedVideos}
+              outputPath={videoOutputPath}
+              onChangeOutputPath={handleChangeVideoOutputPath}
+              onDirectSend={handleDirectSend}
+            />
           ) : (
-            <div style={{ position: 'relative' }}>
-              <div
-                onClick={() => setShowFolderDropdown(!showFolderDropdown)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '10px 12px',
-                  borderRadius: '10px',
-                  background: 'rgba(245, 158, 11, 0.08)',
-                  border: '1px solid rgba(245, 158, 11, 0.4)',
-                  cursor: 'pointer'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Folder size={14} style={{ color: '#f59e0b' }} />
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#fef08a' }}>
-                    {selectedFolderName}
-                  </span>
-                </div>
-                <span style={{ fontSize: '10px', color: 'rgba(255, 255, 255, 0.4)' }}>
-                  ▼
-                </span>
-              </div>
-
-              {showFolderDropdown && (
-                <div style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  right: 0,
-                  zIndex: 20,
-                  marginTop: '4px',
-                  background: '#13141f',
-                  border: '1px solid rgba(245, 158, 11, 0.3)',
-                  borderRadius: '10px',
-                  overflow: 'hidden',
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.8)'
-                }}>
-                  <div
-                    onClick={() => {
-                      setSelectedFolderId(undefined);
-                      setShowFolderDropdown(false);
-                    }}
-                    style={{
-                      padding: '8px 12px',
-                      fontSize: '11.5px',
-                      color: !selectedFolderId ? '#f59e0b' : '#fff',
-                      cursor: 'pointer',
-                      borderBottom: '1px solid rgba(255,255,255,0.06)',
-                      background: !selectedFolderId ? 'rgba(245, 158, 11, 0.1)' : 'transparent'
-                    }}
-                  >
-                    Main Tray (No Folder)
-                  </div>
-                  {folders.map(f => (
-                    <div
-                      key={f.id}
-                      onClick={() => {
-                        setSelectedFolderId(f.id);
-                        setShowFolderDropdown(false);
-                      }}
-                      style={{
-                        padding: '8px 12px',
-                        fontSize: '11.5px',
-                        color: selectedFolderId === f.id ? '#f59e0b' : '#fff',
-                        cursor: 'pointer',
-                        background: selectedFolderId === f.id ? 'rgba(245, 158, 11, 0.1)' : 'transparent'
-                      }}
-                    >
-                      {f.name}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <OutputHistoryList
+              type="audio"
+              items={convertedAudios}
+              outputPath={audioOutputPath}
+              onChangeOutputPath={handleChangeAudioOutputPath}
+              onDirectSend={handleDirectSend}
+            />
           )}
         </div>
 
-        {/* Section 4: OUTPUT FILE PREVIEW */}
+        {/* ── RIGHT PANEL: Video Preview Player + Destination Selector (Comfortable 300px width) ── */}
         <div style={{
-          background: 'rgba(255, 255, 255, 0.02)',
-          border: '1px solid rgba(255, 255, 255, 0.06)',
-          borderRadius: '10px',
-          padding: '10px 12px',
+          width: '300px',
+          flex: '0 0 300px',
+          minWidth: '290px',
+          maxWidth: '320px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '4px'
+          background: 'rgba(12, 13, 22, 0.75)'
         }}>
-          <div style={{ fontSize: '10px', fontWeight: 700, color: 'rgba(255, 255, 255, 0.4)', letterSpacing: '0.4px' }}>
-            OUTPUT FILE PREVIEW
-          </div>
-          <div style={{
-            fontSize: '11.5px',
-            color: '#fff',
-            fontWeight: 500,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis'
-          }}>
-            {mode === 'extract_audio'
-              ? `${baseFileName}.${format}`
-              : mode === 'convert'
-              ? `${baseFileName}.${videoFormat}`
-              : fileName}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
-            <CheckCircle2 size={12} style={{ color: '#10b981' }} />
-            <span style={{ fontSize: '10.5px', color: '#34d399', fontWeight: 500 }}>
-              {mode === 'extract_audio'
-                ? 'Takes ~85% less storage space'
-                : mode === 'convert'
-                ? 'Universal hardware playback'
-                : 'Zero compression loss'}
-            </span>
-          </div>
-        </div>
+          {/* Preview Monitor */}
+          <PreviewMonitor
+            currentFile={currentFile}
+            streamingPort={streamingPort}
+            appPlayerState={appPlayerState}
+            onPrevFile={() => {
+              setSelectedFileIdx(prev => Math.max(0, prev - 1));
+            }}
+            onNextFile={() => {
+              setSelectedFileIdx(prev => Math.min(localQueue.length - 1, prev + 1));
+            }}
+            isMinimized={isMinimized}
+          />
 
-        {/* Big Action Button */}
-        <button
-          type="button"
-          onClick={handleProceed}
-          style={{
-            marginTop: 'auto',
-            padding: '11px 16px',
-            borderRadius: '10px',
-            border: 'none',
-            background: mode === 'extract_audio'
-              ? 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)'
-              : mode === 'convert'
-              ? 'linear-gradient(135deg, #a855f7 0%, #9333ea 100%)'
-              : 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-            color: '#fff',
-            fontSize: '13px',
-            fontWeight: 700,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px',
-            boxShadow: mode === 'extract_audio'
-              ? '0 4px 18px rgba(236, 72, 153, 0.4)'
-              : mode === 'convert'
-              ? '0 4px 18px rgba(168, 85, 247, 0.4)'
-              : '0 4px 18px rgba(59, 130, 246, 0.4)',
-            transition: 'all 0.18s ease'
-          }}
-        >
-          <span>
-            {mode === 'extract_audio'
-              ? targetAction === 'drive' ? 'Extract & Send to Drive' : 'Extract & Add to Tray'
-              : mode === 'convert'
-              ? targetAction === 'drive' ? 'Convert & Send to Drive' : 'Convert & Add to Tray'
-              : targetAction === 'drive' ? 'Send to Drive' : 'Add to Tray'}
-          </span>
-          <ArrowRight size={15} />
-        </button>
+          {/* Export Settings Panel */}
+          <ExportSettingsPanel
+            useHwAccel={useHwAccel}
+            setUseHwAccel={setUseHwAccel}
+            useHqEngine={useHqEngine}
+            setUseHqEngine={setUseHqEngine}
+            deinterlacing={deinterlacing}
+            setDeinterlacing={setDeinterlacing}
+            autoCopy={autoCopy}
+            setAutoCopy={setAutoCopy}
+            mergeFiles={mergeFiles}
+            setMergeFiles={setMergeFiles}
+            exportDestination={exportDestination}
+            setExportDestination={setExportDestination}
+            selectedDriveLetter={selectedDriveLetter}
+            setSelectedDriveLetter={setSelectedDriveLetter}
+            customExportFolder={customExportFolder}
+            setCustomExportFolder={setCustomExportFolder}
+            selectedFolderId={selectedFolderId}
+            setSelectedFolderId={setSelectedFolderId}
+            drives={drives}
+          />
+        </div>
       </div>
+
+      {/* ─── 3. BOTTOM DOCK (Target Format, Media Tools Carousel & Circular RUN) ─── */}
+      <ConverterBottomDock
+        formatModalMode={formatModalMode}
+        activeVideoPreset={activeVideoPreset}
+        activeAudioPreset={activeAudioPreset}
+        videoQuality={videoQuality}
+        audioBitrate={audioBitrate}
+        onOpenFormatModal={(mode) => {
+          setFormatModalMode(mode);
+          setShowFormatModal(true);
+        }}
+        onSelectTool={setActiveTool}
+        onRunConvert={handleProceed}
+      />
+
+      {/* ─── 4. FORMAT SETTINGS DIALOG MODAL ─── */}
+      <FormatSettingsModal
+        isOpen={showFormatModal}
+        formatModalMode={formatModalMode}
+        setFormatModalMode={setFormatModalMode}
+        selectedVideoFmt={selectedVideoFmt}
+        setSelectedVideoFmt={setSelectedVideoFmt}
+        videoQuality={videoQuality}
+        setVideoQuality={setVideoQuality}
+        selectedAudioFmt={selectedAudioFmt}
+        setSelectedAudioFmt={setSelectedAudioFmt}
+        audioBitrate={audioBitrate}
+        setAudioBitrate={setAudioBitrate}
+        onClose={() => setShowFormatModal(false)}
+      />
+
+      {/* ─── 5. DEDICATED CONVERSION FEATURE TOOLS ─── */}
+      {activeTool?.id === 'cut' && (
+        <CutTrimTool
+          fileName={currentFile}
+          duration={appPlayerState?.duration || 180}
+          onApply={(_cutSettings) => {
+            console.log('Applied Cut Settings:', _cutSettings);
+          }}
+          onClose={() => setActiveTool(null)}
+        />
+      )}
+
+      {activeTool?.id === 'crop' && (
+        <CropTool
+          fileName={currentFile}
+          onApply={(_cropSettings) => {
+            console.log('Applied Crop Settings:', _cropSettings);
+          }}
+          onClose={() => setActiveTool(null)}
+        />
+      )}
+
+      {activeTool?.id === 'subtitle' && (
+        <SubtitleTool
+          fileName={currentFile}
+          onApply={(_subSettings) => {
+            console.log('Applied Subtitle Settings:', _subSettings);
+          }}
+          onClose={() => setActiveTool(null)}
+        />
+      )}
+
+      {activeTool?.id === 'effect' && (
+        <EffectTool
+          fileName={currentFile}
+          onApply={(_effectSettings) => {
+            console.log('Applied Effect Settings:', _effectSettings);
+          }}
+          onClose={() => setActiveTool(null)}
+        />
+      )}
+
+      {activeTool?.id === 'rotate' && (
+        <RotateTool
+          fileName={currentFile}
+          onApply={(_rotateSettings) => {
+            console.log('Applied Rotate Settings:', _rotateSettings);
+          }}
+          onClose={() => setActiveTool(null)}
+        />
+      )}
+
+      {activeTool?.id === 'watermark' && (
+        <WatermarkTool
+          fileName={currentFile}
+          onApply={(_wmSettings) => {
+            console.log('Applied Watermark Settings:', _wmSettings);
+          }}
+          onClose={() => setActiveTool(null)}
+        />
+      )}
+
+      {activeTool?.id === 'compress' && (
+        <CompressTool
+          fileName={currentFile}
+          onApply={(_compSettings) => {
+            console.log('Applied Compress Settings:', _compSettings);
+          }}
+          onClose={() => setActiveTool(null)}
+        />
+      )}
+
+      {activeTool && !['cut', 'crop', 'subtitle', 'effect', 'rotate', 'watermark', 'compress'].includes(activeTool.id) && (
+        <ToolInfoModal
+          tool={activeTool}
+          fileName={currentFile}
+          onClose={() => setActiveTool(null)}
+        />
+      )}
     </div>
   );
 }

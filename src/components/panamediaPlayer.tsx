@@ -605,8 +605,11 @@ function tn({ filePath: e, title: t }) {
           ? `http://localhost:${Ut}/transcode?path=${encodeURIComponent(T)}&start=${F}&quality=${Be}`
           : `http://localhost:${Ut}/stream?path=${encodeURIComponent(T)}`
         : ``,
-    [Yt, Xt] = (0, _.useState)<{ hasError?: boolean; message?: string; filePath?: string } | null>(null),
-    Zt = (0, _.useCallback)(() => {
+    [Yt, Xt] = (0, _.useState)<{ hasError?: boolean; message?: string; filePath?: string } | null>(null);
+  (0, _.useEffect)(() => {
+    Xt(null);
+  }, [T]);
+  let Zt = (0, _.useCallback)(() => {
       (Xt(null),
         b(!0),
         I(0),
@@ -740,51 +743,48 @@ function tn({ filePath: e, title: t }) {
           };
         });
       let n = z === `effects` ? ce : z,
-        r = e.toLowerCase().replace(/[\\/]/g, `/`),
-        i = (e) =>
-          r
-            ? e
-                .toLowerCase()
-                .replace(/[\\/]/g, `/`)
-                .startsWith(r + `/`)
-            : !1,
+        dlNorm = e.toLowerCase().replace(/[\\/]/g, `/`);
+      if (dlNorm.endsWith(`/`)) dlNorm = dlNorm.slice(0, -1);
+      let isDownloadItem = (filePath: string) => {
+        if (!filePath) return !1;
+        let p = filePath.toLowerCase().replace(/[\\/]/g, `/`);
+        if (dlNorm && (p === dlNorm || p.startsWith(dlNorm + `/`))) return !0;
+        let dirParts = p.split(`/`);
+        dirParts.pop();
+        let folder = dirParts.pop() || ``;
+        return folder === `download` || folder === `downloads`;
+      },
         a: any[] = [];
       if (n === `videos`) {
         let e = new Map();
         ((Xe === `favourites` || Xe === `archive`) &&
           t
-            .filter((e) => e.category === `videos`)
+            .filter((e) => e.category === `videos` && !isDownloadItem(e.path))
             .forEach((t) =>
               e.set(t.path.replace(/[\\/]/g, `/`).toLowerCase(), t),
             ),
           fn.forEach((t) =>
-            e.set(t.path.replace(/[\\/]/g, `/`).toLowerCase(), t),
+            !isDownloadItem(t.path) && e.set(t.path.replace(/[\\/]/g, `/`).toLowerCase(), t),
           ),
           un.forEach((t) =>
-            e.set(t.path.replace(/[\\/]/g, `/`).toLowerCase(), t),
+            !isDownloadItem(t.path) && e.set(t.path.replace(/[\\/]/g, `/`).toLowerCase(), t),
           ),
-          (a =
-            Xe === `favourites` || Xe === `archive`
-              ? Array.from(e.values())
-              : Array.from(e.values()).filter((e) => !i(e.path))));
+          (a = Array.from(e.values()).filter((e) => !isDownloadItem(e.path))));
       } else if (n === `audios`) {
         let e = new Map();
         ((Xe === `favourites` || Xe === `archive`) &&
           t
-            .filter((e) => e.category === `audios`)
+            .filter((e) => e.category === `audios` && !isDownloadItem(e.path))
             .forEach((t) =>
               e.set(t.path.replace(/[\\/]/g, `/`).toLowerCase(), t),
             ),
           pn.forEach((t) =>
-            e.set(t.path.replace(/[\\/]/g, `/`).toLowerCase(), t),
+            !isDownloadItem(t.path) && e.set(t.path.replace(/[\\/]/g, `/`).toLowerCase(), t),
           ),
           dn.forEach((t) =>
-            e.set(t.path.replace(/[\\/]/g, `/`).toLowerCase(), t),
+            !isDownloadItem(t.path) && e.set(t.path.replace(/[\\/]/g, `/`).toLowerCase(), t),
           ),
-          (a =
-            Xe === `favourites` || Xe === `archive`
-              ? Array.from(e.values())
-              : Array.from(e.values()).filter((e) => !i(e.path))));
+          (a = Array.from(e.values()).filter((e) => !isDownloadItem(e.path))));
       } else if (n === `primary`) {
         let e = new Map();
         (ue === `videos`
@@ -794,11 +794,11 @@ function tn({ filePath: e, title: t }) {
                 e.set(t.path.replace(/[\\/]/g, `/`).toLowerCase(), t),
               ),
             fn.forEach((t) => {
-              i(t.path) &&
+              isDownloadItem(t.path) &&
                 e.set(t.path.replace(/[\\/]/g, `/`).toLowerCase(), t);
             }),
             un.forEach((t) => {
-              i(t.path) &&
+              isDownloadItem(t.path) &&
                 e.set(t.path.replace(/[\\/]/g, `/`).toLowerCase(), t);
             }))
           : (t
@@ -807,11 +807,11 @@ function tn({ filePath: e, title: t }) {
                 e.set(t.path.replace(/[\\/]/g, `/`).toLowerCase(), t),
               ),
             pn.forEach((t) => {
-              i(t.path) &&
+              isDownloadItem(t.path) &&
                 e.set(t.path.replace(/[\\/]/g, `/`).toLowerCase(), t);
             }),
             dn.forEach((t) => {
-              i(t.path) &&
+              isDownloadItem(t.path) &&
                 e.set(t.path.replace(/[\\/]/g, `/`).toLowerCase(), t);
             })),
           (a = Array.from(e.values())));
@@ -844,16 +844,27 @@ function tn({ filePath: e, title: t }) {
         : vn;
     })(),
     { favouriteCount: bn, archiveCount: xn } = (0, _.useMemo)(() => {
+      let dlNorm = O ? O.toLowerCase().replace(/[\\/]/g, `/`) : ``;
+      if (dlNorm.endsWith(`/`)) dlNorm = dlNorm.slice(0, -1);
+      let isDownloadItem = (filePath: string) => {
+        if (!filePath) return !1;
+        let p = filePath.toLowerCase().replace(/[\\/]/g, `/`);
+        if (dlNorm && (p === dlNorm || p.startsWith(dlNorm + `/`))) return !0;
+        let dirParts = p.split(`/`);
+        dirParts.pop();
+        let folder = dirParts.pop() || ``;
+        return folder === `download` || folder === `downloads`;
+      };
       let e: any[] = [];
       if (z === `videos`) {
         let t = new Map();
-        (fn.forEach((e) => t.set(e.path, e)),
-          un.forEach((e) => t.set(e.path, e)),
+        (fn.forEach((e) => !isDownloadItem(e.path) && t.set(e.path, e)),
+          un.forEach((e) => !isDownloadItem(e.path) && t.set(e.path, e)),
           (e = Array.from(t.values())));
       } else if (z === `audios`) {
         let t = new Map();
-        (pn.forEach((e) => t.set(e.path, e)),
-          dn.forEach((e) => t.set(e.path, e)),
+        (pn.forEach((e) => !isDownloadItem(e.path) && t.set(e.path, e)),
+          dn.forEach((e) => !isDownloadItem(e.path) && t.set(e.path, e)),
           (e = Array.from(t.values())));
       }
       return {
@@ -882,44 +893,49 @@ function tn({ filePath: e, title: t }) {
               ? t.duration
               : i || 999999,
           r = Math.max(0, Math.min(n, e));
-        if (y || re)
-          (I(r),
-            setTimeout(() => {
-              q.current && (q.current.load(), q.current.play().catch(() => {}));
-            }, 50));
-        else if (typeof t.fastSeek == `function`)
-          try {
-            t.fastSeek(r);
-          } catch {
-            t.currentTime = r;
-          }
-        else t.currentTime = r;
         s(r);
+        if (y || re) {
+          I(r);
+          setTimeout(() => {
+            q.current && (q.current.load(), q.current.play().catch(() => {}));
+          }, 50);
+        } else {
+          t.currentTime = r;
+          t.play().catch(() => {});
+        }
       },
       [y, re, i],
     ),
     Cn = (0, _.useCallback)(() => {
+      if (!q.current?.error || q.current?.seeking) {
+        return;
+      }
+      if (q.current && (q.current.currentTime > 0.3 || q.current.readyState >= 3) && !q.current.paused) {
+        return;
+      }
       !y && T && !M
         ? (console.log(
             `[Player] Direct playback failed, automatically falling back to engine remuxing/transcoding...`,
           ),
           b(!0),
-          I(0),
-          s(0),
           setTimeout(() => {
             q.current &&
-              ((q.current.currentTime = 0),
-              q.current.load(),
+              (q.current.load(),
               q.current.play().catch(() => {}));
           }, 50))
         : (console.warn(`[Player] Playback error encountered for:`, T),
-          Xt({
-            hasError: !0,
-            message: `This media file could not be played. The format may be unsupported, corrupted, or the file may have been moved.`,
-            filePath: T,
-          }),
-          r(!1),
-          S(!1));
+          setTimeout(() => {
+            if (!q.current?.error || (q.current && (q.current.currentTime > 0.3 || q.current.readyState >= 3) && !q.current.paused)) {
+              return;
+            }
+            Xt({
+              hasError: !0,
+              message: `This media file could not be played. The format may be unsupported, corrupted, or the file may have been moved.`,
+              filePath: T,
+            });
+            r(!1);
+            S(!1);
+          }, 400));
     }, [y, T, M]),
     wn = (0, _.useCallback)(
       (e) => {
@@ -969,29 +985,35 @@ function tn({ filePath: e, title: t }) {
       let n = !isNaN(e.duration) && isFinite(e.duration) ? e.duration : i || 0,
         r = Number(localStorage.getItem(`player_lastPlayedTime`)) || 0,
         o = n > 0 && r >= n - 2;
-      (ie.current
-        ? (r > 0 && !o
-            ? (t || (e.currentTime = r), s(r))
-            : ((e.currentTime = 0), s(0)),
-          (ie.current = !1))
-        : ((e.currentTime = 0), s(0)),
-        e.play().catch(() => {}));
+      if (ie.current) {
+        if (r > 0 && !o) {
+          if (!t) e.currentTime = r;
+          s(r);
+        } else {
+          if (!t) e.currentTime = 0;
+          s(0);
+        }
+        ie.current = !1;
+      }
+      e.play().catch(() => {});
     }, [u, c, y, re, i]),
     Dn = (0, _.useCallback)(() => {
-      if (!T || yn.length === 0) return;
-      let e = T.replace(/[\\/]/g, `/`).toLowerCase(),
+      Xt(null);
+      if (yn.length === 0) return;
+      let e = T ? T.replace(/[\\/]/g, `/`).toLowerCase() : ``,
         t = U.some((t) => ft(t) === e);
       if (m === `folder` && !t) {
         let t = en(T),
           n = yn.filter((e) => en(e.path).toLowerCase() === t.toLowerCase());
         if (n.length > 0) {
-          let t =
-            n.findIndex(
-              (t) => t.path.replace(/[\\/]/g, `/`).toLowerCase() === e,
-            ) + 1;
-          t >= n.length && (t = 0);
-          let i = n[t];
-          (ee(i.path),
+          let cur = n.findIndex(
+            (t) => t.path.replace(/[\\/]/g, `/`).toLowerCase() === e,
+          );
+          let target = (cur + 1) % n.length;
+          let i = n[target];
+          (ie.current = !0,
+            Xt(null),
+            ee(i.path),
             D(i.name),
             s(0),
             I(0),
@@ -1005,14 +1027,14 @@ function tn({ filePath: e, title: t }) {
           return;
         }
       }
-      let n =
-        yn.findIndex((t) => t.path.replace(/[\\/]/g, `/`).toLowerCase() === e) +
-        1;
-      if (n >= yn.length)
-        if (m === `all`) n = 0;
-        else return;
-      let i = yn[n];
-      (ee(i.path),
+      let cur = yn.findIndex(
+        (t) => t.path.replace(/[\\/]/g, `/`).toLowerCase() === e,
+      );
+      let target = (cur + 1) % yn.length;
+      let i = yn[target];
+      (ie.current = !0,
+        Xt(null),
+        ee(i.path),
         D(i.name),
         s(0),
         I(0),
@@ -1025,20 +1047,22 @@ function tn({ filePath: e, title: t }) {
           q.current.play().catch(() => {})));
     }, [T, yn, m, U]),
     On = (0, _.useCallback)(() => {
-      if (!T || yn.length === 0) return;
-      let e = T.replace(/[\\/]/g, `/`).toLowerCase(),
+      Xt(null);
+      if (yn.length === 0) return;
+      let e = T ? T.replace(/[\\/]/g, `/`).toLowerCase() : ``,
         t = U.some((t) => ft(t) === e);
       if (m === `folder` && !t) {
         let t = en(T),
           n = yn.filter((e) => en(e.path).toLowerCase() === t.toLowerCase());
         if (n.length > 0) {
-          let t =
-            n.findIndex(
-              (t) => t.path.replace(/[\\/]/g, `/`).toLowerCase() === e,
-            ) - 1;
-          t < 0 && (t = n.length - 1);
-          let i = n[t];
-          (ee(i.path),
+          let cur = n.findIndex(
+            (t) => t.path.replace(/[\\/]/g, `/`).toLowerCase() === e,
+          );
+          let target = cur <= 0 ? n.length - 1 : cur - 1;
+          let i = n[target];
+          (ie.current = !0,
+            Xt(null),
+            ee(i.path),
             D(i.name),
             s(0),
             I(0),
@@ -1052,14 +1076,14 @@ function tn({ filePath: e, title: t }) {
           return;
         }
       }
-      let n =
-        yn.findIndex((t) => t.path.replace(/[\\/]/g, `/`).toLowerCase() === e) -
-        1;
-      if (n < 0)
-        if (m === `all`) n = yn.length - 1;
-        else return;
-      let i = yn[n];
-      (ee(i.path),
+      let cur = yn.findIndex(
+        (t) => t.path.replace(/[\\/]/g, `/`).toLowerCase() === e,
+      );
+      let target = cur <= 0 ? yn.length - 1 : cur - 1;
+      let i = yn[target];
+      (ie.current = !0,
+        Xt(null),
+        ee(i.path),
         D(i.name),
         s(0),
         I(0),
@@ -1071,6 +1095,49 @@ function tn({ filePath: e, title: t }) {
           q.current.load(),
           q.current.play().catch(() => {})));
     }, [T, yn, m, U]),
+    handleRemoveMissingMedia = (targetPath: string) => {
+      if (!targetPath) return;
+      const norm = targetPath.toLowerCase().replace(/[\\/]/g, '/');
+      try {
+        const vRaw = localStorage.getItem('player_syncedVideos');
+        if (vRaw) {
+          const vList = JSON.parse(vRaw);
+          const newVList = vList.filter((item: any) => (item?.path || item).toLowerCase().replace(/[\\/]/g, '/') !== norm);
+          localStorage.setItem('player_syncedVideos', JSON.stringify(newVList));
+        }
+      } catch (e) {}
+      try {
+        const aRaw = localStorage.getItem('player_syncedAudios');
+        if (aRaw) {
+          const aList = JSON.parse(aRaw);
+          const newAList = aList.filter((item: any) => (item?.path || item).toLowerCase().replace(/[\\/]/g, '/') !== norm);
+          localStorage.setItem('player_syncedAudios', JSON.stringify(newAList));
+        }
+      } catch (e) {}
+      try {
+        const favRaw = localStorage.getItem('player_favourites');
+        if (favRaw) {
+          const favList = JSON.parse(favRaw);
+          const newFavList = favList.filter((p: string) => p.toLowerCase().replace(/[\\/]/g, '/') !== norm);
+          localStorage.setItem('player_favourites', JSON.stringify(newFavList));
+          et(newFavList);
+        }
+      } catch (e) {}
+      try {
+        const arcRaw = localStorage.getItem('player_archive');
+        if (arcRaw) {
+          const arcList = JSON.parse(arcRaw);
+          const newArcList = arcList.filter((p: string) => p.toLowerCase().replace(/[\\/]/g, '/') !== norm);
+          localStorage.setItem('player_archive', JSON.stringify(newArcList));
+          nt(newArcList);
+        }
+      } catch (e) {}
+      if (K) {
+        K.ipcRenderer.invoke('remove-media-path', targetPath).catch(() => {});
+      }
+      Xt(null);
+      Dn();
+    },
     kn = (0, _.useCallback)(() => {
       let e = q.current;
       if (e) {
@@ -1343,6 +1410,17 @@ function tn({ filePath: e, title: t }) {
         }
       );
     }, [ae]),
+    (0, _.useEffect)(() => {
+      if (!K) return;
+      let onOpenReq = () => {
+        (window as any).__openConverterProDirect = true;
+        De(T || 'media');
+      };
+      K.ipcRenderer.on('converter-open-request', onOpenReq);
+      return () => {
+        K.ipcRenderer.removeListener('converter-open-request', onOpenReq);
+      };
+    }, [T]),
     (0, W.jsxs)(`div`, {
       onDragOver: Mn,
       onDrop: Nn,
@@ -1358,7 +1436,14 @@ function tn({ filePath: e, title: t }) {
       },
       onMouseMove: zn,
       children: [
-        !B && (0, W.jsx)(At, { currentTitle: E, onHelpClick: () => xe(!0) }),
+        !B && (0, W.jsx)(At, {
+          currentTitle: E,
+          onHelpClick: () => xe(!0),
+          onOpenConverter: () => {
+            (window as any).__openConverterProDirect = true;
+            De(T || 'media');
+          },
+        }),
         (0, W.jsxs)(`div`, {
           style: {
             flex: 1,
@@ -1420,6 +1505,7 @@ function tn({ filePath: e, title: t }) {
                   onRetryPlayback: Zt,
                   onNextTrack: Dn,
                   onDismissError: () => Xt(null),
+                  onRemoveMissingMedia: handleRemoveMissingMedia,
                   isMediaLocked: St,
                   isArchiveTabActive: Ct,
                   archivePin: rt,

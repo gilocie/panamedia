@@ -21,6 +21,8 @@ installer-ui/build/
 # Electron generated output
 release/
 out/
+dist-electron/
+installer-ui/*.exe
 
 # Local environment and machine-specific files
 *.local
