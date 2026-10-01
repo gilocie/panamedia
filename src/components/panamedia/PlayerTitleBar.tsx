@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { 
-  Sparkles, Maximize2, Play, Pause, Loader2, CheckCircle2, AlertCircle, X, Zap 
+  Sparkles, Maximize2, Play, Pause, Loader2, CheckCircle2, AlertCircle, X, Zap, CopyPlus 
 } from 'lucide-react';
 import { electron } from './types';
 
@@ -422,19 +422,29 @@ export function PlayerTitleBar({ currentTitle, onHelpClick, onOpenConverter }: P
           )}
         </div>
 
+        {/* New Player Window Button (Multi-Window Playback) */}
+        <button 
+          className="titlebar-btn" 
+          onClick={() => electron?.ipcRenderer.invoke('open-new-player-window')} 
+          title="Open New Player Window (Work with multiple players at once)" 
+          style={{ WebkitAppRegion: 'no-drag' } as any}
+        >
+          <CopyPlus size={13} style={{ opacity: 0.85 }} />
+        </button>
+
         {/* Help Button */}
         <button className="titlebar-btn" onClick={onHelpClick} title="Keyboard Shortcuts Help" style={{ WebkitAppRegion: 'no-drag' } as any}>
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
         </button>
 
         {/* Standard Window Controls */}
-        <button className="titlebar-btn" onClick={() => electron?.ipcRenderer.send('player-minimize-to-sidebar')} title="Minimize to sidebar">
+        <button className="titlebar-btn" onClick={() => electron?.ipcRenderer.send('player-minimize-to-sidebar')} title="Minimize">
           <svg viewBox="0 0 10 1" width="10" height="1"><line x1="0" y1="0" x2="10" y2="0" stroke="currentColor" strokeWidth="2" /></svg>
         </button>
-        <button className="titlebar-btn" onClick={() => electron?.ipcRenderer.send('window-maximize')}>
+        <button className="titlebar-btn" onClick={() => electron?.ipcRenderer.send('window-maximize')} title="Maximize">
           <svg viewBox="0 0 10 10" width="10" height="10"><rect x="1" y="1" width="8" height="8" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
         </button>
-        <button className="titlebar-btn close" onClick={() => electron?.ipcRenderer.send('window-close')}>
+        <button className="titlebar-btn close" onClick={() => electron?.ipcRenderer.send('window-close')} title="Close">
           <svg viewBox="0 0 10 10" width="10" height="10"><path d="M1,1 L9,9 M9,1 L1,9" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
         </button>
       </div>
