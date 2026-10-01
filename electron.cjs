@@ -95,6 +95,21 @@ const {
 const { initDownloadManager, cleanUpDownloadManager, getDownloadsList, removeDownloadByPath } = require('./panamedia-downloader/downloadManager.cjs');
 const { getUniversalWebFormats } = require('./panamedia-downloader/web-downloader/webExtractor.cjs');
 const { convertAndSendToDrive, convertMediaFile, togglePauseProcess } = require('./panamedia-downloader/mediaConverter.cjs');
+const {
+  initPlayerManager,
+  setMainWindow,
+  setPlayerTray,
+  openPlayerWindow,
+  showAndFloatPlayerWindow,
+  detachPlayerWindowsOnMainClose,
+  getActivePlayerWindows,
+  getPlayerStates,
+  getLastFocusedPlayerWindow
+} = require('./electron/player-manager.cjs');
+const {
+  initConverterManager,
+  broadcastConverterState
+} = require('./electron/converter-manager.cjs');
 
 // ─── Production vs Development URL resolution ─────────────────────────────────
 function getAppUrl(queryString = '') {
@@ -230,103 +245,9 @@ function parseFfmpegOutput(rawText) {
 const dataDir = path.join(app.getPath('userData'));
 const settingsFile = path.join(dataDir, 'settings.json');
 
-let mainWindow;
-let playerWindow = null; // Track the most recently active/focused player window
-const activePlayerWindows = new Set(); // Track all active player windows
-const playerStates = new Map(); // Track state per windowId
-let playerState = null; // Legacy state reference for backwards compatibility
-let tray = null; // System tray icon instance
-let playerTray = null; // System tray icon instance specifically for player
-let wasPlayerMinimizedBeforeParentClosed = false;
+let mainWindow = null;
+let tray = null; // Main app system tray icon instance
 
-function showAndFloatPlayerWindow() {
-  const win = (playerWindow && !playerWindow.isDestroyed())
-    ? playerWindow
-    : (activePlayerWindows.size > 0 ? Array.from(activePlayerWindows)[0] : null);
-
-  if (win && !win.isDestroyed()) {
-    wasPlayerMinimizedBeforeParentClosed = false;
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.setAlwaysOnTop(true);
-    win.focus();
-    setTimeout(() => {
-      if (win && !win.isDestroyed()) {
-        win.setAlwaysOnTop(false);
-      }
-    }, 400);
-    const st = playerStates.get(win.id);
-    if (st) st.minimized = false;
-    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
-      mainWindow.webContents.send('player-state-changed', st || playerState);
-    }
-  } else {
-    openPlayerWindow('', 'Media Player', { newWindow: true });
-  }
-}
-
-function ensurePlayerTray() {
-  if (playerTray && !playerTray.isDestroyed()) return;
-  try {
-    const iconPath = getIconPath('player.ico');
-    const playerIconImg = nativeImage.createFromPath(iconPath);
-    playerTray = new Tray(playerIconImg.isEmpty() ? iconPath : playerIconImg);
-    const contextMenu = Menu.buildFromTemplate([
-      {
-        label: 'Open Panamedia Player',
-        click: () => showAndFloatPlayerWindow()
-      },
-      {
-        label: 'Play / Pause',
-        click: () => {
-          if (playerWindow && !playerWindow.isDestroyed()) {
-            playerWindow.webContents.send('player-remote-command', 'toggle-play');
-          }
-        }
-      },
-      {
-        label: 'Next Track',
-        click: () => {
-          if (playerWindow && !playerWindow.isDestroyed()) {
-            playerWindow.webContents.send('player-remote-command', 'next');
-          }
-        }
-      },
-      {
-        label: 'Previous Track',
-        click: () => {
-          if (playerWindow && !playerWindow.isDestroyed()) {
-            playerWindow.webContents.send('player-remote-command', 'prev');
-          }
-        }
-      },
-      { type: 'separator' },
-      {
-        label: 'Close Player',
-        click: () => {
-          if (playerWindow && !playerWindow.isDestroyed()) {
-            playerWindow.close();
-          }
-        }
-      }
-    ]);
-    playerTray.setToolTip('Panamedia Player');
-    playerTray.setContextMenu(contextMenu);
-    playerTray.on('click', () => showAndFloatPlayerWindow());
-    playerTray.on('double-click', () => showAndFloatPlayerWindow());
-  } catch (err) {
-    console.error('Failed to create player tray icon:', err);
-  }
-}
-
-function destroyPlayerTray() {
-  if (playerTray && !playerTray.isDestroyed()) {
-    try {
-      playerTray.destroy();
-    } catch (e) {}
-    playerTray = null;
-  }
-}
 let settings = {
   connections: 8,
   downloadDir: path.join(process.env.USERPROFILE, 'Downloads'),
@@ -1511,7 +1432,7 @@ function createWindow(forceMode = null) {
     return;
   } else {
     // Only show splash on initial cold start when player is not running
-    const hasActivePlayer = activePlayerWindows.size > 0 || (playerWindow && !playerWindow.isDestroyed());
+    const hasActivePlayer = getActivePlayerWindows().size > 0;
     const splash = hasActivePlayer ? null : createSplashWindow();
     
     mainWindow = new BrowserWindow({
@@ -1529,6 +1450,7 @@ function createWindow(forceMode = null) {
         preload: path.join(__dirname, 'preload.cjs')
       }
     });
+    setMainWindow(mainWindow);
 
     // Prevent Chromium from navigating the window away when a file is dropped
     mainWindow.webContents.on('will-navigate', (event, url) => {
@@ -1552,35 +1474,8 @@ function createWindow(forceMode = null) {
 
     mainWindow.on('closed', () => {
       mainWindow = null;
-      // Detach all active player windows completely so they float freely on the desktop
-      const playerIcon = getIconPath('player.ico');
-      const playerIconImg = nativeImage.createFromPath(playerIcon);
-      const playerAppId = isDev ? 'com.panamedia.player.dev' : 'com.panamedia.player';
-
-      for (const pWin of activePlayerWindows) {
-        if (!pWin.isDestroyed()) {
-          try {
-            pWin.setParentWindow(null);
-          } catch (e) {}
-          pWin.setIcon(playerIconImg.isEmpty() ? playerIcon : playerIconImg);
-          try {
-            pWin.setAppDetails({
-              appId: playerAppId,
-              appIconPath: playerIcon,
-              appIconIndex: 0,
-              relaunchDisplayName: 'Panamedia Player',
-              relaunchCommand: `"${process.execPath}" --mode=player`
-            });
-          } catch (e) {}
-
-          const st = playerStates.get(pWin.id);
-          const wasMin = Boolean(st && st.minimized) || pWin.isMinimized();
-          if (!wasMin) {
-            pWin.show();
-            pWin.focus();
-          }
-        }
-      }
+      setMainWindow(null);
+      detachPlayerWindowsOnMainClose();
     });
     
     mainWindow.webContents.on('did-finish-load', () => {
@@ -1606,11 +1501,12 @@ function createWindow(forceMode = null) {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.show();
         mainWindow.focus();
-        if (playerWindow && !playerWindow.isDestroyed() && playerState) {
-          if (wasPlayerMinimizedBeforeParentClosed) {
-            playerState.minimized = true;
+        const focusedPlayer = getLastFocusedPlayerWindow();
+        if (focusedPlayer && !focusedPlayer.isDestroyed()) {
+          const st = getPlayerStates().get(focusedPlayer.id);
+          if (st) {
+            mainWindow.webContents.send('player-state-changed', st);
           }
-          mainWindow.webContents.send('player-state-changed', playerState);
         }
       }
     };
@@ -1698,8 +1594,10 @@ ipcMain.handle('save-settings', (event, newSettings) => {
   if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents !== event.sender) {
     mainWindow.webContents.send('settings-changed', settings);
   }
-  if (playerWindow && !playerWindow.isDestroyed() && playerWindow.webContents !== event.sender) {
-    playerWindow.webContents.send('settings-changed', settings);
+  for (const pWin of getActivePlayerWindows()) {
+    if (pWin && !pWin.isDestroyed() && pWin.webContents !== event.sender) {
+      pWin.webContents.send('settings-changed', settings);
+    }
   }
   return settings;
 });
@@ -1713,9 +1611,11 @@ ipcMain.on('synced-folders-updated', (event, folders) => {
     mainWindow.webContents.send('synced-folders-updated', folders);
     mainWindow.webContents.send('settings-changed', settings);
   }
-  if (playerWindow && !playerWindow.isDestroyed() && playerWindow.webContents !== event.sender) {
-    playerWindow.webContents.send('synced-folders-updated', folders);
-    playerWindow.webContents.send('settings-changed', settings);
+  for (const pWin of getActivePlayerWindows()) {
+    if (pWin && !pWin.isDestroyed() && pWin.webContents !== event.sender) {
+      pWin.webContents.send('synced-folders-updated', folders);
+      pWin.webContents.send('settings-changed', settings);
+    }
   }
 });
 
@@ -2043,12 +1943,14 @@ function registerMediaFolder(filePath) {
       settings.syncedFolders.push(folderPath);
       saveSettings();
       
-      // Notify both windows that settings updated
+      // Notify active windows that settings updated
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('settings-changed', settings);
       }
-      if (playerWindow && !playerWindow.isDestroyed()) {
-        playerWindow.webContents.send('settings-changed', settings);
+      for (const pWin of getActivePlayerWindows()) {
+        if (pWin && !pWin.isDestroyed()) {
+          pWin.webContents.send('settings-changed', settings);
+        }
       }
     }
   } catch (e) {
@@ -2056,171 +1958,13 @@ function registerMediaFolder(filePath) {
   }
 }
 
-let playerOpenDebounceTimer = null;
-let lastOpenCommandToken = 0;
-
-function openPlayerWindow(filePath, filename, options = {}) {
-  if (filePath) registerMediaFolder(filePath);
-  const commandToken = ++lastOpenCommandToken;
-  const isForceNew = Boolean(options && (options.newWindow || options.forceNew));
-  const targetTitle = filename || (filePath ? path.basename(filePath) : 'Media Player');
-
-  // If not explicitly requesting a new window and an active player window already exists,
-  // update the existing player
-  if (!isForceNew && playerWindow && !playerWindow.isDestroyed()) {
-    const st = { filePath, filename: targetTitle, playing: true, currentTime: 0, duration: 0, minimized: false, windowId: playerWindow.id };
-    playerState = st;
-    playerStates.set(playerWindow.id, st);
-    playerWindow.webContents.send('player-open-file', { filePath, filename: targetTitle, token: commandToken });
-    if (playerWindow.isMinimized()) playerWindow.restore();
-    playerWindow.show();
-    playerWindow.focus();
-    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
-      mainWindow.webContents.send('player-state-changed', playerState);
-    }
-    return playerWindow;
-  }
-
-  // Create a brand new independent player window
-  const playerIcon = getIconPath('player.ico');
-  const playerIconImg = nativeImage.createFromPath(playerIcon);
-  const playerAppId = isDev ? 'com.panamedia.player.dev' : 'com.panamedia.player';
-  ensurePlayerShortcut();
-
-  const winOptions = {
-    width: 960,
-    height: 600,
-    minWidth: 720,
-    minHeight: 460,
-    frame: false,
-    icon: playerIconImg.isEmpty() ? playerIcon : playerIconImg,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-      backgroundThrottling: false,
-      preload: path.join(__dirname, 'preload.cjs')
-    }
-  };
-
-  // Cascade window position if other player windows are open
-  if (activePlayerWindows.size > 0 && playerWindow && !playerWindow.isDestroyed()) {
-    try {
-      const [curX, curY] = playerWindow.getPosition();
-      winOptions.x = curX + 30;
-      winOptions.y = curY + 30;
-    } catch (e) {}
-  }
-
-  const playerWin = new BrowserWindow(winOptions);
-  playerWin.setIcon(playerIconImg.isEmpty() ? playerIcon : playerIconImg);
-  try {
-    playerWin.setAppDetails({
-      appId: playerAppId,
-      appIconPath: playerIcon,
-      appIconIndex: 0,
-      relaunchDisplayName: 'Panamedia Player',
-      relaunchCommand: `"${process.execPath}" --mode=player`
-    });
-  } catch (e) {}
-
-  // Prevent Chromium from navigating the window away when a file is dropped
-  playerWin.webContents.on('will-navigate', (event, url) => {
-    if (url.startsWith('file://') && !url.includes('index.html')) {
-      event.preventDefault();
-    }
-  });
-
-  activePlayerWindows.add(playerWin);
-  playerWindow = playerWin;
-  const initialPlayerState = {
-    filePath,
-    filename: targetTitle,
-    playing: true,
-    currentTime: 0,
-    duration: 0,
-    minimized: false,
-    windowId: playerWin.id
-  };
-  playerStates.set(playerWin.id, initialPlayerState);
-  playerState = initialPlayerState;
-
-  ensurePlayerTray();
-
-  const queryParams = `mode=player&path=${encodeURIComponent(filePath || '')}&title=${encodeURIComponent(targetTitle)}&windowId=${playerWin.id}`;
-  playerWin.loadURL(getAppUrl(queryParams));
-
-  playerWin.on('enter-full-screen', () => {
-    playerWin.webContents.send('player-fullscreen-changed', true);
-  });
-
-  playerWin.on('leave-full-screen', () => {
-    playerWin.webContents.send('player-fullscreen-changed', false);
-  });
-
-  playerWin.on('focus', () => {
-    playerWindow = playerWin;
-    const st = playerStates.get(playerWin.id);
-    if (st && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
-      mainWindow.webContents.send('player-state-changed', st);
-    }
-  });
-
-  playerWin.on('closed', () => {
-    activePlayerWindows.delete(playerWin);
-    playerStates.delete(playerWin.id);
-    if (playerWindow === playerWin) {
-      playerWindow = activePlayerWindows.size > 0 ? Array.from(activePlayerWindows)[activePlayerWindows.size - 1] : null;
-    }
-    if (activePlayerWindows.size === 0) {
-      destroyPlayerTray();
-      playerState = null;
-      wasPlayerMinimizedBeforeParentClosed = false;
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('player-state-changed', null);
-      } else {
-        app.quit();
-      }
-    } else if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
-      const remainingState = playerWindow ? playerStates.get(playerWindow.id) : null;
-      mainWindow.webContents.send('player-state-changed', remainingState);
-    }
-  });
-
-  playerWin.on('minimize', () => {
-    const st = playerStates.get(playerWin.id);
-    if (st) {
-      st.minimized = true;
-      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
-        mainWindow.webContents.send('player-state-changed', st);
-      }
-    }
-  });
-
-  playerWin.on('restore', () => {
-    const st = playerStates.get(playerWin.id);
-    if (st) {
-      st.minimized = false;
-      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
-        mainWindow.webContents.send('player-state-changed', st);
-      }
-    }
-  });
-
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
-    mainWindow.webContents.send('player-state-changed', { ...initialPlayerState, minimized: false });
-  }
-
-  return playerWin;
-}
-
 // ─── Single Instance & Second Instance Handler ─────────────────────────────
 app.on('second-instance', (event, argv, workingDirectory) => {
   const fileArg = getMediaFileFromCommandLine(argv, workingDirectory);
   if (fileArg) {
     registerMediaFolder(fileArg);
-    // Allow opening in a new player window if a player window is already active
-    const openInNew = activePlayerWindows.size > 0;
-    openPlayerWindow(fileArg, path.basename(fileArg), { newWindow: openInNew });
+    // Double clicking media plays in the current active player window!
+    openPlayerWindow(fileArg, path.basename(fileArg), { newWindow: false });
     return;
   }
 
@@ -2230,8 +1974,7 @@ app.on('second-instance', (event, argv, workingDirectory) => {
     if (pathArgIndex !== -1) {
       filePath = cleanArgPath(argv[pathArgIndex].split('=')[1]);
     }
-    const openInNew = activePlayerWindows.size > 0;
-    openPlayerWindow(filePath, filePath ? path.basename(filePath) : 'Media Player', { newWindow: openInNew });
+    openPlayerWindow(filePath, filePath ? path.basename(filePath) : 'Media Player', { newWindow: false });
     return;
   }
 
@@ -2248,43 +1991,6 @@ app.on('second-instance', (event, argv, workingDirectory) => {
 ipcMain.handle('register-media-folder', (event, filePath) => {
   registerMediaFolder(filePath);
   return settings;
-});
-
-ipcMain.handle('open-player-window', (event, { filePath, filename, newWindow = false } = {}) => {
-  return openPlayerWindow(filePath, filename, { newWindow });
-});
-
-ipcMain.handle('open-new-player-window', (event, data = {}) => {
-  return openPlayerWindow(data?.filePath || '', data?.filename || '', { newWindow: true });
-});
-
-ipcMain.on('player-set-fullscreen', (event, flag) => {
-  const win = (event && event.sender) ? BrowserWindow.fromWebContents(event.sender) : playerWindow;
-  if (win && !win.isDestroyed()) {
-    win.setFullScreen(flag);
-  }
-});
-
-// IPC player window controls from mini-player sidebar
-ipcMain.on('player-control-play-pause', (event) => {
-  const win = (event && event.sender) ? BrowserWindow.fromWebContents(event.sender) : playerWindow;
-  if (win && !win.isDestroyed()) {
-    win.webContents.send('player-control-play-pause');
-  }
-});
-
-ipcMain.on('player-control-close', (event) => {
-  const win = (event && event.sender) ? BrowserWindow.fromWebContents(event.sender) : playerWindow;
-  if (win && !win.isDestroyed()) {
-    win.close();
-  }
-});
-
-ipcMain.on('player-control-mute', (event) => {
-  const win = (event && event.sender) ? BrowserWindow.fromWebContents(event.sender) : playerWindow;
-  if (win && !win.isDestroyed()) {
-    win.webContents.send('player-control-mute');
-  }
 });
 
 
@@ -2420,14 +2126,6 @@ ipcMain.handle('convert-media-file', async (event, { filePath, targetDir, option
   }
 });
 
-ipcMain.handle('converter-toggle-pause', async (_event, filePath) => {
-  try {
-    const isPaused = togglePauseProcess(filePath);
-    return { success: true, isPaused };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
 
 ipcMain.handle('save-folder-to-disk', async (event, { folderName, filePaths }) => {
   try {
@@ -2872,205 +2570,7 @@ ipcMain.handle('get-converter-output-files', async (_event, dirPath) => {
 });
 
 
-// IPC Player State sync
-ipcMain.handle('get-player-state', () => {
-  if (playerWindow && !playerWindow.isDestroyed() && playerState) {
-    const isMinimized = wasPlayerMinimizedBeforeParentClosed || !playerWindow.isVisible() || playerWindow.isMinimized();
-    return { ...playerState, minimized: isMinimized };
-  }
-  return null;
-});
 
-// Player sends its state updates (playing/paused, currentTime, title changes)
-ipcMain.on('player-update-state', (event, state) => {
-  const win = (event && event.sender) ? BrowserWindow.fromWebContents(event.sender) : playerWindow;
-  if (win && !win.isDestroyed()) {
-    const isMinimized = !win.isVisible() || win.isMinimized();
-    const existing = playerStates.get(win.id) || {};
-    const updated = { ...existing, ...state, minimized: isMinimized, windowId: win.id };
-    playerStates.set(win.id, updated);
-    if (win === playerWindow || !playerWindow) {
-      playerState = updated;
-    }
-    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
-      mainWindow.webContents.send('player-state-changed', updated);
-    }
-    if (state && state.duration > 0 && typeof state.currentTime === 'number') {
-      const ratio = Math.max(0, Math.min(1, state.currentTime / state.duration));
-      win.setProgressBar(ratio, { mode: state.playing ? 'normal' : 'paused' });
-    } else {
-      win.setProgressBar(-1);
-    }
-    if (playerTray && !playerTray.isDestroyed() && state && state.filename) {
-      try {
-        playerTray.setToolTip(`Panamedia Player - ${state.filename}`);
-      } catch (e) {}
-    }
-  }
-});
-
-// Player minimize: if main app is open and visible on screen, hide window and dock to sidebar;
-// if main app is closed or hidden, minimize directly to the Windows Taskbar!
-ipcMain.on('player-minimize-to-sidebar', (event) => {
-  const win = (event && event.sender) ? BrowserWindow.fromWebContents(event.sender) : playerWindow;
-  if (!win || win.isDestroyed()) return;
-
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized()) {
-    win.hide();
-    const st = playerStates.get(win.id) || { filePath: '', filename: 'Media Player', playing: true, currentTime: 0, duration: 0, volume: 100 };
-    st.minimized = true;
-    playerStates.set(win.id, st);
-    mainWindow.webContents.send('player-state-changed', st);
-  } else {
-    // Parent app is closed or hidden: minimize directly to Windows Taskbar!
-    win.minimize();
-    const st = playerStates.get(win.id);
-    if (st) st.minimized = true;
-  }
-});
-
-// Restore player window from mini-player click
-ipcMain.handle('player-restore', () => {
-  const targetWin = (playerWindow && !playerWindow.isDestroyed()) 
-    ? playerWindow 
-    : (activePlayerWindows.size > 0 ? Array.from(activePlayerWindows)[0] : null);
-  if (targetWin && !targetWin.isDestroyed()) {
-    wasPlayerMinimizedBeforeParentClosed = false;
-    if (targetWin.isMinimized()) {
-      targetWin.restore();
-    }
-    targetWin.show();
-    targetWin.focus();
-    const st = playerStates.get(targetWin.id) || { filePath: '', filename: 'Media Player', playing: true, currentTime: 0, duration: 0, volume: 100 };
-    st.minimized = false;
-    playerStates.set(targetWin.id, st);
-    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
-      mainWindow.webContents.send('player-state-changed', st);
-    }
-    return true;
-  }
-  return false;
-});
-
-// Relay remote commands from main window sidebar mini-player controls to the player window
-// Commands: 'toggle-play', 'prev', 'next', 'mute'
-ipcMain.on('player-remote-command', (event, command, ...args) => {
-  const targetWin = (playerWindow && !playerWindow.isDestroyed()) 
-    ? playerWindow 
-    : (activePlayerWindows.size > 0 ? Array.from(activePlayerWindows)[0] : null);
-  if (targetWin && !targetWin.isDestroyed()) {
-    targetWin.webContents.send('player-remote-command', command, ...args);
-  }
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('player-remote-command', command, ...args);
-  }
-});
-
-// Converter Pro minimized state synchronization between Converter and Player Header
-let converterMinimizedState = null;
-function getConverterStateFilePath() {
-  try {
-    const userData = app.getPath ? app.getPath('userData') : path.join(process.env.APPDATA || '', 'panamedia');
-    return path.join(userData, 'converter_minimized_state.json');
-  } catch (e) {
-    return null;
-  }
-}
-
-try {
-  const sf = getConverterStateFilePath();
-  if (sf && fs.existsSync(sf)) {
-    converterMinimizedState = JSON.parse(fs.readFileSync(sf, 'utf8'));
-  }
-} catch (e) {}
-
-ipcMain.on('converter-minimize-state', (_event, state) => {
-  converterMinimizedState = state;
-  try {
-    const sf = getConverterStateFilePath();
-    if (sf) fs.writeFileSync(sf, JSON.stringify(state));
-  } catch (e) {}
-  if (playerWindow && !playerWindow.isDestroyed()) {
-    playerWindow.webContents.send('converter-state-changed', state);
-  }
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('converter-state-changed', state);
-  }
-});
-
-ipcMain.handle('get-converter-minimize-state', () => {
-  if (!converterMinimizedState) {
-    try {
-      const sf = getConverterStateFilePath();
-      if (sf && fs.existsSync(sf)) {
-        converterMinimizedState = JSON.parse(fs.readFileSync(sf, 'utf8'));
-      }
-    } catch (e) {}
-  }
-  return converterMinimizedState;
-});
-
-ipcMain.on('converter-restore-request', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('converter-restore-request');
-    mainWindow.show();
-    mainWindow.focus();
-  }
-  if (playerWindow && !playerWindow.isDestroyed()) {
-    playerWindow.webContents.send('converter-restore-request');
-  }
-});
-
-ipcMain.on('converter-close-request', () => {
-  converterMinimizedState = { minimized: false, queueCount: 0 };
-  try {
-    const sf = getConverterStateFilePath();
-    if (sf) fs.writeFileSync(sf, JSON.stringify(converterMinimizedState));
-  } catch (e) {}
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('converter-close-request');
-  }
-  if (playerWindow && !playerWindow.isDestroyed()) {
-    playerWindow.webContents.send('converter-close-request');
-    playerWindow.webContents.send('converter-state-changed', { minimized: false, queueCount: 0 });
-  }
-});
-
-ipcMain.on('converter-run-request', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('converter-run-request');
-  }
-  if (playerWindow && !playerWindow.isDestroyed()) {
-    playerWindow.webContents.send('converter-run-request');
-  }
-});
-
-ipcMain.on('converter-pause-request', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('converter-pause-request');
-  }
-  if (playerWindow && !playerWindow.isDestroyed()) {
-    playerWindow.webContents.send('converter-pause-request');
-  }
-});
-
-ipcMain.on('converter-resume-request', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('converter-resume-request');
-  }
-  if (playerWindow && !playerWindow.isDestroyed()) {
-    playerWindow.webContents.send('converter-resume-request');
-  }
-});
-
-ipcMain.on('converter-open-request', () => {
-  if (playerWindow && !playerWindow.isDestroyed()) {
-    playerWindow.webContents.send('converter-open-request');
-  }
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('converter-open-request');
-  }
-});
 
 ipcMain.handle('remove-media-path', async (_event, filePath) => {
   if (!filePath) return { success: false };
@@ -3286,15 +2786,19 @@ ipcMain.handle('sync-media-library', async (event, folderPath) => {
     }
   }
   saveDirCache();
-  if (playerWindow && !playerWindow.isDestroyed()) {
-    playerWindow.webContents.send('library-synced', fileList);
+  for (const pWin of getActivePlayerWindows()) {
+    if (pWin && !pWin.isDestroyed()) {
+      pWin.webContents.send('library-synced', fileList);
+    }
   }
   return fileList;
 });
 
 ipcMain.on('library-synced', (event, files) => {
-  if (playerWindow && !playerWindow.isDestroyed() && event.sender !== playerWindow.webContents) {
-    playerWindow.webContents.send('library-synced', files);
+  for (const pWin of getActivePlayerWindows()) {
+    if (pWin && !pWin.isDestroyed() && event.sender !== pWin.webContents) {
+      pWin.webContents.send('library-synced', files);
+    }
   }
   if (mainWindow && !mainWindow.isDestroyed() && event.sender !== mainWindow.webContents) {
     mainWindow.webContents.send('library-synced', files);
@@ -3302,8 +2806,10 @@ ipcMain.on('library-synced', (event, files) => {
 });
 
 ipcMain.on('archive-updated', (event, paths) => {
-  if (playerWindow && !playerWindow.isDestroyed() && event.sender !== playerWindow.webContents) {
-    playerWindow.webContents.send('archive-updated', paths);
+  for (const pWin of getActivePlayerWindows()) {
+    if (pWin && !pWin.isDestroyed() && event.sender !== pWin.webContents) {
+      pWin.webContents.send('archive-updated', paths);
+    }
   }
   if (mainWindow && !mainWindow.isDestroyed() && event.sender !== mainWindow.webContents) {
     mainWindow.webContents.send('archive-updated', paths);
@@ -3321,8 +2827,10 @@ ipcMain.on('archive-updated', (event, paths) => {
 });
 
 ipcMain.on('archive-pin-updated', (event, pin) => {
-  if (playerWindow && !playerWindow.isDestroyed() && event.sender !== playerWindow.webContents) {
-    playerWindow.webContents.send('archive-pin-updated', pin);
+  for (const pWin of getActivePlayerWindows()) {
+    if (pWin && !pWin.isDestroyed() && event.sender !== pWin.webContents) {
+      pWin.webContents.send('archive-pin-updated', pin);
+    }
   }
   if (mainWindow && !mainWindow.isDestroyed() && event.sender !== mainWindow.webContents) {
     mainWindow.webContents.send('archive-pin-updated', pin);
@@ -3347,8 +2855,10 @@ ipcMain.handle('save-archive-data', async (event, data) => {
     if (data.archivePaths !== undefined) existing.archivePaths = data.archivePaths;
     if (data.archivePin !== undefined) {
       existing.archivePin = data.archivePin;
-      if (playerWindow && !playerWindow.isDestroyed() && event.sender !== playerWindow.webContents) {
-        playerWindow.webContents.send('archive-pin-updated', data.archivePin);
+      for (const pWin of getActivePlayerWindows()) {
+        if (pWin && !pWin.isDestroyed() && event.sender !== pWin.webContents) {
+          pWin.webContents.send('archive-pin-updated', data.archivePin);
+        }
       }
       if (mainWindow && !mainWindow.isDestroyed() && event.sender !== mainWindow.webContents) {
         mainWindow.webContents.send('archive-pin-updated', data.archivePin);
@@ -3852,6 +3362,18 @@ ipcMain.handle('install-browser-integration', async () => {
 });
 
 app.whenReady().then(() => {
+  initPlayerManager({
+    getAppUrl,
+    getIconPath,
+    ensurePlayerShortcut,
+    registerMediaFolder,
+    isDev
+  });
+  initConverterManager({
+    getMainWindow: () => mainWindow,
+    getActivePlayerWindows: () => Array.from(getActivePlayerWindows())
+  });
+
   ensurePlayerShortcut();
   loadSettings();
   loadDirCache();
@@ -3918,7 +3440,7 @@ app.whenReady().then(() => {
   // Initialize download manager
   initDownloadManager(
     () => mainWindow,
-    () => playerWindow,
+    () => getLastFocusedPlayerWindow(),
     settings
   );
 
@@ -3954,5 +3476,5 @@ app.on('open-file', (event, rawFilePath) => {
   const filePath = cleanArgPath(rawFilePath) || rawFilePath;
   const filename = path.basename(filePath);
   registerMediaFolder(filePath);
-  openPlayerWindow(filePath, filename, { newWindow: activePlayerWindows.size > 0 });
+  openPlayerWindow(filePath, filename, { newWindow: false });
 });

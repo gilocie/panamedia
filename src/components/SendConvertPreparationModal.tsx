@@ -60,19 +60,18 @@ export function SendConvertPreparationModal({
   onBack,
   onClose,
 }: SendConvertPreparationModalProps) {
-  const initialFiles = queuedFiles && queuedFiles.length > 0 ? queuedFiles : (fileName && fileName !== 'media' ? [fileName] : []);
   const [localQueue, setLocalQueue] = useState<string[]>(() => {
     let saved: string[] = [];
     try {
       const parsed = JSON.parse(localStorage.getItem('converter_queue') || '[]');
       if (Array.isArray(parsed)) saved = parsed;
     } catch (e) {}
+    if (saved.length > 0) return saved;
     const incoming = queuedFiles && queuedFiles.length > 0 ? queuedFiles : (fileName && fileName !== 'media' ? [fileName] : []);
-    const merged = Array.from(new Set([...saved, ...incoming]));
-    if (merged.length > 0) {
-      localStorage.setItem('converter_queue', JSON.stringify(merged));
+    if (incoming.length > 0) {
+      localStorage.setItem('converter_queue', JSON.stringify(incoming));
     }
-    return merged.length > 0 ? merged : initialFiles;
+    return incoming;
   });
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
 
@@ -99,7 +98,8 @@ export function SendConvertPreparationModal({
       saved = JSON.parse(localStorage.getItem('converter_media_types') || '{}');
     } catch (e) {}
     const map: Record<string, 'video' | 'audio'> = { ...saved };
-    initialFiles.forEach(f => {
+    const queueList = localQueue && localQueue.length > 0 ? localQueue : (queuedFiles || []);
+    queueList.forEach(f => {
       if (!map[f]) {
         map[f] = isVideoFile(f) ? 'video' : 'audio';
       }
@@ -126,27 +126,23 @@ export function SendConvertPreparationModal({
     date: string;
   }>>([]);
 
-  // Sync if queuedFiles prop changes: append newly added files under previous ones and keep stored types
+  // Sync if queuedFiles prop changes: only append files that are genuinely new
   useEffect(() => {
-    if (queuedFiles && queuedFiles.length > 0) {
-      setLocalQueue(prev => {
-        const next = Array.from(new Set([...prev, ...queuedFiles]));
-        localStorage.setItem('converter_queue', JSON.stringify(next));
-        return next;
-      });
-      setMediaTypes(prev => {
-        let saved: Record<string, 'video' | 'audio'> = {};
-        try {
-          saved = JSON.parse(localStorage.getItem('converter_media_types') || '{}');
-        } catch (e) {}
-        const next = { ...saved, ...prev };
-        queuedFiles.forEach(f => {
-          if (!next[f]) next[f] = isVideoFile(f) ? 'video' : 'audio';
-        });
-        localStorage.setItem('converter_media_types', JSON.stringify(next));
-        return next;
-      });
-    }
+    if (!queuedFiles || queuedFiles.length === 0) return;
+    setLocalQueue(prev => {
+      let saved: string[] = [];
+      try {
+        const parsed = JSON.parse(localStorage.getItem('converter_queue') || '[]');
+        if (Array.isArray(parsed)) saved = parsed;
+      } catch (e) {}
+      // If we have saved queue, only add files if they were newly selected and aren't in saved
+      const base = saved.length > 0 ? saved : prev;
+      const trulyNew = queuedFiles.filter(f => !base.includes(f));
+      if (trulyNew.length === 0) return base;
+      const next = [...base, ...trulyNew];
+      localStorage.setItem('converter_queue', JSON.stringify(next));
+      return next;
+    });
   }, [queuedFiles]);
 
   // Format Presets - persisted across sessions & reboots

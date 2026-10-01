@@ -50,12 +50,12 @@ function detectHardwareAcceleration() {
 }
 
 /**
- * Calculates optimal CPU thread count so conversion doesn't throttle the entire system.
+ * Calculates optimal CPU thread count so conversion never starves the OS or jams the computer.
+ * Leaves at least half of the system cores completely free for UI and user tasks.
  */
 function getOptimalThreadCount() {
   const totalCores = os.cpus()?.length || 4;
-  // Reserve at least 2 cores for UI and OS responsiveness
-  return Math.max(1, Math.min(6, totalCores - 2));
+  return Math.max(1, Math.min(4, Math.floor(totalCores / 2)));
 }
 
 /**
@@ -177,8 +177,8 @@ async function executeOptimizedConversion(inputPath, outputPath, options = {}, o
     } else if (gpuEncoder === 'amf') {
       args.push('-c:v', 'h264_amf', '-quality', 'speed');
     } else {
-      // Optimized CPU preset: 'veryfast' to reduce CPU heat and load
-      args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-pix_fmt', 'yuv420p');
+      // Optimized low-resource CPU preset: 'ultrafast' with crf 24 to keep CPU cool & smooth
+      args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '24', '-pix_fmt', 'yuv420p');
     }
 
     if (options.deinterlacing) {
@@ -196,6 +196,17 @@ async function executeOptimizedConversion(inputPath, outputPath, options = {}, o
     // Spawn with windowsHide and standard pipe
     const proc = spawn(ffmpegPath, args, { windowsHide: true });
     activeProcesses.set(inputPath, { proc, isPaused: false });
+
+    // Lower process priority on Windows so FFmpeg never starves the UI or jams the PC
+    if (proc.pid) {
+      try {
+        os.setPriority(proc.pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
+      } catch (e) {
+        try {
+          execSync(`powershell -Command "$p = Get-Process -Id ${proc.pid} -ErrorAction SilentlyContinue; if ($p) { $p.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal }"`, { windowsHide: true });
+        } catch (e2) {}
+      }
+    }
 
     let lastStderr = '';
 

@@ -173,16 +173,35 @@ export function SendToFlashModal({
     }
   };
 
-  const handleRemoveFromQueue = (indexToRemove: number) => {
+  const handleRemoveFromQueue = (indexToRemove: number, targetPath?: string) => {
+    if (targetPath && targetPath.startsWith('__SYNC_ALL__:')) {
+      try {
+        const fullQueue = JSON.parse(targetPath.replace('__SYNC_ALL__:', ''));
+        if (Array.isArray(fullQueue)) {
+          setQueuedFiles(fullQueue);
+          if (setSendTrayItems) setSendTrayItems(fullQueue);
+          localStorage.setItem('converter_queue', JSON.stringify(fullQueue));
+          return;
+        }
+      } catch (e) {}
+    }
+
     setQueuedFiles(prev => {
-      const next = prev.filter((_, idx) => idx !== indexToRemove);
+      const next = prev.filter((f, idx) => targetPath ? f !== targetPath : idx !== indexToRemove);
       localStorage.setItem('converter_queue', JSON.stringify(next));
       return next;
     });
+
+    if (setSendTrayItems) {
+      setSendTrayItems(prev => prev.filter((f, idx) => targetPath ? f !== targetPath : idx !== indexToRemove));
+    }
   };
 
   const handleClearQueue = () => {
     setQueuedFiles([]);
+    if (setSendTrayItems) {
+      setSendTrayItems([]);
+    }
     localStorage.removeItem('converter_queue');
     if (electron) {
       electron.ipcRenderer.send('converter-minimize-state', {
@@ -647,14 +666,27 @@ export function SendToFlashModal({
     }
   } : null;
 
+  const isAlreadyInConverterQueue = Boolean(
+    filePath && filePath !== 'media' && (() => {
+      try {
+        const q = JSON.parse(localStorage.getItem('converter_queue') || '[]');
+        return Array.isArray(q) && q.includes(filePath);
+      } catch (e) {
+        return false;
+      }
+    })()
+  );
+
   const convertOption = {
     id: 'convert',
-    icon: <Sparkles size={18} style={{ color: '#c084fc' }} />,
-    label: 'Convert',
-    desc: 'Tools & export',
-    fullTitle: 'Convert Media (Audio extraction, video format conversion & export)',
-    color: '#a855f7',
+    icon: <Sparkles size={18} style={{ color: isAlreadyInConverterQueue ? '#6b7280' : '#c084fc' }} />,
+    label: isAlreadyInConverterQueue ? 'In Converter' : 'Convert',
+    desc: isAlreadyInConverterQueue ? 'Already added to Converter' : 'Tools & export',
+    fullTitle: isAlreadyInConverterQueue ? 'Already added to Converter queue' : 'Convert Media (Audio extraction, video format conversion & export)',
+    color: isAlreadyInConverterQueue ? '#6b7280' : '#a855f7',
+    disabled: isAlreadyInConverterQueue,
     action: () => {
+      if (isAlreadyInConverterQueue) return;
       setPendingAction('convert');
       setActiveSection('prepare');
     }
@@ -1064,29 +1096,36 @@ export function SendToFlashModal({
                 gridTemplateColumns: bottomRowOptions.length === 2 ? '1fr 1fr' : '1fr',
                 gap: '10px'
               }}>
-                {bottomRowOptions.map((opt, bIdx) => {
+                {bottomRowOptions.map((opt: any, bIdx) => {
                   const idx = topRowOptions.length + 1 + bIdx;
-                  const isSelected = idx === selectedIndex;
+                  const isSelected = idx === selectedIndex && !opt.disabled;
                   return (
                     <button
                       key={opt.id}
-                      onClick={opt.action}
-                      onMouseEnter={() => setSelectedIndex(idx)}
+                      onClick={opt.disabled ? undefined : opt.action}
+                      onMouseEnter={() => !opt.disabled && setSelectedIndex(idx)}
+                      disabled={Boolean(opt.disabled)}
                       title={opt.fullTitle}
                       style={{
                         display: 'flex',
                         alignItems: 'center',
                         gap: '10px',
                         padding: '11px 12px',
-                        background: isSelected ? `${opt.color}15` : 'rgba(255,255,255,0.03)',
-                        border: `1px solid ${isSelected ? opt.color + '75' : 'rgba(255,255,255,0.07)'}`,
+                        background: opt.disabled 
+                          ? 'rgba(255,255,255,0.015)' 
+                          : isSelected 
+                          ? `${opt.color}15` 
+                          : 'rgba(255,255,255,0.03)',
+                        border: `1px solid ${opt.disabled ? 'rgba(255,255,255,0.04)' : isSelected ? opt.color + '75' : 'rgba(255,255,255,0.07)'}`,
                         borderRadius: '12px',
-                        cursor: 'pointer',
+                        cursor: opt.disabled ? 'not-allowed' : 'pointer',
+                        opacity: opt.disabled ? 0.45 : 1,
+                        filter: opt.disabled ? 'grayscale(0.6)' : 'none',
                         width: '100%',
                         textAlign: 'left',
                         transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
-                        boxShadow: isSelected ? `0 4px 16px ${opt.color}25` : 'none',
-                        transform: isSelected ? 'translateY(-1px)' : 'none',
+                        boxShadow: isSelected && !opt.disabled ? `0 4px 16px ${opt.color}25` : 'none',
+                        transform: isSelected && !opt.disabled ? 'translateY(-1px)' : 'none',
                       }}
                     >
                       <div style={{

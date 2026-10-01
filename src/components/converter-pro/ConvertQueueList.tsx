@@ -444,27 +444,28 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
                           }
                         }}
                         style={{
-                          width: '26px',
-                          height: '26px',
+                          padding: '4px 9px',
                           borderRadius: '6px',
                           background: isItemConverting
                             ? 'rgba(6, 182, 212, 0.2)'
                             : isItemPaused
                             ? 'rgba(245, 158, 11, 0.2)'
                             : isItemDone
-                            ? 'rgba(16, 185, 129, 0.2)'
-                            : 'rgba(59, 130, 246, 0.15)',
+                            ? 'rgba(16, 185, 129, 0.15)'
+                            : 'linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(6, 182, 212, 0.25) 100%)',
                           border: isItemConverting
                             ? '1px solid rgba(6, 182, 212, 0.6)'
                             : isItemPaused
                             ? '1px solid rgba(245, 158, 11, 0.6)'
                             : isItemDone
-                            ? '1px solid rgba(16, 185, 129, 0.5)'
-                            : '1px solid rgba(59, 130, 246, 0.4)',
-                          color: isItemDone ? '#10b981' : isItemPaused ? '#fbbf24' : '#67e8f9',
+                            ? '1px solid rgba(16, 185, 129, 0.4)'
+                            : '1px solid rgba(99, 102, 241, 0.5)',
+                          color: isItemDone ? '#34d399' : isItemPaused ? '#fbbf24' : isItemConverting ? '#67e8f9' : '#fff',
                           display: 'flex',
                           alignItems: 'center',
-                          justifyContent: 'center',
+                          gap: '4px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
                           cursor: isItemDone ? 'default' : 'pointer',
                           transition: 'all 0.15s ease',
                           flexShrink: 0
@@ -476,15 +477,26 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
                             ? 'Resume conversion for this file'
                             : isItemDone
                             ? 'Converted successfully'
-                            : 'Convert this single file'
+                            : 'Start conversion for this file'
                         }
                       >
                         {isItemConverting ? (
-                          <Pause size={12} fill="currentColor" />
+                          <>
+                            <Pause size={10} fill="currentColor" />
+                            <span>Pause</span>
+                          </>
+                        ) : isItemPaused ? (
+                          <>
+                            <Play size={10} fill="currentColor" />
+                            <span>Resume</span>
+                          </>
                         ) : isItemDone ? (
-                          <CheckCircle2 size={12} />
+                          <>
+                            <CheckCircle2 size={11} />
+                            <span>Done</span>
+                          </>
                         ) : (
-                          <Play size={12} fill="currentColor" style={{ marginLeft: '1px' }} />
+                          <span>Start</span>
                         )}
                       </button>
                     );
