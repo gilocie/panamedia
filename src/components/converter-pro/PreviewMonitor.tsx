@@ -37,6 +37,16 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
   const isVideo = isVideoFile(currentFile);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [activePort, setActivePort] = useState<number>(streamingPort || 52321);
+
+  useEffect(() => {
+    if (electron) {
+      electron.ipcRenderer.invoke('get-streaming-port').then((p: number) => {
+        if (p) setActivePort(p);
+      }).catch(() => {});
+    }
+  }, [streamingPort]);
+
   const [isPlaying, setIsPlaying] = useState<boolean>(false); // PAUSED BY DEFAULT
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
@@ -295,7 +305,7 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
         {isVideo ? (
           <video
             ref={videoRef}
-            src={`http://localhost:${streamingPort}/stream?path=${encodeURIComponent(currentFile)}`}
+            src={`http://localhost:${activePort}/stream?path=${encodeURIComponent(currentFile)}`}
             style={{
               width: '100%',
               height: '100%',

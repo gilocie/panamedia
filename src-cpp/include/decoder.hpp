@@ -15,6 +15,7 @@ namespace Panamedia {
         void play();
         void pause();
         void stop();
+        void close();
         void seek(double seconds);
         void setSpeed(double speed);
 

@@ -1,0 +1,10 @@
+CompileFlags:
+  Add:
+    - -std=c++17
+    - -D_MSVC_LANG=201703L
+    - -D_HAS_CXX17=1
+    - -D_CRT_SECURE_NO_WARNINGS
+    - -DWIN32_LEAN_AND_MEAN
+    - -DNOMINMAX
+    - -Isrc-cpp/include
+    - -Isrc-cpp/build/_deps/json-src/include

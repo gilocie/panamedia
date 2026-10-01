@@ -49,6 +49,7 @@ namespace Panamedia {
             int width = 0;
             int height = 0;
             bool hasAudio = false;
+            bool hasSubtitles = false;
         };
 
         SafeProbeResult probeWithFFmpeg(const std::string& filePath);

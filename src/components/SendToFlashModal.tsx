@@ -223,14 +223,16 @@ export function SendToFlashModal({
   // Sync minimize state and conversion progress with PlayerTitleBar
   useEffect(() => {
     if (!electron) return;
-    if (isMinimized && activeSection !== 'prepare') {
+    if (isMinimized) {
       const activeFile = allFiles[currentFileIndex] || filePath || '';
       const cleanFileName = activeFile ? activeFile.split(/[/\\]/).pop() : '';
+      const isConvertingNow = copyStatus === 'copying' || isConvertingBatch;
+      const progressVal = Math.round(copyProgress <= 1 && copyProgress > 0 ? copyProgress * 100 : copyProgress);
       electron.ipcRenderer.send('converter-minimize-state', {
         minimized: true,
-        converting: copyStatus === 'copying',
+        converting: isConvertingNow,
         isPaused,
-        progress: Math.round(copyProgress * 100),
+        progress: progressVal,
         currentFile: cleanFileName,
         queueCount: allFiles.length,
         status: copyStatus,
@@ -240,12 +242,12 @@ export function SendToFlashModal({
           ? 'Conversion Complete!'
           : copyStatus === 'failed'
           ? 'Conversion Failed'
-          : copyStatus === 'copying'
-          ? (allFiles.length > 1 ? `Converting [${currentFileIndex + 1}/${allFiles.length}]` : 'Converting Media...')
+          : isConvertingNow
+          ? (allFiles.length > 1 ? `Converting [${currentFileIndex + 1}/${allFiles.length}] (${progressVal}%)` : `Converting... ${progressVal}%`)
           : 'Converter Pro'
       });
     }
-  }, [isMinimized, copyProgress, copyStatus, currentFileIndex, allFiles, filePath, isPaused, activeSection]);
+  }, [isMinimized, copyProgress, copyStatus, currentFileIndex, allFiles, filePath, isPaused, isConvertingBatch]);
 
   useEffect(() => {
     if (!electron) { 

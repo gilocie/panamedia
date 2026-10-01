@@ -1,16 +1,15 @@
-#ifndef NOMINMAX
-#define NOMINMAX
+#if defined(_MSC_VER) && !defined(_HAS_CXX17)
+#define _HAS_CXX17 1
+#endif
+#if defined(_MSC_VER) && (!defined(_MSVC_LANG) || _MSVC_LANG < 201703L)
+#undef _MSVC_LANG
+#define _MSVC_LANG 201703L
 #endif
 
-#include "http_server.hpp"
+#include "../include/http_server.hpp"
 #include <iostream>
+#include <string>
 #include <sstream>
-
-extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libavutil/pixdesc.h>
-}
 #include <fstream>
 #include <vector>
 #include <filesystem>
@@ -19,6 +18,10 @@ extern "C" {
 #include <regex>
 #include <unordered_map>
 #include <mutex>
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -519,52 +522,18 @@ namespace Panamedia {
     }
 
     bool HTTPServer::hasInternalSubtitles(const std::string& filePath) {
-        AVFormatContext* fmtCtx = nullptr;
-        if (avformat_open_input(&fmtCtx, filePath.c_str(), nullptr, nullptr) < 0) {
-            return false;
-        }
-        if (avformat_find_stream_info(fmtCtx, nullptr) < 0) {
-            avformat_close_input(&fmtCtx);
-            return false;
-        }
-        bool hasSubs = false;
-        for (unsigned int i = 0; i < fmtCtx->nb_streams; i++) {
-            if (fmtCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE) {
-                const char* codecName = avcodec_get_name(fmtCtx->streams[i]->codecpar->codec_id);
-                if (codecName) {
-                    std::string codecStr(codecName);
-                    // Only support text-based subtitles inside the subtitles filter
-                    if (codecStr == "subrip" || codecStr == "srt" || codecStr == "ass" || codecStr == "ssa" || codecStr == "mov_text" || codecStr == "webvtt") {
-                        hasSubs = true;
-                        break;
-                    }
-                }
-            }
-        }
-        avformat_close_input(&fmtCtx);
-        return hasSubs;
+        SafeProbeResult res = probeWithFFmpeg(filePath);
+        return res.hasSubtitles;
     }
 
     bool HTTPServer::getVideoResolution(const std::string& filePath, int& width, int& height) {
-        AVFormatContext* fmtCtx = nullptr;
-        if (avformat_open_input(&fmtCtx, filePath.c_str(), nullptr, nullptr) < 0) {
-            return false;
+        SafeProbeResult res = probeWithFFmpeg(filePath);
+        if (res.width > 0 && res.height > 0) {
+            width = res.width;
+            height = res.height;
+            return true;
         }
-        if (avformat_find_stream_info(fmtCtx, nullptr) < 0) {
-            avformat_close_input(&fmtCtx);
-            return false;
-        }
-        bool found = false;
-        for (unsigned int i = 0; i < fmtCtx->nb_streams; i++) {
-            if (fmtCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-                width = fmtCtx->streams[i]->codecpar->width;
-                height = fmtCtx->streams[i]->codecpar->height;
-                found = true;
-                break;
-            }
-        }
-        avformat_close_input(&fmtCtx);
-        return found;
+        return false;
     }
 
     HTTPServer::SafeProbeResult HTTPServer::probeWithFFmpeg(const std::string& filePath) {

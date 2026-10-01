@@ -211,22 +211,34 @@ export function SendConvertPreparationModal({
     };
   }, []);
 
+  // Engine Settings
+  const [useHwAccel, setUseHwAccel] = useState<boolean>(() => localStorage.getItem('converter_useHwAccel') !== 'false');
+  useEffect(() => {
+    localStorage.setItem('converter_useHwAccel', String(useHwAccel));
+  }, [useHwAccel]);
+
   // Sync minimized state to Electron and Player Titlebar progress card
   useEffect(() => {
     if (!electron) return;
     if (isMinimized) {
-      const activeFile = (localQueue[selectedFileIdx] || fileName).split(/[\\/]/).pop() || '';
+      const activeFile = (activeConvertingFile || localQueue[selectedFileIdx] || fileName || '').split(/[\\/]/).pop() || '';
+      const displayProgress = Math.round(conversionProgress <= 1 && conversionProgress > 0 ? conversionProgress * 100 : conversionProgress);
       electron.ipcRenderer.send('converter-minimize-state', {
         minimized: true,
-        converting: false,
-        isPaused: false,
-        progress: 0,
+        converting: isConverting,
+        isPaused: isPaused,
+        progress: displayProgress,
         queueCount: localQueue.length,
         currentFile: activeFile,
-        statusText: 'Converter Pro'
+        statusText: isConverting
+          ? (isPaused ? 'Conversion Paused' : (localQueue.length > 1 ? `Converting (${displayProgress}%)` : `Converting... ${displayProgress}%`))
+          : (localQueue.length > 1 ? `${localQueue.length} files queued` : 'Ready to Convert'),
+        useHwAccel: useHwAccel,
+        queue: localQueue,
+        mediaTypes: mediaTypes
       });
     }
-  }, [isMinimized, localQueue.length, selectedFileIdx, fileName]);
+  }, [isMinimized, isConverting, isPaused, conversionProgress, activeConvertingFile, localQueue, selectedFileIdx, fileName, useHwAccel, mediaTypes]);
 
   // Listen for restore requests from Player Header progress card
   useEffect(() => {
@@ -240,16 +252,41 @@ export function SendConvertPreparationModal({
     };
   }, []);
 
-  // Engine Settings
-  const [useHwAccel, setUseHwAccel] = useState<boolean>(() => localStorage.getItem('converter_useHwAccel') !== 'false');
-  useEffect(() => {
-    localStorage.setItem('converter_useHwAccel', String(useHwAccel));
-  }, [useHwAccel]);
+  const handleMinimizeModal = () => {
+    setIsMinimized(true);
+    if (onMinimizeChange) onMinimizeChange(true);
+    const activeFile = (activeConvertingFile || localQueue[selectedFileIdx] || fileName || '').split(/[\\/]/).pop() || '';
+    const displayProgress = Math.round(conversionProgress <= 1 && conversionProgress > 0 ? conversionProgress * 100 : conversionProgress);
+    if (electron) {
+      electron.ipcRenderer.send('converter-minimize-state', {
+        minimized: true,
+        converting: isConverting,
+        isPaused: isPaused,
+        progress: displayProgress,
+        queueCount: localQueue.length,
+        currentFile: activeFile,
+        statusText: isConverting
+          ? (isPaused ? 'Conversion Paused' : (localQueue.length > 1 ? `Converting (${displayProgress}%)` : `Converting... ${displayProgress}%`))
+          : (localQueue.length > 1 ? `${localQueue.length} files queued` : 'Ready to Convert'),
+        useHwAccel: useHwAccel,
+        queue: localQueue,
+        mediaTypes: mediaTypes
+      });
+      electron.ipcRenderer.send('player-remote-command', 'play');
+    }
+  };
 
   const handleDone = () => {
-    const activeFile = (localQueue[selectedFileIdx] || fileName).split(/[\\/]/).pop() || '';
     localStorage.setItem('converter_queue', JSON.stringify(localQueue));
     localStorage.setItem('converter_media_types', JSON.stringify(mediaTypes));
+    
+    // If conversion is actively running, never unmount or kill the conversion process!
+    if (isConverting) {
+      handleMinimizeModal();
+      return;
+    }
+
+    const activeFile = (localQueue[selectedFileIdx] || fileName).split(/[\\/]/).pop() || '';
     if (electron) {
       electron.ipcRenderer.send('converter-minimize-state', {
         minimized: true,
@@ -624,9 +661,9 @@ export function SendConvertPreparationModal({
         isExpanded={isExpanded}
         useHwAccel={useHwAccel}
         onToggleExpand={() => setIsExpanded(prev => !prev)}
-        onMinimize={handleDone}
+        onMinimize={handleMinimizeModal}
         onBack={handleDone}
-        onClose={handleDone}
+        onClose={isConverting ? handleMinimizeModal : (onClose || handleDone)}
       />
 
       {/* ─── 2. MAIN CENTER WORKSPACE (Split Left 65% / Right 35%) ─── */}

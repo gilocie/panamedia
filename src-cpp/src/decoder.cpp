@@ -28,6 +28,11 @@ namespace Panamedia {
         m_isPlaying = false;
     }
 
+    void Decoder::close() {
+        stop();
+        m_currentFile.clear();
+    }
+
     void Decoder::seek(double seconds) {
         // Seek implementation placeholder
         (void)seconds;
