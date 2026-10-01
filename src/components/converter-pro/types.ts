@@ -26,6 +26,14 @@ export interface SendConvertPreparationModalProps {
   onProceed: (options: SendConvertOptions) => void;
   onDirectSend?: (target: 'drive' | 'sendtray' | string[]) => void;
   onMinimizeChange?: (isMinimized: boolean) => void;
+  isConverting?: boolean;
+  isPaused?: boolean;
+  conversionProgress?: number;
+  activeConvertingFile?: string;
+  conversionStatus?: Record<string, { status: 'idle' | 'converting' | 'paused' | 'completed' | 'failed'; progress: number; error?: string }>;
+  onTogglePauseConversion?: () => void;
+  onConvertSingleFile?: (filePath: string) => void;
+  onTogglePauseSingleFile?: (filePath: string) => void;
   onBack: () => void;
   onClose: () => void;
 }

@@ -94,7 +94,7 @@ const {
 } = require('./panamedia-downloader/youtube.cjs');
 const { initDownloadManager, cleanUpDownloadManager, getDownloadsList, removeDownloadByPath } = require('./panamedia-downloader/downloadManager.cjs');
 const { getUniversalWebFormats } = require('./panamedia-downloader/web-downloader/webExtractor.cjs');
-const { convertAndSendToDrive, convertMediaFile } = require('./panamedia-downloader/mediaConverter.cjs');
+const { convertAndSendToDrive, convertMediaFile, togglePauseProcess } = require('./panamedia-downloader/mediaConverter.cjs');
 
 // ─── Production vs Development URL resolution ─────────────────────────────────
 function getAppUrl(queryString = '') {
@@ -2444,6 +2444,15 @@ ipcMain.handle('convert-media-file', async (event, { filePath, targetDir, option
       status: 'failed',
       error: err.message
     });
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('converter-toggle-pause', async (_event, filePath) => {
+  try {
+    const isPaused = togglePauseProcess(filePath);
+    return { success: true, isPaused };
+  } catch (err) {
     return { success: false, error: err.message };
   }
 });

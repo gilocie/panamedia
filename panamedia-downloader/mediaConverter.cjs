@@ -51,15 +51,16 @@ function parseTimeString(tStr) {
   return 0;
 }
 
+const { executeOptimizedConversion, togglePauseProcess } = require('./conversion-engine/hardwareEngine.cjs');
+
 /**
- * Extracts audio or converts video using FFmpeg with real-time progress callbacks.
- * 
- * @param {string} inputPath Source file path
- * @param {string} outputPath Target file path
- * @param {object} options { mode: 'extract_audio' | 'convert_video', format: 'mp3'|'aac'|'m4a'|'wav', bitrate: '128k'|'192k'|'256k'|'320k' }
- * @param {function} onProgress Callback ({ progress: 0..1, status: 'converting'|'completed'|'failed', error?: string })
+ * Extracts audio or converts video using Hardware-accelerated / resource-optimized engine.
  */
 async function convertMediaFile(inputPath, outputPath, options = {}, onProgress = () => {}) {
+  return executeOptimizedConversion(inputPath, outputPath, options, onProgress);
+}
+
+async function convertMediaFileLegacy(inputPath, outputPath, options = {}, onProgress = () => {}) {
   if (!fs.existsSync(inputPath)) {
     throw new Error(`Source file does not exist: ${inputPath}`);
   }
@@ -252,5 +253,6 @@ function copyDirectToDrive(src, dest, onProgress) {
 module.exports = {
   probeDuration,
   convertMediaFile,
-  convertAndSendToDrive
+  convertAndSendToDrive,
+  togglePauseProcess
 };

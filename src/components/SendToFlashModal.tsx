@@ -83,6 +83,8 @@ export function SendToFlashModal({
   const [isMinimized, setIsMinimized] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const isPausedRef = useRef(false);
+  const [fileConversionMap, setFileConversionMap] = useState<Record<string, { status: 'idle' | 'converting' | 'paused' | 'completed' | 'failed'; progress: number; error?: string }>>({});
+  const [isConvertingBatch, setIsConvertingBatch] = useState(false);
 
   useEffect(() => {
     if ((window as any).__openConverterProDirect) {
@@ -237,6 +239,16 @@ export function SendToFlashModal({
     });
 
     const handleProgress = (_event: any, data: any) => {
+      if (data && data.filePath) {
+        setFileConversionMap(prev => ({
+          ...prev,
+          [data.filePath]: {
+            status: data.status || 'converting',
+            progress: typeof data.progress === 'number' ? data.progress : 0,
+            error: data.error
+          }
+        }));
+      }
       if (allFiles[currentFileIndex] && data.filePath === allFiles[currentFileIndex]) {
         setCopyProgress(data.progress);
         if (data.status === 'completed') {
@@ -332,8 +344,11 @@ export function SendToFlashModal({
     }
 
     if (!electron) return;
-    setActiveSection('sendtray_progress');
+    if (activeSection !== 'prepare') {
+      setActiveSection('sendtray_progress');
+    }
     setCopyStatus('copying');
+    setIsConvertingBatch(true);
     setCopyProgress(0.01);
     setCurrentFileIndex(0);
     setErrorMsg('');
@@ -346,6 +361,10 @@ export function SendToFlashModal({
         setCurrentFileIndex(i);
         const target = allFiles[i];
         setCopyProgress(0.05);
+        setFileConversionMap(prev => ({
+          ...prev,
+          [target]: { status: 'converting', progress: 0.05 }
+        }));
 
         // Record persistent event state so status is retained across power loss / restarts
         try {
@@ -383,6 +402,10 @@ export function SendToFlashModal({
             });
             if (!res.success) throw new Error(res.error || 'Conversion to drive failed');
           }
+          setFileConversionMap(prev => ({
+            ...prev,
+            [target]: { status: 'completed', progress: 1.0 }
+          }));
         } else {
           // Export to Sendtray or custom folder
           const targetDir = dest === 'folder' ? options.exportCustomPath : undefined;
@@ -400,6 +423,10 @@ export function SendToFlashModal({
               handleMoveFileToSendtray(res.outputPath, options.targetFolderId);
             }
             setCopyProgress(1);
+            setFileConversionMap(prev => ({
+              ...prev,
+              [target]: { status: 'completed', progress: 1.0, outputPath: res.outputPath }
+            }));
 
             // Save completed event
             try {
@@ -415,11 +442,17 @@ export function SendToFlashModal({
           } else {
             setCopyStatus('failed');
             setErrorMsg(res.error || `Conversion failed for ${target.split(/[\\/]/).pop()}`);
+            setFileConversionMap(prev => ({
+              ...prev,
+              [target]: { status: 'failed', progress: 0, error: res.error }
+            }));
+            setIsConvertingBatch(false);
             return;
           }
         }
       }
       setCopyStatus('completed');
+      setIsConvertingBatch(false);
       try {
         localStorage.removeItem('converter_active_progress');
         localStorage.setItem('converter_last_event', JSON.stringify({
@@ -428,11 +461,14 @@ export function SendToFlashModal({
           totalFiles: allFiles.length
         }));
       } catch (e) {}
-      setTimeout(() => {
-        onClose();
-      }, 1500);
+      if (activeSection !== 'prepare') {
+        setTimeout(() => {
+          onClose();
+        }, 1500);
+      }
     } catch (err: any) {
       setCopyStatus('failed');
+      setIsConvertingBatch(false);
       setErrorMsg(err.message || 'Conversion failed');
       try {
         localStorage.setItem('converter_active_progress', JSON.stringify({
@@ -442,6 +478,84 @@ export function SendToFlashModal({
         }));
       } catch (e) {}
     }
+  };
+
+  const handleTogglePauseConversion = async () => {
+    const nextPaused = !isPausedRef.current;
+    isPausedRef.current = nextPaused;
+    setIsPaused(nextPaused);
+    const currFile = allFiles[currentFileIndex];
+    if (currFile && electron) {
+      await electron.ipcRenderer.invoke('converter-toggle-pause', currFile);
+      setFileConversionMap(prev => {
+        const item = prev[currFile];
+        if (!item) return prev;
+        return {
+          ...prev,
+          [currFile]: { ...item, status: nextPaused ? 'paused' : 'converting' }
+        };
+      });
+    }
+  };
+
+  const handleConvertSingleFile = async (targetFile: string) => {
+    if (!electron || !targetFile) return;
+    setIsConvertingBatch(true);
+    setCopyStatus('copying');
+    setFileConversionMap(prev => ({
+      ...prev,
+      [targetFile]: { status: 'converting', progress: 0.05 }
+    }));
+    try {
+      const isVid = isVideoFile(targetFile);
+      let mType = 'video';
+      try {
+        const saved = JSON.parse(localStorage.getItem('converter_media_types') || '{}');
+        mType = saved[targetFile] || (isVid ? 'video' : 'audio');
+      } catch (e) {
+        mType = isVid ? 'video' : 'audio';
+      }
+      const res = await electron.ipcRenderer.invoke('convert-media-file', {
+        filePath: targetFile,
+        options: {
+          mode: mType === 'video' ? 'convert_video' : 'extract_audio',
+          format: mType === 'video' ? 'mp4' : 'mp3',
+          bitrate: mType === 'video' ? '1080p' : '320k'
+        }
+      });
+      if (res.success) {
+        setFileConversionMap(prev => ({
+          ...prev,
+          [targetFile]: { status: 'completed', progress: 1.0, outputPath: res.outputPath }
+        }));
+      } else {
+        setFileConversionMap(prev => ({
+          ...prev,
+          [targetFile]: { status: 'failed', progress: 0, error: res.error }
+        }));
+      }
+    } catch (err: any) {
+      setFileConversionMap(prev => ({
+        ...prev,
+        [targetFile]: { status: 'failed', progress: 0, error: err?.message || 'Error' }
+      }));
+    } finally {
+      setIsConvertingBatch(false);
+    }
+  };
+
+  const handleTogglePauseSingleFile = async (targetFile: string) => {
+    if (!electron || !targetFile) return;
+    const res = await electron.ipcRenderer.invoke('converter-toggle-pause', targetFile);
+    const isNowPaused = res?.isPaused ?? !isPausedRef.current;
+    setFileConversionMap(prev => {
+      const curr = prev[targetFile];
+      if (!curr) return prev;
+      return {
+        ...prev,
+        [targetFile]: { ...curr, status: isNowPaused ? 'paused' : 'converting' }
+      };
+    });
   };
 
   const handleMoveToSendtray = (folderId?: string) => {
@@ -704,6 +818,14 @@ export function SendToFlashModal({
           onRemoveFile={handleRemoveFromQueue}
           onClearQueue={handleClearQueue}
           drives={drives}
+          isConverting={copyStatus === 'copying' || isConvertingBatch}
+          isPaused={isPaused}
+          conversionProgress={copyProgress}
+          activeConvertingFile={allFiles[currentFileIndex]}
+          conversionStatus={fileConversionMap}
+          onTogglePauseConversion={handleTogglePauseConversion}
+          onConvertSingleFile={handleConvertSingleFile}
+          onTogglePauseSingleFile={handleTogglePauseSingleFile}
           onProceed={handleProceedFromPreparation}
           onDirectSend={(target) => {
             if (Array.isArray(target) && target.length > 0) {

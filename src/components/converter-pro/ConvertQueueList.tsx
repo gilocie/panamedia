@@ -1,7 +1,8 @@
 import React from 'react';
 import { 
   Film, Music, Plus, X, 
-  CheckSquare, Square, Trash2, ArrowRight
+  CheckSquare, Square, Trash2, ArrowRight,
+  Play, Pause, CheckCircle2
 } from 'lucide-react';
 import { isVideoFile, type VideoFormatPreset, type AudioFormatPreset } from './types';
 
@@ -15,6 +16,9 @@ interface ConvertQueueListProps {
   activeAudioPreset: AudioFormatPreset;
   videoQuality: string;
   audioBitrate: string;
+  conversionStatus?: Record<string, { status: 'idle' | 'converting' | 'paused' | 'completed' | 'failed'; progress: number; error?: string }>;
+  onConvertSingleFile?: (filePath: string) => void;
+  onTogglePauseSingleFile?: (filePath: string) => void;
   onSelectFile: (idx: number) => void;
   onToggleSelectAll: () => void;
   onToggleSelectCard: (idx: number, e: React.MouseEvent) => void;
@@ -35,6 +39,9 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
   activeAudioPreset,
   videoQuality,
   audioBitrate,
+  conversionStatus = {},
+  onConvertSingleFile,
+  onTogglePauseSingleFile,
   onSelectFile,
   onToggleSelectAll,
   onToggleSelectCard,
@@ -353,35 +360,135 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
 
                     <ArrowRight size={12} style={{ color: 'rgba(255, 255, 255, 0.3)' }} />
 
-                    {/* Target Format Spec Pill */}
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px'
-                    }}>
-                      <span style={{
-                        fontSize: '10px',
-                        fontWeight: 700,
-                        background: isCardVideo ? 'rgba(99, 102, 241, 0.2)' : 'rgba(236, 72, 153, 0.2)',
-                        border: isCardVideo ? '1px solid rgba(99, 102, 241, 0.45)' : '1px solid rgba(236, 72, 153, 0.45)',
-                        color: isCardVideo ? '#c7d2fe' : '#fbcfe8',
-                        padding: '1px 6px',
-                        borderRadius: '4px'
+                    {/* Target Format Spec Pill + Progress Bar (Green underline area from user mockup) */}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: '150px' }}>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
                       }}>
-                        {isCardVideo ? activeVideoPreset.codec : `${activeAudioPreset.label} • ${audioBitrate}`}
-                      </span>
-                      <span style={{
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        background: 'rgba(255, 255, 255, 0.05)',
-                        color: '#cbd5e1',
-                        padding: '1px 6px',
-                        borderRadius: '4px'
-                      }}>
-                        {isCardVideo ? videoQuality : 'Hi-Fi Audio'}
-                      </span>
+                        <span style={{
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          background: isCardVideo ? 'rgba(99, 102, 241, 0.2)' : 'rgba(236, 72, 153, 0.2)',
+                          border: isCardVideo ? '1px solid rgba(99, 102, 241, 0.45)' : '1px solid rgba(236, 72, 153, 0.45)',
+                          color: isCardVideo ? '#c7d2fe' : '#fbcfe8',
+                          padding: '1px 6px',
+                          borderRadius: '4px'
+                        }}>
+                          {isCardVideo ? activeVideoPreset.codec : `${activeAudioPreset.label} • ${audioBitrate}`}
+                        </span>
+                        <span style={{
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          background: 'rgba(255, 255, 255, 0.05)',
+                          color: '#cbd5e1',
+                          padding: '1px 6px',
+                          borderRadius: '4px'
+                        }}>
+                          {isCardVideo ? videoQuality : 'Hi-Fi Audio'}
+                        </span>
+                      </div>
+
+                      {/* Dynamic Progress Bar under format pill */}
+                      {(() => {
+                        const fileStatus = conversionStatus[fPath];
+                        if (fileStatus && (fileStatus.status === 'converting' || fileStatus.status === 'paused' || fileStatus.status === 'completed')) {
+                          return (
+                            <div style={{ width: '100%', marginTop: '3px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', marginBottom: '2px' }}>
+                                <span style={{
+                                  fontWeight: 700,
+                                  color: fileStatus.status === 'completed' ? '#10b981' : fileStatus.status === 'paused' ? '#f59e0b' : '#38bdf8'
+                                }}>
+                                  {fileStatus.status === 'completed' ? 'Done' : fileStatus.status === 'paused' ? 'Paused' : `${Math.round(fileStatus.progress * 100)}%`}
+                                </span>
+                              </div>
+                              <div style={{ height: '4px', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '2px', overflow: 'hidden' }}>
+                                <div style={{
+                                  height: '100%',
+                                  width: `${Math.max(4, Math.round(fileStatus.progress * 100))}%`,
+                                  background: fileStatus.status === 'completed' 
+                                    ? 'linear-gradient(90deg, #10b981, #34d399)' 
+                                    : fileStatus.status === 'paused'
+                                    ? 'linear-gradient(90deg, #f59e0b, #d97706)'
+                                    : 'linear-gradient(90deg, #06b6d4, #8b5cf6, #ec4899)',
+                                  borderRadius: '2px',
+                                  transition: 'width 0.2s ease'
+                                }} />
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
                   </div>
+
+                  {/* Single File Action Button (Play / Pause / Convert) */}
+                  {(() => {
+                    const fileStatus = conversionStatus[fPath];
+                    const isItemConverting = fileStatus?.status === 'converting';
+                    const isItemPaused = fileStatus?.status === 'paused';
+                    const isItemDone = fileStatus?.status === 'completed';
+
+                    return (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isItemConverting || isItemPaused) {
+                            onTogglePauseSingleFile?.(fPath);
+                          } else if (!isItemDone) {
+                            onConvertSingleFile?.(fPath);
+                          }
+                        }}
+                        style={{
+                          width: '26px',
+                          height: '26px',
+                          borderRadius: '6px',
+                          background: isItemConverting
+                            ? 'rgba(6, 182, 212, 0.2)'
+                            : isItemPaused
+                            ? 'rgba(245, 158, 11, 0.2)'
+                            : isItemDone
+                            ? 'rgba(16, 185, 129, 0.2)'
+                            : 'rgba(59, 130, 246, 0.15)',
+                          border: isItemConverting
+                            ? '1px solid rgba(6, 182, 212, 0.6)'
+                            : isItemPaused
+                            ? '1px solid rgba(245, 158, 11, 0.6)'
+                            : isItemDone
+                            ? '1px solid rgba(16, 185, 129, 0.5)'
+                            : '1px solid rgba(59, 130, 246, 0.4)',
+                          color: isItemDone ? '#10b981' : isItemPaused ? '#fbbf24' : '#67e8f9',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: isItemDone ? 'default' : 'pointer',
+                          transition: 'all 0.15s ease',
+                          flexShrink: 0
+                        }}
+                        title={
+                          isItemConverting
+                            ? 'Pause conversion for this file'
+                            : isItemPaused
+                            ? 'Resume conversion for this file'
+                            : isItemDone
+                            ? 'Converted successfully'
+                            : 'Convert this single file'
+                        }
+                      >
+                        {isItemConverting ? (
+                          <Pause size={12} fill="currentColor" />
+                        ) : isItemDone ? (
+                          <CheckCircle2 size={12} />
+                        ) : (
+                          <Play size={12} fill="currentColor" style={{ marginLeft: '1px' }} />
+                        )}
+                      </button>
+                    );
+                  })()}
 
                   {/* Item Remove Button */}
                   <button
@@ -398,7 +505,8 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
                       alignItems: 'center',
                       justifyContent: 'center',
                       cursor: 'pointer',
-                      transition: 'all 0.15s ease'
+                      transition: 'all 0.15s ease',
+                      flexShrink: 0
                     }}
                     title="Remove from queue"
                     onMouseEnter={e => {

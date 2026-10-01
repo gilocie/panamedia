@@ -22,7 +22,9 @@ installer-ui/build/
 release/
 out/
 dist-electron/
+dist-installer/
 installer-ui/*.exe
+*.exe
 
 # Local environment and machine-specific files
 *.local

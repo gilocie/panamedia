@@ -49,6 +49,14 @@ export function SendConvertPreparationModal({
   onProceed,
   onDirectSend,
   onMinimizeChange,
+  isConverting = false,
+  isPaused = false,
+  conversionProgress = 0,
+  activeConvertingFile,
+  conversionStatus: externalConversionStatus = {},
+  onTogglePauseConversion,
+  onConvertSingleFile,
+  onTogglePauseSingleFile,
   onBack,
   onClose,
 }: SendConvertPreparationModalProps) {
@@ -651,6 +659,37 @@ export function SendConvertPreparationModal({
             audioOutputCount={convertedAudios.length}
           />
 
+          {/* Active In-Place Conversion Status Banner */}
+          {isConverting && (
+            <div style={{
+              padding: '6px 16px',
+              background: isPaused ? 'rgba(245, 158, 11, 0.15)' : 'rgba(6, 182, 212, 0.12)',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontSize: '11px',
+              flexShrink: 0
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{
+                  display: 'inline-block',
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  background: isPaused ? '#f59e0b' : '#06b6d4',
+                  boxShadow: isPaused ? '0 0 8px #f59e0b' : '0 0 10px #06b6d4'
+                }} />
+                <span style={{ color: isPaused ? '#fbbf24' : '#67e8f9', fontWeight: 600 }}>
+                  {isPaused ? 'Conversion Paused' : `Converting: ${activeConvertingFile ? activeConvertingFile.split(/[\\/]/).pop() : 'Processing...'}`}
+                </span>
+              </div>
+              <span style={{ fontWeight: 800, color: '#fff' }}>
+                {Math.round(conversionProgress * 100)}%
+              </span>
+            </div>
+          )}
+
           {/* Tab Views */}
           {activeMainTab === 'convert' ? (
             <ConvertQueueList
@@ -663,6 +702,9 @@ export function SendConvertPreparationModal({
               activeAudioPreset={activeAudioPreset}
               videoQuality={videoQuality}
               audioBitrate={audioBitrate}
+              conversionStatus={externalConversionStatus}
+              onConvertSingleFile={onConvertSingleFile}
+              onTogglePauseSingleFile={onTogglePauseSingleFile}
               onSelectFile={setSelectedFileIdx}
               onToggleSelectAll={handleToggleSelectAll}
               onToggleSelectCard={handleToggleSelectCard}
@@ -747,6 +789,9 @@ export function SendConvertPreparationModal({
         activeAudioPreset={activeAudioPreset}
         videoQuality={videoQuality}
         audioBitrate={audioBitrate}
+        isConverting={isConverting}
+        isPaused={isPaused}
+        onTogglePause={onTogglePauseConversion}
         onOpenFormatModal={(mode) => {
           setFormatModalMode(mode);
           setShowFormatModal(true);
