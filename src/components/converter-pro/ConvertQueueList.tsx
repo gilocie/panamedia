@@ -405,18 +405,30 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
                       {/* Dynamic Progress Bar under format pill */}
                       {(() => {
                         const fileStatus = conversionStatus[fPath];
-                        if (fileStatus && (fileStatus.status === 'converting' || fileStatus.status === 'paused' || fileStatus.status === 'completed')) {
+                        if (fileStatus && (fileStatus.status === 'converting' || fileStatus.status === 'paused' || fileStatus.status === 'completed' || fileStatus.status === 'failed')) {
                           return (
                             <div style={{ width: '100%', marginTop: '3px' }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', marginBottom: '2px' }}>
                                 <span style={{
                                   fontWeight: 700,
-                                  color: fileStatus.status === 'completed' ? '#10b981' : fileStatus.status === 'paused' ? '#f59e0b' : '#38bdf8'
+                                  color: fileStatus.status === 'completed'
+                                    ? '#10b981'
+                                    : fileStatus.status === 'failed'
+                                    ? '#f87171'
+                                    : fileStatus.status === 'paused'
+                                    ? '#f59e0b'
+                                    : '#38bdf8'
                                 }}>
-                                  {fileStatus.status === 'completed' ? 'Done' : fileStatus.status === 'paused' ? 'Paused' : `${Math.round(fileStatus.progress * 100)}%`}
+                                  {fileStatus.status === 'completed'
+                                    ? 'Done'
+                                    : fileStatus.status === 'failed'
+                                    ? 'Failed'
+                                    : fileStatus.status === 'paused'
+                                    ? 'Paused'
+                                    : `${Math.round(fileStatus.progress * 100)}%`}
                                 </span>
                               </div>
-                              <div style={{ height: '4px', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '2px', overflow: 'hidden' }}>
+                              {fileStatus.status !== 'failed' && <div style={{ height: '4px', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '2px', overflow: 'hidden' }}>
                                 <div style={{
                                   height: '100%',
                                   width: `${Math.max(4, Math.round(fileStatus.progress * 100))}%`,
@@ -428,7 +440,23 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
                                   borderRadius: '2px',
                                   transition: 'width 0.2s ease'
                                 }} />
-                              </div>
+                              </div>}
+                              {fileStatus.status === 'failed' && fileStatus.error && (
+                                <div
+                                  title={fileStatus.error}
+                                  style={{
+                                    color: '#fca5a5',
+                                    fontSize: '9px',
+                                    marginTop: '3px',
+                                    maxWidth: '220px',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                >
+                                  {fileStatus.error}
+                                </div>
+                              )}
                             </div>
                           );
                         }
@@ -443,6 +471,7 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
                     const isItemConverting = fileStatus?.status === 'converting';
                     const isItemPaused = fileStatus?.status === 'paused';
                     const isItemDone = fileStatus?.status === 'completed';
+                    const isItemFailed = fileStatus?.status === 'failed';
 
                     return (
                       <button
@@ -464,6 +493,8 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
                             ? 'rgba(245, 158, 11, 0.2)'
                             : isItemDone
                             ? 'rgba(16, 185, 129, 0.15)'
+                            : isItemFailed
+                            ? 'rgba(248, 113, 113, 0.2)'
                             : 'linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(6, 182, 212, 0.25) 100%)',
                           border: isItemConverting
                             ? '1px solid rgba(6, 182, 212, 0.6)'
@@ -471,8 +502,10 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
                             ? '1px solid rgba(245, 158, 11, 0.6)'
                             : isItemDone
                             ? '1px solid rgba(16, 185, 129, 0.4)'
+                            : isItemFailed
+                            ? '1px solid rgba(248, 113, 113, 0.55)'
                             : '1px solid rgba(99, 102, 241, 0.5)',
-                          color: isItemDone ? '#34d399' : isItemPaused ? '#fbbf24' : isItemConverting ? '#67e8f9' : '#fff',
+                          color: isItemDone ? '#34d399' : isItemFailed ? '#fca5a5' : isItemPaused ? '#fbbf24' : isItemConverting ? '#67e8f9' : '#fff',
                           display: 'flex',
                           alignItems: 'center',
                           gap: '4px',
@@ -489,6 +522,8 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
                             ? 'Resume conversion for this file'
                             : isItemDone
                             ? 'Converted successfully'
+                            : isItemFailed
+                            ? `Retry conversion${fileStatus?.error ? `: ${fileStatus.error}` : ''}`
                             : 'Start conversion for this file'
                         }
                       >
@@ -507,6 +542,8 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
                             <CheckCircle2 size={11} />
                             <span>Done</span>
                           </>
+                        ) : isItemFailed ? (
+                          <span>Retry</span>
                         ) : (
                           <span>Start</span>
                         )}

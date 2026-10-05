@@ -77,6 +77,7 @@ export function SendToFlashModal({
   const [activeSection, setActiveSection] = useState<
     'main' | 'prepare' | 'drives' | 'sendtray_progress' | 'sendtray_destination'
   >(() => (openedFromPlayer ? 'prepare' : 'main'));
+  const [converterTab, setConverterTab] = useState<'convert' | 'video_output' | 'audio_output'>('convert');
   const [pendingAction, setPendingAction] = useState<'drive' | 'sendtray' | 'convert'>('convert');
   const [destinationFolders, setDestinationFolders] = useState<SendtrayFolder[]>(() => getSendtrayFolders());
   const [isCreatingDestFolder, setIsCreatingDestFolder] = useState(false);
@@ -116,7 +117,12 @@ export function SendToFlashModal({
   // and having a second copy is what broke the footer: pausing a card left
   // `isPaused` false, so the big button kept reading PAUSE and kept pulsing
   // while the card read RESUME. It is derived below instead.
-  const [fileConversionMap, setFileConversionMap] = useState<Record<string, { status: 'idle' | 'converting' | 'paused' | 'completed' | 'failed'; progress: number; error?: string }>>({});
+  const [fileConversionMap, setFileConversionMap] = useState<Record<string, {
+    status: 'idle' | 'converting' | 'paused' | 'completed' | 'failed';
+    progress: number;
+    error?: string;
+    outputPath?: string;
+  }>>({});
 
   // Files the user deleted from the queue while converting. Their
   // jobs were cancelled, so late progress events are dropped here --
@@ -129,6 +135,9 @@ export function SendToFlashModal({
   // Mirror of the above, readable from callbacks without re-creating them.
   const fileConversionMapRef = useRef(fileConversionMap);
   fileConversionMapRef.current = fileConversionMap;
+  const hasActiveFileConversions = Object.values(fileConversionMap).some(
+    ({ status }) => status === 'converting' || status === 'paused'
+  );
 
   /**
    * Splits the live jobs into the ones running and the ones held.
@@ -349,7 +358,7 @@ export function SendToFlashModal({
     if (isMinimized) {
       const activeFile = allFiles[currentFileIndex] || filePath || '';
       const cleanFileName = activeFile ? activeFile.split(/[/\\]/).pop() : '';
-      const isConvertingNow = copyStatus === 'copying' || isConvertingBatch;
+      const isConvertingNow = copyStatus === 'copying' || isConvertingBatch || hasActiveFileConversions;
       const progressVal = Math.round(copyProgress <= 1 && copyProgress > 0 ? copyProgress * 100 : copyProgress);
       electron.ipcRenderer.send('converter-minimize-state', {
         minimized: true,
@@ -370,7 +379,7 @@ export function SendToFlashModal({
           : 'Converter Pro'
       });
     }
-  }, [isMinimized, copyProgress, copyStatus, currentFileIndex, allFiles, filePath, isPaused, isConvertingBatch]);
+  }, [isMinimized, copyProgress, copyStatus, currentFileIndex, allFiles, filePath, isPaused, isConvertingBatch, hasActiveFileConversions]);
 
   useEffect(() => {
     if (!electron) { 
@@ -475,6 +484,22 @@ export function SendToFlashModal({
     }
   };
 
+  const resolveOutputDirectory = async (kind: 'video' | 'audio', bridge: NonNullable<typeof electron>) => {
+    const storageKey = kind === 'video' ? 'panamedia_video_output_dir' : 'panamedia_audio_output_dir';
+    const savedPath = localStorage.getItem(storageKey);
+    if (savedPath) return savedPath;
+
+    const paths = await bridge.ipcRenderer.invoke('get-converter-output-paths');
+    const outputPath = kind === 'video' ? paths?.videoOutputDir : paths?.audioOutputDir;
+    if (!outputPath) {
+      throw new Error(`Could not resolve the ${kind} output folder.`);
+    }
+    return outputPath;
+  };
+
+  const thumbnailForOutput = (mode: string | undefined, sourcePath: string) =>
+    mode === 'extract_audio' && isVideoFile(sourcePath) ? sourcePath : undefined;
+
   const handleProceedFromPreparation = async (options: SendConvertOptions) => {
     setSendConvertOptions(options);
     const dest = options.exportDestination || (pendingAction === 'drive' ? 'drive' : 'sendtray');
@@ -578,21 +603,29 @@ export function SendToFlashModal({
             // Same bookkeeping as the sendtray/folder branch below: record what
             // was produced so it appears under Video or Audio, and take the
             // source off the queue so a finished job stops looking pending.
-            registerOutputs(driveOutputs, classifyOutput(itemOpt.mode, target, driveOutputs[0] || ''));
+            const driveOutputKind = classifyOutput(itemOpt.mode, target, driveOutputs[0] || '');
+            registerOutputs(driveOutputs, driveOutputKind, {
+              thumbnailPath: driveOutputKind === 'audio' ? thumbnailForOutput(itemOpt.mode, target) : undefined
+            });
             setFileConversionMap(prev => ({
               ...prev,
               [target]: { status: 'completed', progress: 1.0, outputPath: driveOutputs[0] }
             }));
             removeFromQueue([target]);
           } else {
-            // Export to Sendtray or custom folder. Passing the destination
-            // lets the engine write straight there instead of writing
-            // beside the source and moving the file afterwards.
-            const targetDir = dest === 'folder' ? options.exportCustomPath : undefined;
+            // Conversion output belongs in the matching media folder by
+            // default; Sendtray is for staging files for later sending.
+            const outputKind = classifyOutput(itemOpt.mode, target, target);
+            const targetDir = dest === 'folder'
+              ? options.exportCustomPath
+              : await resolveOutputDirectory(outputKind, bridge);
+            if (!targetDir) {
+              throw new Error('Select a destination folder before starting this conversion.');
+            }
             const res = await bridge.ipcRenderer.invoke('convert-media-file', {
               filePath: target,
               targetDir,
-              destination: dest === 'folder' ? 'folder' : 'sendtray',
+              destination: 'folder',
               options: {
                 mode: itemOpt.mode,
                 format: itemOpt.format,
@@ -612,39 +645,14 @@ export function SendToFlashModal({
                 ? res.outputs
                 : [res.outputPath];
               let finalPath = res.outputPath;
-              if (!res.outputs) {
-                try {
-                  const moved = await bridge.ipcRenderer.invoke('move-converted-output', {
-                    sourcePath: res.outputPath,
-                    destination: dest,
-                    destPath: options.exportCustomPath
-                  });
-                  if (moved && moved.success && moved.path) {
-                    finalPath = moved.path;
-                  } else if (moved && moved.error) {
-                    console.warn('[Converter] could not relocate output:', moved.error);
-                  }
-                } catch (moveErr) {
-                  console.warn('[Converter] move failed:', moveErr);
-                }
-              }
-
-              if (dest === 'sendtray') {
-                outputs.forEach(seg => handleMoveFileToSendtray(seg, options.targetFolderId));
-              }
 
               // Record the finished files against the side they belong to.
-              // The output tabs read a directory scan, and the sendtray -- the
-              // default destination -- is not that directory, so without this a
-              // completed conversion was simply never visible anywhere.
-              //
-              // Classified by the mode used for *this* file, not by the source
-              // extension: extracting audio from an .mp4 is the common case, and
-              // it produced an audio file that the video tab then claimed.
-              registerOutputs(
-                outputs,
-                classifyOutput(itemOpt.mode, target, finalPath || res.outputPath)
-              );
+              // Classification uses the mode, so extracting audio from a video
+              // is registered in the Audio Output tab.
+              const outputKind = classifyOutput(itemOpt.mode, target, finalPath || res.outputPath);
+              registerOutputs(outputs, outputKind, {
+                thumbnailPath: outputKind === 'audio' ? thumbnailForOutput(itemOpt.mode, target) : undefined
+              });
 
               setFileConversionMap(prev => ({
                 ...prev,
@@ -744,49 +752,94 @@ export function SendToFlashModal({
     await applyPauseTo(targets, toPaused);
   };
 
-  const handleConvertSingleFile = async (targetFile: string) => {
-    if (!electron || !targetFile) return;
-    setIsConvertingBatch(true);
-    setCopyStatus('copying');
+  const handleConvertSingleFile = async (targetFile: string, options: SendConvertOptions) => {
+    if (!targetFile) return;
+    if (!electron) {
+      setFileConversionMap(prev => ({
+        ...prev,
+        [targetFile]: { status: 'failed', progress: 0, error: 'The Electron conversion bridge is unavailable.' }
+      }));
+      return;
+    }
     setFileConversionMap(prev => ({
       ...prev,
       [targetFile]: { status: 'converting', progress: 0.05 }
     }));
     try {
-      const isVid = isVideoFile(targetFile);
-      let mType = 'video';
-      try {
-        const saved = JSON.parse(localStorage.getItem('converter_media_types') || '{}');
-        mType = saved[targetFile] || (isVid ? 'video' : 'audio');
-      } catch (e) {
-        mType = isVid ? 'video' : 'audio';
-      }
-      const res = await electron.ipcRenderer.invoke('convert-media-file', {
-        filePath: targetFile,
-        options: {
-          mode: mType === 'video' ? 'convert_video' : 'extract_audio',
-          format: mType === 'video' ? 'mp4' : 'mp3',
-          bitrate: mType === 'video' ? '1080p' : '320k'
+      const bridge = electron;
+      const dest = options.exportDestination || 'sendtray';
+      const itemOptions = options.perFileOptions?.[targetFile] || {
+        mode: options.mode,
+        format: options.format,
+        bitrate: options.bitrate,
+        audioBitrate: options.audioBitrate,
+        highQuality: options.highQuality
+      };
+      let res: any;
+
+      if (dest === 'drive') {
+        if (!options.exportDriveLetter) {
+          throw new Error('Select a destination drive before starting this conversion.');
         }
-      });
-      if (res.success) {
-        setFileConversionMap(prev => ({
-          ...prev,
-          [targetFile]: { status: 'completed', progress: 1.0, outputPath: res.outputPath }
-        }));
+        res = await bridge.ipcRenderer.invoke('convert-and-send-to-drive', {
+          filePath: targetFile,
+          driveLetter: options.exportDriveLetter,
+          options: itemOptions
+        });
       } else {
+        const isFolder = dest === 'folder';
+        if (isFolder && !options.exportCustomPath) {
+          throw new Error('Select a destination folder before starting this conversion.');
+        }
+        const outputKind = classifyOutput(itemOptions.mode, targetFile, targetFile);
+        const targetDir = isFolder
+          ? options.exportCustomPath
+          : await resolveOutputDirectory(outputKind, bridge);
+        res = await bridge.ipcRenderer.invoke('convert-media-file', {
+          filePath: targetFile,
+          targetDir,
+          destination: 'folder',
+          options: {
+            ...itemOptions,
+            mode: itemOptions.mode === 'original' ? 'convert' : itemOptions.mode,
+            threadBudget: Math.max(1, Math.floor(
+              ((typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4) /
+              conversionConcurrency()
+            ))
+          }
+        });
+      }
+
+      if (!res?.success) {
+        throw new Error(res?.error || 'Conversion failed.');
+      }
+
+      let outputs: string[] = res.outputs?.length
+        ? res.outputs
+        : [res.outputPath || res.destPath].filter((path): path is string => Boolean(path));
+      if (outputs.length === 0) {
+        throw new Error('Conversion finished without returning an output path.');
+      }
+
+      const outputPath = outputs[0];
+      const outputKind = classifyOutput(itemOptions.mode, targetFile, outputPath);
+      registerOutputs(outputs, outputKind, {
+        thumbnailPath: outputKind === 'audio' ? thumbnailForOutput(itemOptions.mode, targetFile) : undefined
+      });
+      if (!removedFilesRef.current.has(targetFile)) {
         setFileConversionMap(prev => ({
           ...prev,
-          [targetFile]: { status: 'failed', progress: 0, error: res.error }
+          [targetFile]: { status: 'completed', progress: 1.0, outputPath }
         }));
+        removeFromQueue([targetFile]);
       }
     } catch (err: any) {
-      setFileConversionMap(prev => ({
-        ...prev,
-        [targetFile]: { status: 'failed', progress: 0, error: err?.message || 'Error' }
-      }));
-    } finally {
-      setIsConvertingBatch(false);
+      if (!removedFilesRef.current.has(targetFile)) {
+        setFileConversionMap(prev => ({
+          ...prev,
+          [targetFile]: { status: 'failed', progress: 0, error: err?.message || 'Conversion failed.' }
+        }));
+      }
     }
   };
 
@@ -923,10 +976,11 @@ export function SendToFlashModal({
   // Now the only path into the queue is this button, which is what the label
   // says it does.
   const handleConvert = () => {
-    // `allFiles` rather than `filePath`: the modal can also be opened from the
-    // converter's own tray with a batch selected, and Convert should take all
+    // Use the file or batch selected in this send modal, not the existing queue.
+    // Batch selection comes from sendTrayItems.
     // of it, not just the one the modal was pointed at.
-    const targets = allFiles.length > 0 ? allFiles : [filePath];
+    const batchTargets = isBatch ? sendTrayItems : [];
+    const targets = batchTargets.length > 0 ? batchTargets : [filePath];
     const usable = targets.filter((f) => f && f !== 'media');
     if (usable.length === 0) return;
 
@@ -1108,7 +1162,7 @@ export function SendToFlashModal({
           onRemoveFile={handleRemoveFromQueue}
           onClearQueue={handleClearQueue}
           drives={drives}
-          isConverting={copyStatus === 'copying' || isConvertingBatch}
+          isConverting={copyStatus === 'copying' || isConvertingBatch || hasActiveFileConversions}
           isPaused={isPaused}
           conversionProgress={copyProgress}
           activeConvertingFile={allFiles[currentFileIndex]}
@@ -1117,6 +1171,8 @@ export function SendToFlashModal({
           onConvertSingleFile={handleConvertSingleFile}
           onQueueFilesRemoved={handleQueueFilesRemoved}
           onTogglePauseSingleFile={handleTogglePauseSingleFile}
+          activeMainTab={converterTab}
+          onActiveMainTabChange={setConverterTab}
           onProceed={handleProceedFromPreparation}
           onDirectSend={(target) => {
             if (Array.isArray(target) && target.length > 0) {
@@ -1226,6 +1282,18 @@ export function SendToFlashModal({
           {/* Main Options Menu */}
           {activeSection === 'main' && (
             <>
+              {isFromConverter && (
+                <div style={{
+                  padding: '9px 11px',
+                  borderRadius: '9px',
+                  background: 'rgba(6, 182, 212, 0.08)',
+                  border: '1px solid rgba(6, 182, 212, 0.18)',
+                  color: '#a5f3fc',
+                  fontSize: '11px'
+                }}>
+                  Review the send destination. Cancel returns to the same output tab without sending.
+                </div>
+              )}
               {/* Top Row: Favourite & Archive buttons side-by-side */}
               {topRowOptions.length > 0 && (
                 <div style={{ 
@@ -1435,7 +1503,9 @@ export function SendToFlashModal({
                 <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace' }}>
                   ↑ ↓ ← → navigate • ↵ select • ⌫ back
                 </span>
-                <button className="btn-secondary" onClick={handleCancelOrClose} style={{ fontSize: '12px', padding: '6px 14px', borderRadius: '8px' }}>Cancel</button>
+                <button className="btn-secondary" onClick={handleCancelOrClose} style={{ fontSize: '12px', padding: '6px 14px', borderRadius: '8px' }}>
+                  {isFromConverter ? 'Cancel & Return' : 'Cancel'}
+                </button>
               </div>
             </>
           )}

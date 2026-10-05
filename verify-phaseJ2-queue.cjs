@@ -165,9 +165,10 @@ check('Convert adds through converterQueue',
   'the explicit button is the only allowed path into the queue');
 check('Convert does not write localStorage directly',
   !/localStorage/.test(hcBody));
-check('Convert takes the whole batch, not just the one file',
-  /allFiles\.length\s*>\s*0\s*\?\s*allFiles\s*:\s*\[\s*filePath\s*\]/.test(hcBody),
-  'opened from the converter tray, Convert must take everything selected');
+check('Convert queues the current file or selected batch, not the existing converter queue',
+  /batchTargets\s*=\s*isBatch\s*\?\s*sendTrayItems\s*:\s*\[\s*\]/.test(hcBody) &&
+  /targets\s*=\s*batchTargets\.length\s*>\s*0\s*\?\s*batchTargets\s*:\s*\[\s*filePath\s*\]/.test(hcBody),
+  'use the current right-click target for one file and the send-tray selection for a batch');
 check('Convert filters out the placeholder and empty paths',
   /filter\(\s*\(f\)\s*=>\s*f\s*&&\s*f\s*!==\s*`media`\s*\)/.test(hcBody) ||
   /filter\(\s*\(f\)\s*=>\s*f\s*&&\s*f\s*!==\s*'media'\s*\)/.test(hcBody));

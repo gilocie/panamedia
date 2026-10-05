@@ -3267,6 +3267,23 @@ ipcMain.handle('delete-file', async (event, filePath) => {
   }
 });
 
+ipcMain.handle('trash-converter-output', async (_event, filePath) => {
+  if (!filePath || !path.isAbsolute(filePath)) {
+    return { success: false, error: 'Invalid output file path' };
+  }
+  try {
+    const stat = await fs.promises.stat(filePath);
+    if (!stat.isFile()) {
+      return { success: false, error: 'Selected output is not a file' };
+    }
+    await shell.trashItem(filePath);
+    return { success: true };
+  } catch (err) {
+    console.error('[Converter] Failed to move output to Recycle Bin:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 
 
 

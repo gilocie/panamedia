@@ -1,10 +1,11 @@
-import React from 'react';
-import { Film, Music, Play, CheckCircle2, Send, FolderEdit, FolderOpen } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Film, Music, Play, CheckCircle2, Send, FolderEdit, FolderOpen, Trash2 } from 'lucide-react';
 import { electron } from '../panamedia/types';
 
 interface OutputItem {
   name: string;
   path: string;
+  thumbnailPath?: string;
   size?: string;
   format: string;
   resolutionOrBitrate?: string;
@@ -15,24 +16,96 @@ interface OutputHistoryListProps {
   type: 'video' | 'audio';
   items: OutputItem[];
   outputPath?: string;
+  streamingPort?: number;
   onChangeOutputPath?: () => void;
   onDirectSend?: (files: string[]) => void;
   onPlayMedia?: (path: string) => void;
+  onItemsDeleted?: (paths: string[]) => void;
 }
 
 export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
   type,
   items,
   outputPath,
+  streamingPort = 52321,
   onChangeOutputPath,
   onDirectSend,
-  onPlayMedia
+  onPlayMedia,
+  onItemsDeleted
 }) => {
   const isVideo = type === 'video';
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
-  const handleOpenLocation = (filePath: string) => {
+  useEffect(() => {
+    const currentPaths = new Set(items.map((item) => item.path));
+    setSelectedPaths((prev) => {
+      const next = new Set([...prev].filter((filePath) => currentPaths.has(filePath)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [items]);
+
+  const allSelected = items.length > 0 && selectedPaths.size === items.length;
+
+  const toggleSelected = (filePath: string) => {
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(filePath)) next.delete(filePath);
+      else next.add(filePath);
+      return next;
+    });
+    setDeleteError('');
+  };
+
+  const handleDeleteSelected = async () => {
+    const targets = items.filter((item) => selectedPaths.has(item.path));
+    if (targets.length === 0 || isDeleting) return;
+    const label = `${targets.length} selected file${targets.length === 1 ? '' : 's'}`;
+    if (!window.confirm(`Move ${label} to the Recycle Bin?`)) return;
+    if (!electron) {
+      setDeleteError('File deletion is only available in the Panamedia desktop app.');
+      return;
+    }
+
+    setIsDeleting(true);
+    setDeleteError('');
+    const deleted: string[] = [];
+    const failures: string[] = [];
+    try {
+      for (const item of targets) {
+        try {
+          const result = await electron.ipcRenderer.invoke('trash-converter-output', item.path);
+          if (result?.success) deleted.push(item.path);
+          else failures.push(`${item.name}: ${result?.error || 'Delete failed'}`);
+        } catch (error) {
+          failures.push(`${item.name}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      if (deleted.length > 0) {
+        onItemsDeleted?.(deleted);
+        setSelectedPaths((prev) => {
+          const next = new Set(prev);
+          deleted.forEach((filePath) => next.delete(filePath));
+          return next;
+        });
+      }
+      if (failures.length > 0) {
+        setDeleteError(`Could not delete ${failures.length} file${failures.length === 1 ? '' : 's'}: ${failures.join('; ')}`);
+      }
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleOpenLocation = async (filePath: string) => {
     if (!electron || !filePath) return;
-    electron.ipcRenderer.send('open-file-location', filePath);
+    try {
+      const opened = await electron.ipcRenderer.invoke('show-item-in-folder', filePath);
+      if (opened !== true) setDeleteError('Could not locate this output file.');
+    } catch (error) {
+      setDeleteError(`Could not open the file location: ${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   return (
@@ -99,8 +172,50 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
               <span>Change Location</span>
             </button>
           )}
+          <label style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '5px',
+            color: 'var(--text-muted, rgba(255,255,255,0.65))',
+            fontSize: '10px',
+            cursor: items.length > 0 ? 'pointer' : 'default',
+            whiteSpace: 'nowrap'
+          }}>
+            <input
+              type="checkbox"
+              checked={allSelected}
+              disabled={items.length === 0 || isDeleting}
+              onChange={() => setSelectedPaths(allSelected ? new Set() : new Set(items.map((item) => item.path)))}
+              aria-label={`Select all ${isVideo ? 'video' : 'audio'} outputs`}
+            />
+            Select all
+          </label>
         </div>
 
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {selectedPaths.size > 0 && (
+          <button
+            type="button"
+            disabled={isDeleting}
+            onClick={handleDeleteSelected}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '8px',
+              background: 'rgba(239, 68, 68, 0.14)',
+              border: '1px solid rgba(239, 68, 68, 0.42)',
+              color: '#fca5a5',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: isDeleting ? 'wait' : 'pointer',
+              opacity: isDeleting ? 0.65 : 1
+            }}
+          >
+            <Trash2 size={13} /> {isDeleting ? 'Deleting...' : `Delete (${selectedPaths.size})`}
+          </button>
+        )}
         {/* Send Button inside Output Tab: Active only when items exist */}
         {onDirectSend && (
           <button
@@ -108,7 +223,8 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
             disabled={items.length === 0}
             onClick={() => {
               if (items.length > 0) {
-                onDirectSend(items.map(it => it.path));
+                const targets = items.filter((item) => selectedPaths.has(item.path));
+                onDirectSend((targets.length > 0 ? targets : items).map((item) => item.path));
               }
             }}
             style={{
@@ -131,13 +247,22 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
               boxShadow: items.length > 0 ? '0 2px 10px rgba(245, 158, 11, 0.15)' : 'none',
               transition: 'all 0.15s ease'
             }}
-            title={items.length > 0 ? `Send ${items.length} converted file${items.length === 1 ? '' : 's'}` : 'No files in output folder to send'}
+            title={items.length > 0
+              ? `Send ${selectedPaths.size > 0 ? selectedPaths.size : items.length} converted file${(selectedPaths.size > 0 ? selectedPaths.size : items.length) === 1 ? '' : 's'}`
+              : 'No files in output folder to send'}
           >
             <Send size={13} style={{ color: items.length > 0 ? '#f59e0b' : 'rgba(255, 255, 255, 0.3)' }} />
-            <span>Direct Send</span>
+            <span>{selectedPaths.size > 0 ? 'Send Selected' : 'Send All'}</span>
           </button>
         )}
+        </div>
       </div>
+
+      {deleteError && (
+        <div role="alert" style={{ color: '#fca5a5', fontSize: '11px', margin: '0 0 8px' }}>
+          {deleteError}
+        </div>
+      )}
 
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {items.length === 0 ? (
@@ -174,6 +299,14 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                <input
+                  type="checkbox"
+                  checked={selectedPaths.has(item.path)}
+                  disabled={isDeleting}
+                  onChange={() => toggleSelected(item.path)}
+                  aria-label={`Select ${item.name}`}
+                  style={{ flexShrink: 0, accentColor: isVideo ? '#818cf8' : '#ec4899' }}
+                />
                 <div style={{
                   width: '32px',
                   height: '32px',
@@ -184,9 +317,26 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
                   alignItems: 'center',
                   justifyContent: 'center',
                   color: isVideo ? '#818cf8' : '#ec4899',
+                  position: 'relative',
                   flexShrink: 0
                 }}>
                   <CheckCircle2 size={16} />
+                  {!isVideo && item.thumbnailPath && (
+                    <img
+                      src={`http://localhost:${streamingPort}/thumbnail?path=${encodeURIComponent(item.thumbnailPath)}`}
+                      alt=""
+                      loading="lazy"
+                      onError={(event) => { event.currentTarget.style.display = 'none'; }}
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        width: '100%',
+                        height: '100%',
+                        borderRadius: '6px',
+                        objectFit: 'cover'
+                      }}
+                    />
+                  )}
                 </div>
 
                 <div style={{ minWidth: 0, flex: 1 }}>

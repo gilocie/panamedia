@@ -194,6 +194,12 @@ async function togglePauseProcess(filePath) {
   }
 }
 
+function cancelConversion(filePath) {
+  const item = activeProcesses.get(filePath);
+  if (!item || !item.proc || item.proc.killed) return false;
+  return item.proc.kill();
+}
+
 /**
  * Execute media conversion through the C++ engine, falling back to the local
  * Node implementation when the engine is unavailable.
@@ -456,5 +462,6 @@ module.exports = {
   executeOptimizedConversion,
   executeOptimizedConversionLocal,
   togglePauseProcess,
+  cancelConversion,
   probeDuration
 };

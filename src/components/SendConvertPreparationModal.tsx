@@ -14,7 +14,7 @@ import {
   clearQueue,
   normalizeQueuePath
 } from './panamedia/converterQueue';
-import { getOutputs, subscribeOutputs } from './panamedia/converterOutputs';
+import { getOutputs, removeOutputs, subscribeOutputs } from './panamedia/converterOutputs';
 import {
   type SendConvertOptions,
   type SendConvertPreparationModalProps,
@@ -71,6 +71,8 @@ export function SendConvertPreparationModal({
   onBack,
   onClose,
   onQueueFilesRemoved,
+  activeMainTab: restoredMainTab = 'convert',
+  onActiveMainTabChange,
 }: SendConvertPreparationModalProps) {
   // The queue is owned by converterQueue. This used to keep its own copy seeded
   // from `converter_queue` and then fall back to `fileName` (the playing file),
@@ -111,7 +113,12 @@ export function SendConvertPreparationModal({
   }, [isMinimized, onMinimizeChange]);
 
   // Top Tabs: Convert Tab, Video Output, Audio Output
-  const [activeMainTab, setActiveMainTab] = useState<'convert' | 'video_output' | 'audio_output'>('convert');
+  const [activeMainTab, setActiveMainTab] = useState<'convert' | 'video_output' | 'audio_output'>(restoredMainTab);
+
+  const handleSelectMainTab = (tab: 'convert' | 'video_output' | 'audio_output') => {
+    setActiveMainTab(tab);
+    onActiveMainTabChange?.(tab);
+  };
 
   // Format modal mode: video or audio
   const [formatModalMode, setFormatModalMode] = useState<'video' | 'audio'>('video');
@@ -419,7 +426,7 @@ export function SendConvertPreparationModal({
     kind: 'video' | 'audio'
   ) => {
     const fromScan: Array<{
-      name: string; path: string; size?: string; format: string;
+      name: string; path: string; thumbnailPath?: string; size?: string; format: string;
       resolutionOrBitrate?: string; date: string;
     }> = Array.isArray(scanned)
       ? scanned.map((f: any) => ({
@@ -435,6 +442,7 @@ export function SendConvertPreparationModal({
     const fromRegistry: typeof fromScan = getOutputs(kind).map((o) => ({
       name: o.name,
       path: o.path,
+      thumbnailPath: o.thumbnailPath,
       size: o.size,
       format: o.format,
       resolutionOrBitrate: o.detail,
@@ -484,6 +492,11 @@ export function SendConvertPreparationModal({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoOutputPath, audioOutputPath]);
+
+  const handleOutputFilesDeleted = (paths: string[]) => {
+    removeOutputs(paths);
+    refreshOutputFiles();
+  };
 
   // Conversions run in the parent, so this component never saw a completion
   // event -- it only refreshed on mount, on tab change and on folder change.
@@ -777,6 +790,43 @@ export function SendConvertPreparationModal({
     });
   };
 
+  const handleConvertSingleFile = (filePath: string) => {
+    const mediaType = mediaTypes[filePath] || (isVideoFile(filePath) ? 'video' : 'audio');
+    const tools = toolSettings[normalizeQueuePath(filePath)];
+    const mode = mediaType === 'video'
+      ? (autoCopy ? 'original' : 'convert')
+      : 'extract_audio';
+    const format = tools?.gif
+      ? 'gif'
+      : (mediaType === 'video' ? selectedVideoFmt : selectedAudioFmt);
+    const bitrate = mediaType === 'video' ? videoQuality : audioBitrate;
+
+    onConvertSingleFile?.(filePath, {
+      mode,
+      format,
+      bitrate,
+      audioBitrate,
+      highQuality: useHqEngine,
+      keepOriginal: true,
+      targetFolderId: selectedFolderId,
+      exportDestination,
+      exportDriveLetter: exportDestination === 'drive' ? selectedDriveLetter : undefined,
+      exportCustomPath: exportDestination === 'folder'
+        ? (customExportFolder || (mediaType === 'video' ? videoOutputPath : audioOutputPath))
+        : undefined,
+      perFileOptions: {
+        [filePath]: {
+          mode,
+          format,
+          bitrate,
+          audioBitrate,
+          highQuality: useHqEngine,
+          tools
+        }
+      }
+    });
+  };
+
   const handleDirectSend = (files?: string[]) => {
     if (onDirectSend) {
       if (files && files.length > 0) {
@@ -884,7 +934,7 @@ export function SendConvertPreparationModal({
           {/* Top Subheader: Clean 3 Main Tabs (No duplicate settings buttons) */}
           <TopTabsBar
             activeMainTab={activeMainTab}
-            onSelectTab={setActiveMainTab}
+            onSelectTab={handleSelectMainTab}
             queueCount={localQueue.length}
             videoOutputCount={convertedVideos.length}
             audioOutputCount={convertedAudios.length}
@@ -934,7 +984,7 @@ export function SendConvertPreparationModal({
               videoQuality={videoQuality}
               audioBitrate={audioBitrate}
               conversionStatus={externalConversionStatus}
-              onConvertSingleFile={onConvertSingleFile}
+              onConvertSingleFile={handleConvertSingleFile}
               onTogglePauseSingleFile={onTogglePauseSingleFile}
               onSelectFile={setSelectedFileIdx}
               onToggleSelectAll={handleToggleSelectAll}
@@ -950,16 +1000,20 @@ export function SendConvertPreparationModal({
               type="video"
               items={convertedVideos}
               outputPath={videoOutputPath}
+              streamingPort={streamingPort}
               onChangeOutputPath={handleChangeVideoOutputPath}
               onDirectSend={handleDirectSend}
+              onItemsDeleted={handleOutputFilesDeleted}
             />
           ) : (
             <OutputHistoryList
               type="audio"
               items={convertedAudios}
               outputPath={audioOutputPath}
+              streamingPort={streamingPort}
               onChangeOutputPath={handleChangeAudioOutputPath}
               onDirectSend={handleDirectSend}
+              onItemsDeleted={handleOutputFilesDeleted}
             />
           )}
         </div>

@@ -42,6 +42,8 @@ export interface ConvertedOutput {
   detail?: string;
   /** Localised date string, matching the folder scan's format. */
   date: string;
+  /** Source video to use as the thumbnail for extracted audio. */
+  thumbnailPath?: string;
 }
 
 function readStorage(): ConvertedOutput[] {
@@ -101,7 +103,7 @@ function extensionOf(p: string): string {
 export function registerOutput(
   path: string,
   kind: OutputKind,
-  extra?: { size?: string; detail?: string; date?: string; format?: string }
+  extra?: { size?: string; detail?: string; date?: string; format?: string; thumbnailPath?: string }
 ): ConvertedOutput {
   if (!path) {
     // Nothing sensible to record. Callers should still dequeue the source; this
@@ -117,6 +119,7 @@ export function registerOutput(
     size: extra?.size,
     detail: extra?.detail,
     date: extra?.date || new Date().toLocaleString(),
+    thumbnailPath: extra?.thumbnailPath,
   };
 
   const key = normalizeQueuePath(path);
@@ -130,7 +133,7 @@ export function registerOutput(
 export function registerOutputs(
   paths: string[],
   kind: OutputKind,
-  extra?: { size?: string; detail?: string }
+  extra?: { size?: string; detail?: string; thumbnailPath?: string }
 ): void {
   if (!paths.length) return;
   const entries = paths
@@ -143,6 +146,7 @@ export function registerOutputs(
       size: extra?.size,
       detail: extra?.detail,
       date: new Date().toLocaleString(),
+      thumbnailPath: extra?.thumbnailPath,
     }));
   if (!entries.length) return;
 
@@ -171,6 +175,18 @@ export function pruneMissingOutputs(isPresent: (path: string) => boolean): Conve
 export function clearOutputs(): void {
   writeStorage([]);
   notify([]);
+}
+
+/** Removes deleted files from the persisted output history. */
+export function removeOutputs(paths: string[]): void {
+  const removed = new Set(paths.map(normalizeQueuePath));
+  if (removed.size === 0) return;
+  const current = readStorage();
+  const next = current.filter((output) => !removed.has(normalizeQueuePath(output.path)));
+  if (next.length !== current.length) {
+    writeStorage(next);
+    notify(next);
+  }
 }
 
 /**

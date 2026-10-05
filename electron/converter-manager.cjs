@@ -174,10 +174,6 @@ function setupIpcHandlers() {
   });
 
   // Cancel a running conversion outright.
-  //
-  // The engine already had convert_cancel, but nothing exposed it, so removing a
-  // file mid-conversion left ffmpeg running and its progress events kept
-  // updating state for a file no longer in the queue.
   ipcMain.handle('converter-cancel', async (_event, filePath) => {
     try {
       const coreClient = require('./core-client.cjs');
@@ -186,7 +182,12 @@ function setupIpcHandlers() {
         console.log('[Converter] cancelled job:', filePath);
         return { success: true };
       }
-      return { success: false, error: (res && res.error) || 'No running job for that file' };
+      const { cancelConversion } = require('../panamedia-downloader/conversion-engine/hardwareEngine.cjs');
+      if (cancelConversion(filePath)) {
+        console.log('[Converter] cancelled local job:', filePath);
+        return { success: true };
+      }
+      return { success: false, error: (res && res.error) || 'No running conversion for that file' };
     } catch (err) {
       return { success: false, error: err.message };
     }

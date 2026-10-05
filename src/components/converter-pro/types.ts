@@ -34,8 +34,10 @@ export interface SendConvertPreparationModalProps {
   activeConvertingFile?: string;
   conversionStatus?: Record<string, { status: 'idle' | 'converting' | 'paused' | 'completed' | 'failed'; progress: number; error?: string }>;
   onTogglePauseConversion?: () => void;
-  onConvertSingleFile?: (filePath: string) => void;
+  onConvertSingleFile?: (filePath: string, options: SendConvertOptions) => void;
   onTogglePauseSingleFile?: (filePath: string) => void;
+  activeMainTab?: 'convert' | 'video_output' | 'audio_output';
+  onActiveMainTabChange?: (tab: 'convert' | 'video_output' | 'audio_output') => void;
   onBack: () => void;
   onClose: () => void;
   onQueueFilesRemoved?: (files: string[]) => void;
