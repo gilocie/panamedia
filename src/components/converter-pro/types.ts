@@ -4,12 +4,14 @@ export interface SendConvertOptions {
   mode: 'original' | 'extract_audio' | 'convert';
   format: string;
   bitrate: string;
+  audioBitrate?: string;
+  highQuality?: boolean;
   keepOriginal?: boolean;
   targetFolderId?: string;
   exportDestination?: 'sendtray' | 'drive' | 'folder';
   exportDriveLetter?: string;
   exportCustomPath?: string;
-  perFileOptions?: Record<string, { mode: 'original' | 'convert' | 'extract_audio'; format: string; bitrate: string }>;
+  perFileOptions?: Record<string, { mode: 'original' | 'convert' | 'extract_audio'; format: string; bitrate: string; audioBitrate?: string; highQuality?: boolean; tools?: Record<string, unknown> }>;
 }
 
 export interface SendConvertPreparationModalProps {
@@ -36,6 +38,7 @@ export interface SendConvertPreparationModalProps {
   onTogglePauseSingleFile?: (filePath: string) => void;
   onBack: () => void;
   onClose: () => void;
+  onQueueFilesRemoved?: (files: string[]) => void;
 }
 
 export interface VideoFormatPreset {
@@ -93,8 +96,8 @@ export function formatSeconds(secs: number): string {
 
 export const VIDEO_FORMATS: VideoFormatPreset[] = [
   { id: 'mp4', label: 'MP4', ext: 'mp4', codec: 'H.264 / AAC', desc: 'Universal standard for TVs, Phones, PC & Cars', tag: 'Universal', iconColor: '#38bdf8' },
-  { id: 'mkv', label: 'MKV', ext: 'mkv', codec: 'HEVC / H.264', desc: 'High Quality multi-track audio & subtitle container', tag: 'High Quality', iconColor: '#818cf8' },
-  { id: 'mov', label: 'MOV', ext: 'mov', codec: 'Apple ProRes / H.264', desc: 'Native Apple QuickTime standard for iPhone & Mac', tag: 'Apple', iconColor: '#c084fc' },
+  { id: 'mkv', label: 'MKV', ext: 'mkv', codec: 'H.264 / AAC', desc: 'Flexible container that carries soft subtitle tracks alongside the video', tag: 'Flexible', iconColor: '#818cf8' },
+  { id: 'mov', label: 'MOV', ext: 'mov', codec: 'H.264 / AAC', desc: 'Native Apple QuickTime container for iPhone & Mac', tag: 'Apple', iconColor: '#c084fc' },
   { id: 'webm', label: 'WebM', ext: 'webm', codec: 'VP9 / Opus', desc: 'Ultra-compressed open web streaming video format', tag: 'Web', iconColor: '#34d399' },
   { id: 'avi', label: 'AVI', ext: 'avi', codec: 'Xvid / MP3', desc: 'Legacy video container for older car headunits & DVD', tag: 'Legacy', iconColor: '#fbbf24' },
 ];

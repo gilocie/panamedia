@@ -3,7 +3,7 @@ import { Minimize2, X, Check } from 'lucide-react';
 
 interface CompressToolProps {
   fileName: string;
-  onApply: (compressSettings: { targetReduction: number; twoPass: boolean }) => void;
+  onApply: (compressSettings: { targetReduction: number }) => void;
   onClose: () => void;
 }
 
@@ -13,7 +13,6 @@ export const CompressTool: React.FC<CompressToolProps> = ({
   onClose
 }) => {
   const [targetReduction, setTargetReduction] = useState<number>(50);
-  const [twoPass, setTwoPass] = useState<boolean>(true);
 
   return (
     <div 
@@ -123,27 +122,16 @@ export const CompressTool: React.FC<CompressToolProps> = ({
             background: 'rgba(255, 255, 255, 0.03)',
             borderRadius: '10px',
             border: '1px solid rgba(255, 255, 255, 0.06)',
-            padding: '12px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '8px'
+            padding: '10px 12px',
+            fontSize: '10.5px',
+            lineHeight: '1.5',
+            color: 'rgba(255,255,255,0.45)'
           }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={twoPass}
-                onChange={e => setTwoPass(e.target.checked)}
-                style={{ accentColor: '#2dd4bf', width: '16px', height: '16px' }}
-              />
-              <div>
-                <div style={{ fontSize: '12px', fontWeight: 700, color: '#fff' }}>
-                  2-Pass Variable Bitrate (VBR) Encoding
-                </div>
-                <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>
-                  Scans scenes first for maximum crispness and zero compression artifacts.
-                </div>
-              </div>
-            </label>
+            Encoding uses a constant-quality (CRF) rate, so visual
+            quality is held steady and only the quantiser moves.
+            The removed 2-pass VBR toggle only helps when you are
+            targeting an exact bitrate, which this tool does not do:
+            it targets a percentage reduction instead.
           </div>
         </div>
 
@@ -174,7 +162,7 @@ export const CompressTool: React.FC<CompressToolProps> = ({
           <button
             type="button"
             onClick={() => {
-              onApply({ targetReduction, twoPass });
+              onApply({ targetReduction });
               onClose();
             }}
             style={{

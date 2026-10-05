@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { Trash2, Copy, Music, Video, FileText, Folder, ChevronLeft, ChevronRight, X } from 'lucide-react';
 
 interface FileItem {
@@ -34,7 +34,7 @@ function getNormalizedName(filename: string): string {
     .toLowerCase();
 }
 
-export function DuplicatesPanel({
+export const DuplicatesPanel = memo(function DuplicatesPanel({
   libraryFiles,
   duplicateDeletePaths,
   toggleDuplicateDelete,
@@ -310,4 +310,4 @@ export function DuplicatesPanel({
       </div>
     </div>
   );
-}
+});

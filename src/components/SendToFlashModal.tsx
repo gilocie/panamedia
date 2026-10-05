@@ -5,6 +5,15 @@ import {
   Folder, FolderPlus, Plus, Minimize2, Sparkles
 } from 'lucide-react';
 import { electron } from './panamedia/types';
+import {
+  getQueue,
+  subscribeQueue,
+  addToQueue,
+  removeFromQueue,
+  clearQueue,
+  mapWithConcurrency,
+  conversionConcurrency
+} from './panamedia/converterQueue';
 import { 
   SendConvertPreparationModal, 
   type SendConvertOptions, 
@@ -42,7 +51,10 @@ export function SendToFlashModal({
   onToggleFavourite,
   onToggleArchive
 }: SendToFlashModalProps) {
-  const [drives, setDrives] = useState<Array<{ letter: string; label: string }>>([]);
+  // `ready` and `freeBytes` come from the engine (or the PowerShell
+  // fallback) and are what stop a job being sent to a card reader with no
+  // card in it, or to a stick that has just been pulled.
+  const [drives, setDrives] = useState<Array<{ letter: string; label: string; ready?: boolean; freeBytes?: number }>>([]);
   const [loading, setLoading] = useState(true);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copying' | 'completed' | 'failed'>('idle');
   const [copyProgress, setCopyProgress] = useState(0);
@@ -66,24 +78,47 @@ export function SendToFlashModal({
     keepOriginal: true
   });
 
-  const [queuedFiles, setQueuedFiles] = useState<string[]>(() => {
-    let baseList: string[] = [];
-    try {
-      const saved = JSON.parse(localStorage.getItem('converter_queue') || '[]');
-      if (Array.isArray(saved)) baseList = saved;
-    } catch (e) {}
-    if (isBatch && sendTrayItems && sendTrayItems.length > 0) {
-      return Array.from(new Set([...baseList, ...sendTrayItems]));
+  // Queue state lives in converterQueue (backed by `player_sendTray`, the same
+  // store the player's sendTrayItems uses). This used to seed itself from
+  // `filePath`, which made the media currently playing an implicit queue member
+  // and therefore impossible to remove.
+  const [queuedFiles, setQueuedFiles] = useState<string[]>(() => getQueue());
+  useEffect(() => subscribeQueue(setQueuedFiles), []);
+
+  // Opening the converter from the player header icon means "convert what I'm
+  // watching". That intent arrives as __openConverterProDirect, so the current
+  // file is added explicitly, once, de-duplicated. It used to be an
+  // unconditional fallback to `filePath`, which made the playing file a
+  // permanent queue member that could never be removed.
+  const directAddDone = useRef(false);
+  useEffect(() => {
+    if (directAddDone.current) return;
+    if (!(window as any).__openConverterProDirect) return;
+    if (!filePath || filePath === 'media') return;
+    directAddDone.current = true;
+    (window as any).__openConverterProDirect = false;
+    const { added } = addToQueue([filePath]);
+    if (added.length > 0) {
+      console.log('[Converter] added currently playing media to queue');
+      if (setSendTrayItems) setSendTrayItems(getQueue());
     }
-    if (filePath && filePath !== 'media') {
-      return Array.from(new Set([...baseList, filePath]));
-    }
-    return baseList;
-  });
+  }, [filePath]);
   const [isMinimized, setIsMinimized] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const isPausedRef = useRef(false);
   const [fileConversionMap, setFileConversionMap] = useState<Record<string, { status: 'idle' | 'converting' | 'paused' | 'completed' | 'failed'; progress: number; error?: string }>>({});
+
+  // Files the user deleted from the queue while converting. Their
+  // jobs were cancelled, so late progress events are dropped here --
+  // otherwise a removed row resurrected itself in the queue list.
+  const removedFilesRef = useRef<Set<string>>(new Set());
+  const handleQueueFilesRemoved = (files: string[]) => {
+    if (!files || files.length === 0) return;
+    files.forEach(f => removedFilesRef.current.add(f));
+  };
+  // Mirror of the above, readable from callbacks without re-creating them.
+  const fileConversionMapRef = useRef(fileConversionMap);
+  fileConversionMapRef.current = fileConversionMap;
   const [isConvertingBatch, setIsConvertingBatch] = useState(false);
 
   useEffect(() => {
@@ -104,6 +139,10 @@ export function SendToFlashModal({
 
   useEffect(() => {
     if (!electron) return;
+    // Narrow via a local const: the narrowing of an imported binding is not
+    // carried into the cleanup closure below, so `electron` would still be
+    // `ElectronBridge | null` there.
+    const bridge = electron;
     const handleRestore = () => {
       setActiveSection('prepare');
       setIsMinimized(false);
@@ -124,32 +163,39 @@ export function SendToFlashModal({
       setIsPaused(false);
       isPausedRef.current = false;
     };
-    electron.ipcRenderer.on('converter-open-request', handleDirectOpen);
-    electron.ipcRenderer.on('converter-restore-request', handleRestore);
-    electron.ipcRenderer.on('converter-close-request', handleClose);
-    electron.ipcRenderer.on('converter-pause-request', handlePause);
-    electron.ipcRenderer.on('converter-resume-request', handleResume);
+    bridge.ipcRenderer.on('converter-open-request', handleDirectOpen);
+    bridge.ipcRenderer.on('converter-restore-request', handleRestore);
+    bridge.ipcRenderer.on('converter-close-request', handleClose);
+    bridge.ipcRenderer.on('converter-pause-request', handlePause);
+    bridge.ipcRenderer.on('converter-resume-request', handleResume);
     return () => {
-      electron.ipcRenderer.removeListener('converter-open-request', handleDirectOpen);
-      electron.ipcRenderer.removeListener('converter-restore-request', handleRestore);
-      electron.ipcRenderer.removeListener('converter-close-request', handleClose);
-      electron.ipcRenderer.removeListener('converter-pause-request', handlePause);
-      electron.ipcRenderer.removeListener('converter-resume-request', handleResume);
+      bridge.ipcRenderer.removeListener('converter-open-request', handleDirectOpen);
+      bridge.ipcRenderer.removeListener('converter-restore-request', handleRestore);
+      bridge.ipcRenderer.removeListener('converter-close-request', handleClose);
+      bridge.ipcRenderer.removeListener('converter-pause-request', handlePause);
+      bridge.ipcRenderer.removeListener('converter-resume-request', handleResume);
     };
   }, [onClose]);
 
 
   const handleAddFilesToQueue = async () => {
+    // addToQueue de-duplicates by normalised path, so re-adding a file that is
+    // already queued is a no-op instead of creating a second entry (which used
+    // to make the file unpausable, since both shared one job id).
+    const enqueue = (paths: string[]) => {
+      if (!paths.length) return;
+      const { added, duplicates } = addToQueue(paths);
+      if (duplicates.length > 0) {
+        console.log(`[Converter] already queued, skipped: ${duplicates.length} file(s)`);
+      }
+      if (setSendTrayItems) setSendTrayItems(added);
+      if (added.length > 0) setErrorMsg('');
+    };
+
     if (electron) {
       try {
         const selected = await electron.ipcRenderer.invoke('select-media-files');
-        if (Array.isArray(selected) && selected.length > 0) {
-          setQueuedFiles(prev => {
-            const next = Array.from(new Set([...prev, ...selected]));
-            localStorage.setItem('converter_queue', JSON.stringify(next));
-            return next;
-          });
-        }
+        if (Array.isArray(selected)) enqueue(selected);
       } catch (err) {
         console.error('File selection error:', err);
       }
@@ -160,14 +206,7 @@ export function SendToFlashModal({
       input.accept = 'video/*,audio/*';
       input.onchange = (e: any) => {
         const files = Array.from(e.target.files || []) as File[];
-        const paths = files.map((f: any) => f.path || f.name).filter(Boolean);
-        if (paths.length > 0) {
-          setQueuedFiles(prev => {
-            const next = Array.from(new Set([...prev, ...paths]));
-            localStorage.setItem('converter_queue', JSON.stringify(next));
-            return next;
-          });
-        }
+        enqueue(files.map((f: any) => f.path || f.name).filter(Boolean));
       };
       input.click();
     }
@@ -186,23 +225,21 @@ export function SendToFlashModal({
       } catch (e) {}
     }
 
-    setQueuedFiles(prev => {
-      const next = prev.filter((f, idx) => targetPath ? f !== targetPath : idx !== indexToRemove);
-      localStorage.setItem('converter_queue', JSON.stringify(next));
-      return next;
-    });
+    const doomed = targetPath
+      ? [targetPath]
+      : queuedFiles.filter((_, idx) => idx === indexToRemove);
+    removeFromQueue(doomed);
 
     if (setSendTrayItems) {
-      setSendTrayItems(prev => prev.filter((f, idx) => targetPath ? f !== targetPath : idx !== indexToRemove));
+      setSendTrayItems([]);
     }
   };
 
   const handleClearQueue = () => {
-    setQueuedFiles([]);
+    clearQueue();
     if (setSendTrayItems) {
       setSendTrayItems([]);
     }
-    localStorage.removeItem('converter_queue');
     if (electron) {
       electron.ipcRenderer.send('converter-minimize-state', {
         minimized: false,
@@ -215,9 +252,12 @@ export function SendToFlashModal({
   const [directSendFiles, setDirectSendFiles] = useState<string[] | null>(null);
   const [isFromConverter, setIsFromConverter] = useState(false);
 
+  // No implicit fallback to `filePath`: an empty queue now genuinely means empty.
+  // Previously this expression refilled the queue with the playing file the
+  // instant the user cleared it.
   const effectiveFiles = (directSendFiles && directSendFiles.length > 0)
     ? directSendFiles
-    : (queuedFiles.length > 0 ? queuedFiles : (filePath ? [filePath] : []));
+    : queuedFiles;
   const allFiles = effectiveFiles.filter(Boolean);
 
   // Sync minimize state and conversion progress with PlayerTitleBar
@@ -260,6 +300,9 @@ export function SendToFlashModal({
     });
 
     const handleProgress = (_event: any, data: any) => {
+      // Deleted mid-conversion: the job was cancelled, so ignore the
+      // straggler events that arrive before ffmpeg actually exits.
+      if (!data || !data.filePath || removedFilesRef.current.has(data.filePath)) return;
       if (data && data.filePath) {
         setFileConversionMap(prev => ({
           ...prev,
@@ -365,6 +408,10 @@ export function SendToFlashModal({
     }
 
     if (!electron) return;
+    // Local const so the non-null narrowing survives into the async closures
+    // created by allFiles.map() below.
+    const bridge = electron;
+    removedFilesRef.current.clear();
     if (activeSection !== 'prepare') {
       setActiveSection('sendtray_progress');
     }
@@ -375,19 +422,30 @@ export function SendToFlashModal({
     setErrorMsg('');
 
     try {
-      for (let i = 0; i < allFiles.length; i++) {
-        while (isPausedRef.current) {
-          await new Promise(r => setTimeout(r, 400));
-        }
-        setCurrentFileIndex(i);
-        const target = allFiles[i];
-        setCopyProgress(0.05);
+      // Convert several files at once, but with a bounded pool. The previous
+      // `allFiles.map(async ...)` started every conversion simultaneously, so a
+      // 30-file queue launched 30 ffmpeg processes and the machine stalled --
+      // exactly the "feels heavy" problem. The cap scales with core count.
+      const poolSize = conversionConcurrency();
+      // Split the core budget across the pool so concurrent jobs do not
+      // oversubscribe the machine: 3 jobs on 8 cores get 2 threads each,
+      // not 4 each (which would be 12 threads fighting over 8 cores).
+      const coreCount = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4;
+      const threadBudget = Math.max(1, Math.floor(coreCount / poolSize));
+      console.log(`[Converter] converting ${allFiles.length} file(s), ${poolSize} at a time, ${threadBudget} threads each`);
+
+      const conversionPromises = mapWithConcurrency(allFiles, poolSize, async (target, i) => {
         setFileConversionMap(prev => ({
           ...prev,
           [target]: { status: 'converting', progress: 0.05 }
         }));
 
-        // Record persistent event state so status is retained across power loss / restarts
+        // Track which file is actually running. This used to stay pinned at 0,
+        // so the main PAUSE button always targeted allFiles[0] and paused the
+        // wrong job (or nothing) whenever the queue had more than one entry.
+        setCurrentFileIndex(prev => (prev === i ? prev : i));
+
+        // Record persistent event state
         try {
           localStorage.setItem('converter_active_progress', JSON.stringify({
             status: 'converting',
@@ -404,85 +462,138 @@ export function SendToFlashModal({
           bitrate: options.bitrate
         };
 
-        if (dest === 'drive' && options.exportDriveLetter) {
-          if (options.mode === 'original') {
-            const res = await electron.ipcRenderer.invoke('copy-file-to-drive', {
-              filePath: target,
-              driveLetter: options.exportDriveLetter
-            });
-            if (!res.success) throw new Error(res.error || 'Copy to drive failed');
+        try {
+          if (dest === 'drive' && options.exportDriveLetter) {
+            if (options.mode === 'original') {
+              const res = await bridge.ipcRenderer.invoke('copy-file-to-drive', {
+                filePath: target,
+                driveLetter: options.exportDriveLetter
+              });
+              if (!res.success) throw new Error(res.error || 'Copy to drive failed');
+            } else {
+              const res = await bridge.ipcRenderer.invoke('convert-and-send-to-drive', {
+                filePath: target,
+                driveLetter: options.exportDriveLetter,
+                options: {
+                  mode: itemOpt.mode,
+                  format: itemOpt.format,
+                  bitrate: itemOpt.bitrate,
+                  audioBitrate: itemOpt.audioBitrate || options.audioBitrate,
+                  highQuality: itemOpt.highQuality ?? options.highQuality,
+                  tools: itemOpt.tools
+                }
+              });
+              if (!res.success) throw new Error(res.error || 'Conversion to drive failed');
+            }
+            setFileConversionMap(prev => ({
+              ...prev,
+              [target]: { status: 'completed', progress: 1.0 }
+            }));
           } else {
-            const res = await electron.ipcRenderer.invoke('convert-and-send-to-drive', {
+            // Export to Sendtray or custom folder. Passing the destination
+            // lets the engine write straight there instead of writing
+            // beside the source and moving the file afterwards.
+            const targetDir = dest === 'folder' ? options.exportCustomPath : undefined;
+            const res = await bridge.ipcRenderer.invoke('convert-media-file', {
               filePath: target,
-              driveLetter: options.exportDriveLetter,
+              targetDir,
+              destination: dest === 'folder' ? 'folder' : 'sendtray',
               options: {
                 mode: itemOpt.mode,
                 format: itemOpt.format,
-                bitrate: itemOpt.bitrate
+                bitrate: itemOpt.bitrate,
+                audioBitrate: itemOpt.audioBitrate || options.audioBitrate,
+                highQuality: itemOpt.highQuality ?? options.highQuality,
+                threadBudget,
+                tools: itemOpt.tools
               }
             });
-            if (!res.success) throw new Error(res.error || 'Conversion to drive failed');
+            if (res.success && res.outputPath) {
+              // Split writes a numbered series that already sits in
+              // the destination, so every segment is registered and
+              // no relocation happens. A single-file conversion is
+              // relocated out of the source folder as before.
+              const outputs = res.outputs && res.outputs.length
+                ? res.outputs
+                : [res.outputPath];
+              let finalPath = res.outputPath;
+              if (!res.outputs) {
+                try {
+                  const moved = await bridge.ipcRenderer.invoke('move-converted-output', {
+                    sourcePath: res.outputPath,
+                    destination: dest,
+                    destPath: options.exportCustomPath
+                  });
+                  if (moved && moved.success && moved.path) {
+                    finalPath = moved.path;
+                  } else if (moved && moved.error) {
+                    console.warn('[Converter] could not relocate output:', moved.error);
+                  }
+                } catch (moveErr) {
+                  console.warn('[Converter] move failed:', moveErr);
+                }
+              }
+
+              if (dest === 'sendtray') {
+                outputs.forEach(seg => handleMoveFileToSendtray(seg, options.targetFolderId));
+              }
+              setFileConversionMap(prev => ({
+                ...prev,
+                [target]: {
+                  status: 'completed', progress: 1.0, outputPath: finalPath,
+                  segments: res.segments
+                }
+              }));
+
+              // Save completed event
+              try {
+                const history = JSON.parse(localStorage.getItem('converter_event_history') || '[]');
+                history.unshift({
+                  file: target,
+                  output: res.segments
+                    ? `${res.segments} segment(s)`
+                    : (res.outputPath || options.exportDriveLetter || 'Saved'),
+                  timestamp: new Date().toISOString(),
+                  status: 'completed'
+                });
+                localStorage.setItem('converter_event_history', JSON.stringify(history.slice(0, 50)));
+              } catch (e) {}
+            } else {
+              throw new Error(res.error || `Conversion failed for ${target.split(/[\\/]/).pop()}`);
+            }
           }
+          return { file: target, success: true };
+        } catch (err: any) {
           setFileConversionMap(prev => ({
             ...prev,
-            [target]: { status: 'completed', progress: 1.0 }
+            [target]: { status: 'failed', progress: 0, error: err?.message }
           }));
-        } else {
-          // Export to Sendtray or custom folder
-          const targetDir = dest === 'folder' ? options.exportCustomPath : undefined;
-          const res = await electron.ipcRenderer.invoke('convert-media-file', {
-            filePath: target,
-            targetDir,
-            options: {
-              mode: itemOpt.mode,
-              format: itemOpt.format,
-              bitrate: itemOpt.bitrate
-            }
-          });
-          if (res.success && res.outputPath) {
-            if (dest === 'sendtray') {
-              handleMoveFileToSendtray(res.outputPath, options.targetFolderId);
-            }
-            setCopyProgress(1);
-            setFileConversionMap(prev => ({
-              ...prev,
-              [target]: { status: 'completed', progress: 1.0, outputPath: res.outputPath }
-            }));
-
-            // Save completed event
-            try {
-              const history = JSON.parse(localStorage.getItem('converter_event_history') || '[]');
-              history.unshift({
-                file: target,
-                output: res.outputPath || options.exportDriveLetter || 'Saved',
-                timestamp: new Date().toISOString(),
-                status: 'completed'
-              });
-              localStorage.setItem('converter_event_history', JSON.stringify(history.slice(0, 50)));
-            } catch (e) {}
-          } else {
-            setCopyStatus('failed');
-            setErrorMsg(res.error || `Conversion failed for ${target.split(/[\\/]/).pop()}`);
-            setFileConversionMap(prev => ({
-              ...prev,
-              [target]: { status: 'failed', progress: 0, error: res.error }
-            }));
-            setIsConvertingBatch(false);
-            return;
-          }
+          return { file: target, success: false, error: err?.message };
         }
+      });
+
+      // mapWithConcurrency already awaits its own pool.
+      const results = await conversionPromises;
+      const anyFailed = results.some(r => !r.success);
+
+      if (anyFailed) {
+        setCopyStatus('failed');
+        const failedFiles = results.filter(r => !r.success);
+        setErrorMsg(`${failedFiles.length} file(s) failed to convert`);
+      } else {
+        setCopyStatus('completed');
       }
-      setCopyStatus('completed');
       setIsConvertingBatch(false);
+
       try {
         localStorage.removeItem('converter_active_progress');
         localStorage.setItem('converter_last_event', JSON.stringify({
-          status: 'completed',
+          status: anyFailed ? 'partial' : 'completed',
           completedAt: Date.now(),
           totalFiles: allFiles.length
         }));
       } catch (e) {}
-      if (activeSection !== 'prepare') {
+      if (!anyFailed && activeSection !== 'prepare') {
         setTimeout(() => {
           onClose();
         }, 1500);
@@ -505,18 +616,29 @@ export function SendToFlashModal({
     const nextPaused = !isPausedRef.current;
     isPausedRef.current = nextPaused;
     setIsPaused(nextPaused);
-    const currFile = allFiles[currentFileIndex];
-    if (currFile && electron) {
-      await electron.ipcRenderer.invoke('converter-toggle-pause', currFile);
+
+    // Several files convert at once, so the main control pauses/resumes every
+    // in-flight job. It previously paused only allFiles[currentFileIndex],
+    // which was pinned to the first entry.
+    const inFlight = allFiles.filter((f) => {
+      const st = fileConversionMapRef.current[f]?.status;
+      return st === 'converting' || st === 'paused';
+    });
+
+    if (inFlight.length === 0 || !electron) return;
+
+    // Local const so the non-null narrowing survives into the async closure.
+    const bridge = electron;
+    await Promise.all(inFlight.map(async (f) => {
+      try {
+        await bridge.ipcRenderer.invoke('converter-toggle-pause', f);
+      } catch (e) {}
       setFileConversionMap(prev => {
-        const item = prev[currFile];
+        const item = prev[f];
         if (!item) return prev;
-        return {
-          ...prev,
-          [currFile]: { ...item, status: nextPaused ? 'paused' : 'converting' }
-        };
+        return { ...prev, [f]: { ...item, status: nextPaused ? 'paused' : 'converting' } };
       });
-    }
+    }));
   };
 
   const handleConvertSingleFile = async (targetFile: string) => {
@@ -859,6 +981,7 @@ export function SendToFlashModal({
           conversionStatus={fileConversionMap}
           onTogglePauseConversion={handleTogglePauseConversion}
           onConvertSingleFile={handleConvertSingleFile}
+          onQueueFilesRemoved={handleQueueFilesRemoved}
           onTogglePauseSingleFile={handleTogglePauseSingleFile}
           onProceed={handleProceedFromPreparation}
           onDirectSend={(target) => {
@@ -1507,25 +1630,45 @@ export function SendToFlashModal({
                 ) : (
                   drives.map((d, idx) => {
                     const isSelected = idx === selectedIndex;
+                    // A drive that reports no media, or that stopped accepting
+                    // writes while the window was open, is shown but not
+                    // offered. The alternative -- accepting it and failing
+                    // after a full-length encode -- is the thing to avoid.
+                    const notReady = d.ready === false;
+                    const free = typeof d.freeBytes === 'number' && d.freeBytes > 0
+                      ? `${(d.freeBytes / (1024 * 1024 * 1024)).toFixed(1)} GB free`
+                      : '';
                     return (
                       <button
                         key={d.letter}
                         className="btn-secondary"
+                        disabled={notReady}
+                        title={notReady ? 'This drive is not ready. It may have been removed, or a card reader may have no card in it.' : undefined}
                         style={{ 
                           justifyContent: 'space-between', padding: '12px 14px', borderRadius: '10px', fontSize: '13px', width: '100%', display: 'flex', alignItems: 'center', gap: '10px',
                           background: isSelected ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.03)',
                           border: `1px solid ${isSelected ? 'rgba(99,102,241,0.6)' : 'rgba(255,255,255,0.06)'}`,
+                          opacity: notReady ? 0.45 : 1,
+                          cursor: notReady ? 'not-allowed' : 'pointer',
                           transition: 'all 0.15s ease'
                         }}
                         onMouseEnter={() => setSelectedIndex(idx)}
                         onClick={() => handleSend(d.letter)}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <HardDrive size={16} style={{ color: 'var(--primary)' }} />
+                          <HardDrive size={16} style={{ color: notReady ? 'var(--text-muted)' : 'var(--primary)' }} />
                           <span>{d.label}</span>
                           <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>({d.letter.replace('\\', '')})</span>
+                          {free && (
+                            <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{free}</span>
+                          )}
+                          {notReady && (
+                            <span style={{ color: '#f87171', fontSize: '11px', fontWeight: 600 }}>not ready</span>
+                          )}
                         </div>
-                        <span style={{ color: 'var(--primary)', fontWeight: 'bold', fontSize: '12px' }}>Send ➔</span>
+                        <span style={{ color: notReady ? 'var(--text-muted)' : 'var(--primary)', fontWeight: 'bold', fontSize: '12px' }}>
+                          {notReady ? 'Unavailable' : 'Send ➔'}
+                        </span>
                       </button>
                     );
                   })

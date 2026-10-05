@@ -262,15 +262,27 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
                     justifyContent: 'center',
                     flexShrink: 0
                   }}>
+                    {/* Icon sits behind the thumbnail so it shows through if the frame fails */}
+                    <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+                      <Film size={16} color="rgba(255,255,255,0.25)" />
+                    </span>
                     {isVideoFile(fPath) ? (
-                      <video
-                        src={`http://localhost:${streamingPort}/stream?path=${encodeURIComponent(fPath)}#t=1`}
+                      /* Server-rendered poster frame. A <video> element here would spin up a
+                         full demuxer + decoder + range request per queue row on mount. */
+                      <img
+                        src={`http://localhost:${streamingPort}/thumbnail?path=${encodeURIComponent(fPath)}`}
+                        alt=""
+                        width={64}
+                        height={42}
+                        loading="lazy"
+                        decoding="async"
                         style={{
+                          position: 'absolute',
+                          inset: 0,
                           width: '100%',
                           height: '100%',
                           objectFit: 'cover'
                         }}
-                        preload="metadata"
                         onError={(e) => {
                           (e.target as HTMLElement).style.display = 'none';
                         }}

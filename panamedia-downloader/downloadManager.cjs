@@ -124,11 +124,30 @@ function isAdOrGifThumbnail(thumb) {
     l.includes('promo') || l.includes('exclusive') || l.includes('trafficjunky') || l.includes('advert');
 }
 
+// Throttled broadcast — prevents IPC flooding during rapid progress updates
+let broadcastTimer = null;
+let broadcastPending = false;
+
 function broadcast() {
   const main = getMainWindow();
   const player = getPlayerWindow();
   if (main && !main.isDestroyed()) main.webContents.send('downloads-updated', downloadsList);
   if (player && !player.isDestroyed()) player.webContents.send('downloads-updated', downloadsList);
+}
+
+function broadcastThrottled() {
+  if (broadcastTimer) {
+    broadcastPending = true;
+    return;
+  }
+  broadcast();
+  broadcastTimer = setTimeout(() => {
+    broadcastTimer = null;
+    if (broadcastPending) {
+      broadcastPending = false;
+      broadcastThrottled();
+    }
+  }, 300);
 }
 
 function saveState() {
@@ -294,7 +313,7 @@ function startDownload(taskId) {
         }
       }
 
-      broadcast();
+      broadcastThrottled();
     });
 
     activeDownloads[taskId] = {
@@ -405,7 +424,7 @@ function startDownload(taskId) {
     task.eta = d.eta;
     const pct = task.totalBytes > 0 ? Math.round((task.downloadedBytes / task.totalBytes) * 100) : 0;
     task.displayProgress = pct;
-    broadcast();
+    broadcastThrottled();
   });
 
   downloader.on('completed', async () => {

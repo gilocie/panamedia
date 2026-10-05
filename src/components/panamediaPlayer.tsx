@@ -1413,14 +1413,17 @@ function tn({ filePath: e, title: t }) {
     (0, _.useEffect)(() => {
       if (!K) return;
       let onOpenReq = () => {
-        (window as any).__openConverterProDirect = true;
-        De(T || 'media');
+        // If converter is already open (Ee/flashDriveTarget is set), don't re-trigger — just keep it visible
+        if (!Ee) {
+          (window as any).__openConverterProDirect = true;
+          De(T || 'media');
+        }
       };
       K.ipcRenderer.on('converter-open-request', onOpenReq);
       return () => {
         K.ipcRenderer.removeListener('converter-open-request', onOpenReq);
       };
-    }, [T]),
+    }, [T, Ee]),
     (0, W.jsxs)(`div`, {
       onDragOver: Mn,
       onDrop: Nn,
@@ -1903,5 +1906,8 @@ export function nn(e: number, t = 2): string {
 // Example usage:
 //   <PanamediaPlayer filePath="C:/Videos/movie.mp4" title="My Movie" />
 
-export default tn;
-export { tn as PanamediaPlayer };
+import { memo } from 'react';
+
+const PanamediaPlayerMemo = memo(tn);
+export default PanamediaPlayerMemo;
+export { PanamediaPlayerMemo as PanamediaPlayer };

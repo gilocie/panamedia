@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, lazy, Suspense, useMemo } from 'react';
 import {
   Download, Pause, Play, Trash2, Plus, Settings, Folder,
   ExternalLink, Globe, CheckCircle2,
@@ -16,9 +16,24 @@ import { SegmentVisualizer } from './components/SegmentVisualizer';
 import { PlaylistSelector } from './components/PlaylistSelector';
 import { SendToFlashModal } from './components/SendToFlashModal';
 import { PanamediaPlayer } from './components/panamediaPlayer';
-import { DuplicatesPanel } from './components/DuplicatesPanel';
+const DuplicatesPanel = lazy(() => import('./components/DuplicatesPanel').then(m => ({ default: m.DuplicatesPanel })));
 import { AddStreamSiteModal, type NewStreamSiteData } from './components/AddStreamSiteModal';
 import { hashPin } from './components/panamedia/utils/pinSecurity';
+import { useDownloads } from './hooks/useDownloads';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { useSettings } from './hooks/useSettings';
+import { useModals } from './hooks/useModals';
+import { useLibrary } from './hooks/useLibrary';
+import { useBrowser } from './hooks/useBrowser';
+import { useArchive } from './hooks/useArchive';
+import { useUpdater } from './hooks/useUpdater';
+import { useMiniPlayer } from './hooks/useMiniPlayer';
+import { useBinaryInstaller } from './hooks/useBinaryInstaller';
+import { useNetworkStatus } from './hooks/useNetworkStatus';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useFormatPicker } from './hooks/useFormatPicker';
+import { useToasts } from './hooks/useToasts';
+import { HelpTab } from './features/HelpTab';
 
 // Gain access to Electron IPC Renderer safely
 const electron = (window as any).electron || ((window as any).require ? (window as any).require('electron') : null);
@@ -90,7 +105,7 @@ const getNormalizedName = (filename: string) => {
 };
 
 
-interface Task {
+interface AppTask {
   id: string;
   url: string;
   filename: string;
@@ -608,392 +623,134 @@ export default function App() {
   const pathParam = searchParams.get('path') || '';
   const titleParam = searchParams.get('title') || '';
 
-  const [streamingPort, setStreamingPort] = useState(52321);
-  useEffect(() => {
-    if (electron) {
-      electron.ipcRenderer.invoke('get-streaming-port').then((port: number) => {
-        if (port) setStreamingPort(port);
-      });
-    }
-  }, []);
+  const { netSpeed, streamingPort } = useNetworkStatus();
 
   if (mode === 'player') {
     return <PanamediaPlayer filePath={pathParam} title={titleParam} />;
   }
 
   const [activeTab, setActiveTab] = useState<'downloads' | 'queues' | 'settings' | 'integration' | 'browser'>('downloads');
-  const [settingsSubTab, setSettingsSubTab] = useState<'general' | 'folders' | 'security'>('general');
-  const [settingsArchivePin, setSettingsArchivePin] = useState<string>(() => localStorage.getItem('player_archive_pin') || '');
-  const [newSettingsPin, setNewSettingsPin] = useState<string>('');
-  const [confirmSettingsPin, setConfirmSettingsPin] = useState<string>('');
-  const [pinFeedbackMsg, setPinFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [showResetPinModal, setShowResetPinModal] = useState<boolean>(false);
-  const [showNewPin, setShowNewPin] = useState<boolean>(false);
-  const [showConfirmPin, setShowConfirmPin] = useState<boolean>(false);
-  const [newPinFocused, setNewPinFocused] = useState<boolean>(false);
-  const [confirmPinFocused, setConfirmPinFocused] = useState<boolean>(false);
-  const [downloads, setDownloads] = useState<Task[]>([]);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Right panel and Media library states
-  const [rightPanelTab, setRightPanelTab] = useState<'details' | 'library'>('library');
-  const [libraryFiles, setLibraryFiles] = useState<any[]>([]);
-  const [libraryCategory, setLibraryCategory] = useState<'recent' | 'videos' | 'audios' | 'docx' | 'files' | 'duplicates'>('recent');
-  const [librarySearch, setLibrarySearch] = useState('');
-  const [librarySortBy, setLibrarySortBy] = useState<'name' | 'date' | 'size'>('date');
-  const [librarySortOrder, setLibrarySortOrder] = useState<'asc' | 'desc'>('desc');
-  const [syncingLibrary, setSyncingLibrary] = useState(false);
+  // ─── Custom Hooks ────────────────────────────────────────────────
+  const {
+    downloads, setDownloads,
+    selectedTaskId, setSelectedTaskId,
+    searchQuery, setSearchQuery,
+    selectedDownloadIds, setSelectedDownloadIds,
+    extractProgress, setExtractProgress,
+  } = useDownloads();
 
-  // Player Archive state sync
-  const [archivePaths, setArchivePaths] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('player_archive');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const pauseDownload = (id: string) => {
+    if (electron) electron.ipcRenderer.invoke('pause-download', id);
+  };
 
-  useEffect(() => {
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'player_archive' && e.newValue) {
-        try {
-          setArchivePaths(JSON.parse(e.newValue));
-        } catch {}
-      }
-      if (e.key === 'player_archive_pin') {
-        setSettingsArchivePin(e.newValue || '');
-      }
-    };
-    window.addEventListener('storage', handleStorage);
+  const resumeDownload = (id: string) => {
+    if (electron) electron.ipcRenderer.invoke('resume-download', id);
+  };
 
-    const handleArchiveUpdated = (_event: any, paths: string[]) => {
-      if (Array.isArray(paths)) {
-        setArchivePaths(paths);
-      }
-    };
+  const {
+    appSettings, setAppSettings,
+    settingsSubTab, setSettingsSubTab,
+    updateSetting,
+  } = useSettings();
 
-    const handlePinUpdated = (_event: any, pin: string) => {
-      const pinStr = typeof pin === 'string' ? pin : '';
-      setSettingsArchivePin(pinStr);
-      if (!pinStr) {
-        localStorage.removeItem('player_archive_pin');
-      } else {
-        localStorage.setItem('player_archive_pin', pinStr);
-      }
-    };
+  const {
+    showAddModal, setShowAddModal,
+    addUrl, setAddUrl,
+    addFilename, setAddFilename,
+    addSaveDir, setAddSaveDir,
+    startImmediately, setStartImmediately,
+    isYoutubeCheck, setIsYoutubeCheck,
+    interceptedHeaders, setInterceptedHeaders,
+    showFormatModal, setShowFormatModal,
+    formatLoading, setFormatLoading,
+    youtubeInfo, setYoutubeInfo,
+    extractError, setExtractError,
+    formatsSource, setFormatsSource,
+    showPlaylistModal, setShowPlaylistModal,
+    playlistLoading, setPlaylistLoading,
+    playlistInfo, setPlaylistInfo,
+    deleteConfirmTarget, setDeleteConfirmTarget,
+    showClearHistoryModal, setShowClearHistoryModal,
+    selectedFileDetails, setSelectedFileDetails,
+    showFileDetailsModal, setShowFileDetailsModal,
+    flashDriveTarget, setFlashDriveTarget,
+    showAddSiteModal, setShowAddSiteModal,
+    contextMenu, setContextMenu,
+  } = useModals();
 
-    if (electron) {
-      electron.ipcRenderer.on('archive-updated', handleArchiveUpdated);
-      electron.ipcRenderer.on('archive-pin-updated', handlePinUpdated);
-      // Load persistent archive data from disk so files/folders are never lost on updates
-      electron.ipcRenderer.invoke('load-archive-data').then((fileData: any) => {
-        if (fileData?.archivePaths && Array.isArray(fileData.archivePaths)) {
-          setArchivePaths(prev => {
-            const set = new Set(prev.map(p => p.replace(/[\\/]/g, '/').toLowerCase()));
-            for (const fp of fileData.archivePaths) {
-              set.add(fp.replace(/[\\/]/g, '/').toLowerCase());
-            }
-            return Array.from(set);
-          });
-          localStorage.setItem('player_archive', JSON.stringify(fileData.archivePaths));
-        }
-        if (fileData && typeof fileData.archivePin === 'string') {
-          setSettingsArchivePin(fileData.archivePin);
-          if (fileData.archivePin) {
-            localStorage.setItem('player_archive_pin', fileData.archivePin);
-          } else {
-            localStorage.removeItem('player_archive_pin');
-          }
-        }
-      }).catch(() => {});
-    }
-    return () => {
-      window.removeEventListener('storage', handleStorage);
-      if (electron) {
-        electron.ipcRenderer.removeListener('archive-updated', handleArchiveUpdated);
-        electron.ipcRenderer.removeListener('archive-pin-updated', handlePinUpdated);
-      }
-    };
-  }, []);
+  const {
+    rightPanelTab, setRightPanelTab,
+    libraryFiles,
+    libraryCategory, setLibraryCategory,
+    librarySearch, setLibrarySearch,
+    librarySortBy, setLibrarySortBy,
+    librarySortOrder, setLibrarySortOrder,
+    syncingLibrary,
+    selectedLibraryPath, setSelectedLibraryPath,
+    libraryViewMode, setLibraryViewMode,
+    expandedFolders, setExpandedFolders,
+    imgErrors, setImgErrors,
+    duplicateDeletePaths, setDuplicateDeletePaths,
+    expandedDupGroups, setExpandedDupGroups,
+    syncLibrary,
+    toggleDuplicateDelete,
+  } = useLibrary();
 
-  const isItemArchived = useCallback((filePath?: string) => {
-    if (!filePath) return false;
-    const target = filePath.replace(/[\\/]/g, '/').toLowerCase();
-    return archivePaths.some(p => {
-      const arch = p.replace(/[\\/]/g, '/').toLowerCase();
-      return target === arch || target.startsWith(arch + '/');
-    });
-  }, [archivePaths]);
+  const {
+    currentBrowserUrl,
+    urlInput, setUrlInput,
+    isWebviewLoading, setIsWebviewLoading,
+    isDetectingStream, setIsDetectingStream,
+    streamSites, setStreamSites,
+    webviewRef,
+    navigateBrowser, deleteStreamSite,
+    setWebviewRef,
+  } = useBrowser();
 
-  // Browser state
-  const [browserUrl] = useState('https://www.youtube.com');
-  const [helpSubTab, setHelpSubTab] = useState<'guide' | 'license'>('guide');
+  // ─── Archive + PIN ───────────────────────────────────────────────
+  const {
+    archivePaths: _archivePaths, setArchivePaths,
+    settingsArchivePin, setSettingsArchivePin,
+    newSettingsPin, setNewSettingsPin,
+    confirmSettingsPin, setConfirmSettingsPin,
+    pinFeedbackMsg, setPinFeedbackMsg,
+    showResetPinModal, setShowResetPinModal,
+    showNewPin, setShowNewPin,
+    showConfirmPin, setShowConfirmPin,
+    newPinFocused, setNewPinFocused,
+    confirmPinFocused, setConfirmPinFocused,
+    isItemArchived,
+  } = useArchive();
+
+
+  // ─── Updater ─────────────────────────────────────────────────────
+  const {
+    showReleaseDialog, setShowReleaseDialog,
+    releaseCheckStatus, setReleaseCheckStatus,
+    latestReleaseVersion,
+    releaseDownloadUrl: _releaseDownloadUrl,
+    updateDownloadProgress,
+    updateDownloadedBytes,
+    updateTotalBytes,
+    updateInstallerPath: _updateInstallerPath,
+    updateError,
+    releaseNotes,
+    checkReleaseUpdate,
+    startUpdateDownload,
+    installUpdate,
+    compareVersions,
+  } = useUpdater();
+
+
+  // ─── App-level constants ─────────────────────────────────────────
   const APP_VERSION = '1.0.1';
-  const [showReleaseDialog, setShowReleaseDialog] = useState(false);
-  const [releaseCheckStatus, setReleaseCheckStatus] = useState<'idle' | 'checking' | 'up-to-date' | 'update-available' | 'no-internet' | 'downloading' | 'download-complete' | 'installing' | 'error'>('idle');
-  const [latestReleaseVersion, setLatestReleaseVersion] = useState(APP_VERSION);
-  const [releaseDownloadUrl, setReleaseDownloadUrl] = useState('https://panamedia.lovable.app/api/public/download/windows');
-  const [updateDownloadProgress, setUpdateDownloadProgress] = useState(0);
-  const [updateDownloadedBytes, setUpdateDownloadedBytes] = useState(0);
-  const [updateTotalBytes, setUpdateTotalBytes] = useState(0);
-  const [updateInstallerPath, setUpdateInstallerPath] = useState('');
-  const [updateError, setUpdateError] = useState('');
-  const [releaseNotes, setReleaseNotes] = useState('');
+  const [helpSubTab, setHelpSubTab] = useState<'guide' | 'license'>('guide');
+  const [browserUrl] = useState('https://www.youtube.com');
+  const loadedSettingsRef = useRef(false);
 
-  const compareVersions = (v1: string, v2: string): number => {
-    const clean1 = (v1 || '').replace(/^[vV]/, '').trim();
-    const clean2 = (v2 || '').replace(/^[vV]/, '').trim();
-    const parts1 = clean1.split('.').map(n => parseInt(n, 10) || 0);
-    const parts2 = clean2.split('.').map(n => parseInt(n, 10) || 0);
-    const maxLen = Math.max(parts1.length, parts2.length);
-    for (let i = 0; i < maxLen; i++) {
-      const p1 = parts1[i] || 0;
-      const p2 = parts2[i] || 0;
-      if (p1 > p2) return 1;
-      if (p1 < p2) return -1;
-    }
-    return 0;
-  };
 
-  // Listen for update download progress from main process
-  useEffect(() => {
-    if (!electron) return;
-    const handler = (_event: any, data: { downloadedBytes: number; totalBytes: number; progress: number }) => {
-      setUpdateDownloadedBytes(data.downloadedBytes);
-      setUpdateTotalBytes(data.totalBytes);
-      if (data.progress >= 0) setUpdateDownloadProgress(data.progress);
-    };
-    electron.ipcRenderer.on('update-download-progress', handler);
-    return () => { electron.ipcRenderer.removeListener('update-download-progress', handler); };
-  }, []);
-
-  const checkReleaseUpdate = async (isManual = false) => {
-    // If user clicked manually, show dialog immediately to provide instant feedback
-    if (isManual) {
-      setShowReleaseDialog(true);
-    }
-    setReleaseCheckStatus('checking');
-    setUpdateError('');
-
-    try {
-      // 1. Check internet connectivity first
-      let isOnline = true;
-      if (electron) {
-        try {
-          const netCheck = await electron.ipcRenderer.invoke('check-internet');
-          isOnline = !!netCheck?.online;
-        } catch {
-          isOnline = navigator.onLine;
-        }
-      } else {
-        isOnline = navigator.onLine;
-      }
-
-      if (!isOnline) {
-        setReleaseCheckStatus('no-internet');
-        if (isManual) {
-          setShowReleaseDialog(true); // Popup appears if user clicked button manually
-        } else {
-          setShowReleaseDialog(false); // Do not disturb user with popup if checking automatically
-        }
-        return;
-      }
-
-      const startTime = Date.now();
-      let foundVersion = APP_VERSION;
-      let dlUrl = 'https://panamedia.lovable.app/api/public/download/windows';
-      let foundUpdate = false;
-      let notes = '';
-
-      // 1. Primary: Panamedia API (official update source)
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
-        const apiRes = await fetch('https://panamedia.lovable.app/api/public/latest/windows', {
-          headers: { 'cache-control': 'no-cache' },
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        if (apiRes.ok) {
-          const apiData = await apiRes.json();
-          if (apiData) {
-            const parsed = (apiData.version || '').replace(/^[vV]/, '').trim();
-            if (parsed) foundVersion = parsed;
-            if (apiData.download_url) dlUrl = apiData.download_url;
-            else if (apiData.url) dlUrl = apiData.url;
-            else dlUrl = 'https://panamedia.lovable.app/api/public/download/windows';
-            if (apiData.release_notes || apiData.notes) notes = apiData.release_notes || apiData.notes;
-            if (apiData.available === true || compareVersions(foundVersion, APP_VERSION) > 0) {
-              foundUpdate = true;
-            }
-          }
-        }
-      } catch (e) {
-        // Panamedia API unavailable
-      }
-
-      // 2. Fallback: GitHub Releases API
-      if (!foundUpdate) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 8000);
-          const ghRes = await fetch('https://api.github.com/repos/gilocie/net-downloader/releases/latest', {
-            headers: { 'Accept': 'application/vnd.github.v3+json' },
-            signal: controller.signal
-          });
-          clearTimeout(timeoutId);
-          if (ghRes.ok) {
-            const ghData = await ghRes.json();
-            if (ghData && (ghData.tag_name || ghData.name)) {
-              const raw = ghData.tag_name || ghData.name || '';
-              const parsed = raw.replace(/^[vV]/, '').trim();
-              if (parsed) {
-                foundVersion = parsed;
-                dlUrl = ghData.html_url || dlUrl;
-                if (ghData.body) notes = ghData.body;
-                if (compareVersions(parsed, APP_VERSION) > 0) {
-                  foundUpdate = true;
-                }
-              }
-            }
-          }
-        } catch (e) {
-          // GitHub API skipped/offline
-        }
-      }
-
-      // Ensure the "Checking updates..." button activity is clearly visible to the user
-      const elapsed = Date.now() - startTime;
-      const minDuration = 1800;
-      if (elapsed < minDuration) {
-        await new Promise(r => setTimeout(r, minDuration - elapsed));
-      }
-
-      setLatestReleaseVersion(foundVersion);
-      setReleaseDownloadUrl(dlUrl);
-      setReleaseNotes(notes);
-
-      const isActuallyNewer = compareVersions(foundVersion, APP_VERSION) > 0;
-      if (isActuallyNewer) {
-        setReleaseCheckStatus('update-available');
-        // Only show dialogue automatically if there is genuinely a newer version!
-        setShowReleaseDialog(true);
-      } else {
-        setReleaseCheckStatus('up-to-date');
-        // If up to date, only keep dialogue if user manually clicked check
-        if (!isManual) {
-          setShowReleaseDialog(false);
-        }
-      }
-    } catch (err) {
-      console.warn('Release check error:', err);
-      if (isManual) {
-        setReleaseCheckStatus('no-internet');
-        setShowReleaseDialog(true);
-      } else {
-        setReleaseCheckStatus('idle');
-        setShowReleaseDialog(false);
-      }
-    }
-  };
-
-  // Automatically check for new releases every 5 minutes when internet connection is detected
-  useEffect(() => {
-    // Helper to probe internet connectivity
-    const hasInternet = async (): Promise<boolean> => {
-      if (!navigator.onLine) return false;
-      if (electron) {
-        try {
-          const netCheck = await electron.ipcRenderer.invoke('check-internet');
-          if (netCheck && typeof netCheck.online === 'boolean') {
-            return netCheck.online;
-          }
-        } catch {
-          // ignore
-        }
-      }
-      return navigator.onLine;
-    };
-
-    // 1. Initial background check 3.5 seconds after startup if internet is detected
-    const startupTimer = setTimeout(async () => {
-      if (await hasInternet()) {
-        checkReleaseUpdate(false);
-      }
-    }, 3500);
-
-    // 2. Periodic background check every 5 minutes (300,000 ms) when internet connection is detected
-    const intervalTimer = setInterval(async () => {
-      if (await hasInternet()) {
-        checkReleaseUpdate(false);
-      }
-    }, 5 * 60 * 1000);
-
-    // 3. Trigger check immediately when internet connection is detected/reconnected
-    const handleOnline = async () => {
-      if (await hasInternet()) {
-        checkReleaseUpdate(false);
-      }
-    };
-    window.addEventListener('online', handleOnline);
-
-    return () => {
-      clearTimeout(startupTimer);
-      clearInterval(intervalTimer);
-      window.removeEventListener('online', handleOnline);
-    };
-  }, []);
-
-  const startUpdateDownload = async () => {
-    if (!electron) return;
-    setReleaseCheckStatus('downloading');
-    setUpdateDownloadProgress(0);
-    setUpdateDownloadedBytes(0);
-    setUpdateTotalBytes(0);
-    setUpdateInstallerPath('');
-    setUpdateError('');
-
-    try {
-      const result = await electron.ipcRenderer.invoke('download-app-update', {
-        downloadUrl: releaseDownloadUrl || 'https://panamedia.lovable.app/api/public/download/windows',
-        fileName: 'PanamediaSetup.exe'
-      });
-
-      if (result.success && result.installerPath) {
-        setUpdateInstallerPath(result.installerPath);
-        setUpdateDownloadProgress(100);
-        setReleaseCheckStatus('download-complete');
-      } else {
-        setUpdateError(result.error || 'Download failed.');
-        setReleaseCheckStatus('error');
-      }
-    } catch (err: any) {
-      setUpdateError(err.message || 'Download failed.');
-      setReleaseCheckStatus('error');
-    }
-  };
-
-  const installUpdate = async () => {
-    if (!electron || !updateInstallerPath) return;
-    setReleaseCheckStatus('installing');
-    try {
-      await electron.ipcRenderer.invoke('install-app-update', { installerPath: updateInstallerPath });
-    } catch (err: any) {
-      setUpdateError(err.message || 'Failed to launch installer.');
-      setReleaseCheckStatus('error');
-    }
-  };
-
-  const [currentBrowserUrl, setCurrentBrowserUrl] = useState('https://www.youtube.com');
-  const [urlInput, setUrlInput] = useState('https://www.youtube.com');
-  const webviewRef = useRef<any>(null);
   const downloadsTableRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setUrlInput(currentBrowserUrl);
-  }, [currentBrowserUrl]);
 
   // Clean campaign/preview/interstitial links into authentic direct broadcaster streams
   const cleanStreamUrl = (rawUrl: string): string => {
@@ -1091,56 +848,6 @@ export default function App() {
     { name: 'TikTok', url: 'https://www.tiktok.com', color: '#010101' }
   ];
 
-  const [streamSites, setStreamSites] = useState<any[]>(() => {
-    const saved = localStorage.getItem('stream_sites');
-    if (saved) {
-      try { 
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed.filter(s => {
-            const n = (s?.name || '').toLowerCase();
-            const u = (s?.url || '').toLowerCase();
-            return !n.includes('facebook') && !n.includes('instagram') && !u.includes('facebook.com') && !u.includes('instagram.com');
-          });
-        }
-      } catch (e) { }
-    }
-    return DEFAULT_STREAM_SITES;
-  });
-
-  useEffect(() => {
-    localStorage.setItem('stream_sites', JSON.stringify(streamSites));
-  }, [streamSites]);
-
-  const [showAddSiteModal, setShowAddSiteModal] = useState<boolean>(false);
-
-  const navigateBrowser = (url: string) => {
-    let formattedUrl = url.trim();
-    if (!/^https?:\/\//i.test(formattedUrl)) {
-      formattedUrl = 'https://' + formattedUrl;
-    }
-    formattedUrl = cleanStreamUrl(formattedUrl);
-    if (webviewRef.current) {
-      try {
-        if (typeof webviewRef.current.loadURL === 'function') {
-          webviewRef.current.loadURL(formattedUrl).catch(() => {});
-        } else {
-          webviewRef.current.src = formattedUrl;
-        }
-        setCurrentBrowserUrl(formattedUrl);
-        if (electron?.ipcRenderer) {
-          electron.ipcRenderer.send('set-intended-stream-url', formattedUrl);
-        }
-      } catch (e) {
-        console.error(e);
-      }
-    }
-  };
-
-  const deleteStreamSite = (url: string) => {
-    setStreamSites(prev => prev.filter(s => s.url !== url));
-  };
-
   const getSiteIcon = (site: any) => {
     if (site.showIcon === false) return null;
 
@@ -1209,317 +916,37 @@ export default function App() {
     return <Globe size={12} style={{ color: 'var(--primary)', flexShrink: 0 }} />;
   };
 
-  const [isWebviewLoading, setIsWebviewLoading] = useState(false);
-  const [isDetectingStream, setIsDetectingStream] = useState(false);
 
-  const setWebviewRef = (el: any) => {
-    if (!el || webviewRef.current === el) return;
-    webviewRef.current = el;
-
-    const handleNav = (e: any) => {
-      const u = (e.url || '').toLowerCase();
-      // Drop ad campaign parameter redirects so state isn't polluted
-      if (u.includes('campaign=') && u.includes('click_id=')) return;
-      if (u.includes('/tours/') && u.includes('campaign=')) return;
-      if (u.includes('track=00e_interstitial')) return;
-      setCurrentBrowserUrl(e.url || '');
-    };
-
-    const handleStartLoad = () => setIsWebviewLoading(true);
-    const handleStopLoad = () => setIsWebviewLoading(false);
-
-    const handleDomReady = () => {
-      try {
-        // Neutralize popups and auto-skip YouTube ads without modifying site styles
-        el.executeJavaScript?.(`
-          (() => {
-            try {
-              window.open = function() { return null; };
-
-              // Auto-skip video ads
-              const skipVideoAds = () => {
-                const skipBtns = document.querySelectorAll(
-                  '.ytp-ad-skip-button, .ytp-skip-ad-button, .videoAdUiSkipButton, .ytp-ad-skip-button-modern'
-                );
-                skipBtns.forEach(b => { try { b.click(); } catch(e) {} });
-              };
-              setInterval(skipVideoAds, 1000);
-            } catch (e) {}
-          })();
-        `)?.catch?.(() => {});
-      } catch {}
-    };
-
-    const handleNewWindow = (e: any) => {
-      e.preventDefault?.();
-      // Silently deny all popups - never navigate away the active video player
-      console.log('[Stream Browser] Suppressed new-window popup request:', e.url);
-    };
-
-    const handleWillNavigate = (e: any) => {
-      const targetUrl = e.url || '';
-      const lower = targetUrl.toLowerCase();
-
-      // Block any redirect to known cam/affiliate/ad networks or campaign parameters
-      const isAdOrCampaign = lower.includes('/tours/') ||
-                             lower.includes('/in/?') ||
-                             lower.includes('campaign=') ||
-                             lower.includes('click_id=') ||
-                             lower.includes('track=00e') ||
-                             lower.includes('popunder') ||
-                             lower.includes('trafficjunky') ||
-                             lower.includes('exoclick') ||
-                             lower.includes('juicyads') ||
-                             lower.includes('chaturbate') ||
-                             lower.includes('stripchat') ||
-                             lower.includes('camsoda') ||
-                             lower.includes('bongacams') ||
-                             lower.includes('livecampreview');
-
-      if (isAdOrCampaign) {
-        console.log('[Stream Browser] Blocked malicious redirect hijacking to:', targetUrl);
-        e.preventDefault?.();
-        return;
-      }
-    };
-
-    el.addEventListener('did-navigate', handleNav);
-    el.addEventListener('did-navigate-in-page', handleNav);
-    el.addEventListener('will-navigate', handleWillNavigate);
-    el.addEventListener('did-start-loading', handleStartLoad);
-    el.addEventListener('did-stop-loading', handleStopLoad);
-    el.addEventListener('did-fail-load', handleStopLoad);
-    el.addEventListener('dom-ready', handleDomReady);
-    el.addEventListener('new-window', handleNewWindow);
-  };
-
-  // File Details Modal state
-  const [selectedFileDetails, setSelectedFileDetails] = useState<any | null>(null);
-  const [showFileDetailsModal, setShowFileDetailsModal] = useState<boolean>(false);
-
-  // Bulk downloads selection state
-  const [selectedDownloadIds, setSelectedDownloadIds] = useState<string[]>([]);
-
-  // Simulated progress bar states
-  const [extractProgress, setExtractProgress] = useState(0);
 
   // Clear History Modal state
-  const [showClearHistoryModal, setShowClearHistoryModal] = useState<boolean>(false);
-
-  // Format source tracker
-  const [formatsSource, setFormatsSource] = useState<'add_modal' | 'browser' | null>(null);
-
-  // Custom delete confirmation modal state
-  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<{
-    type: 'download' | 'file' | 'bulk-tasks' | 'all-history';
-    title: string;
-    message: string;
-    taskId?: string;
-    filePath?: string;
-    showDeleteFileOption?: boolean;
-    taskIds?: string[];
-    onConfirm: (extraData?: any) => void;
-  } | null>(null);
-
   // Context Menu state
-  const [contextMenu, setContextMenu] = useState<{
-    x: number;
-    y: number;
-    visible: boolean;
-    type: 'file';
-    targetPath?: string;
-  }>({ x: 0, y: 0, visible: false, type: 'file' });
-
-  // Send to Flash state
-  const [flashDriveTarget, setFlashDriveTarget] = useState<string | null>(null);
-
-  // Library view modes and accordions
-  const [libraryViewMode, setLibraryViewMode] = useState<'files' | 'folders'>('files');
-  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
-  const [imgErrors, setImgErrors] = useState<Record<string, boolean>>({});
-
-  // Duplicate prompt states
-  const [duplicateDeletePaths, setDuplicateDeletePaths] = useState<string[]>([]);
-  const [expandedDupGroups, setExpandedDupGroups] = useState<Record<string, boolean>>({});
-
-  // Auto-mark oldest duplicates when libraryFiles changes
-  useEffect(() => {
-    const nameMap = new Map<string, any[]>();
-    libraryFiles.forEach(f => {
-      const normName = getNormalizedName(f.name);
-      if (!nameMap.has(normName)) nameMap.set(normName, []);
-      nameMap.get(normName)!.push(f);
-    });
-
-    const initialDeletePaths: string[] = [];
-    for (const [, group] of nameMap.entries()) {
-      if (group.length > 1) {
-        // Sort by modification time (oldest first)
-        const sorted = [...group].sort((a, b) => (a.mtime || 0) - (b.mtime || 0));
-        // Auto-mark the oldest copy for deletion
-        initialDeletePaths.push(sorted[0].path);
-      }
-    }
-    setDuplicateDeletePaths(initialDeletePaths);
-  }, [libraryFiles]);
-
   // Mini-player state (when player window is minimized to sidebar)
-  const [miniPlayerState, setMiniPlayerState] = useState<{
-    filePath: string;
-    filename: string;
-    playing: boolean;
-    currentTime: number;
-    duration: number;
-    volume: number;
-    minimized: boolean;
-  } | null>(null);
+  // ─── Mini Player ─────────────────────────────────────────────────
+  const {
+    miniPlayerState,
+    miniPlayerHovered, setMiniPlayerHovered,
+    miniThumbError, setMiniThumbError,
+    miniVideoRef,
+  } = useMiniPlayer();
 
-  const [miniPlayerHovered, setMiniPlayerHovered] = useState(false);
-  const [miniThumbError, setMiniThumbError] = useState(false);
-
-  useEffect(() => {
-    setMiniThumbError(false);
-  }, [miniPlayerState?.filePath]);
-
-  const miniVideoRef = useRef<HTMLVideoElement>(null);
-
-  // Real-time OS-level network download speed
-  const [netSpeed, setNetSpeed] = useState<number>(0);
-
-  // Sync mini-player video with main player state
-  useEffect(() => {
-    const video = miniVideoRef.current;
-    if (!video || !miniPlayerState || !miniPlayerState.minimized) return;
-
-    // Sync play/pause state
-    if (miniPlayerState.playing) {
-      video.play().catch(() => { });
-    } else {
-      video.pause();
-    }
-
-    // Sync currentTime if it drifts by more than 1.2 seconds
-    if (Math.abs(video.currentTime - miniPlayerState.currentTime) > 1.2) {
-      video.currentTime = miniPlayerState.currentTime;
-    }
-  }, [miniPlayerState?.playing, miniPlayerState?.currentTime, miniPlayerState?.minimized]);
+  // ─── Real-time network speed (provided by useNetworkStatus above) ─
 
 
-  // Selection for right panel media library files
-  const [selectedLibraryPath, setSelectedLibraryPath] = useState<string | null>(null);
+  // ─── Format Picker + Playlist ─────────────────────────────────────────────
+  const { fetchFormats, handleCloseFormatsModal, handleDownloadPlaylist } = useFormatPicker({
+    setIsYoutubeCheck, setAddUrl, setFormatLoading, setExtractError,
+    setExtractProgress, setShowFormatModal, setYoutubeInfo,
+    setShowAddModal,
+    setFormatsSource: setFormatsSource as (v: 'add_modal' | 'browser' | null) => void,
+    formatsSource,
+    setShowPlaylistModal, setPlaylistLoading, setPlaylistInfo,
+  });
 
-  const fetchFormats = async (url: string, options: { title?: string; pageUrl?: string; headers?: Record<string, string>; thumbnail?: string; duration?: number; currentTime?: number } = {}) => {
-    let targetUrl = url;
-    const isYt = (url || '').toLowerCase().includes('youtube.com/') || (url || '').toLowerCase().includes('youtu.be/');
-    setIsYoutubeCheck(isYt);
 
-    if (isYt) {
-      try {
-        const p = new URL(url);
-        if (p.hostname.includes('youtube.com') && p.searchParams.has('v')) {
-          targetUrl = `https://www.youtube.com/watch?v=${p.searchParams.get('v')}`;
-        } else if (p.hostname.includes('youtu.be')) {
-          const v = p.pathname.replace(/^\//, '').split('/')[0];
-          if (v) targetUrl = `https://www.youtube.com/watch?v=${v}`;
-        }
-      } catch (e) {}
-    }
 
-    setAddUrl(targetUrl);
-    setFormatLoading(true);
-    setExtractError(null);
-    setExtractProgress(0);
-    setShowFormatModal(true);
 
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += Math.floor(Math.random() * 8) + 4;
-      if (progress >= 95) {
-        progress = 95;
-        clearInterval(interval);
-      }
-      setExtractProgress(progress);
-    }, 100);
 
-    try {
-      const channel = isYt ? 'get-youtube-formats' : 'get-web-video-formats';
-      const res = await electron.ipcRenderer.invoke(channel, targetUrl, options);
-      clearInterval(interval);
 
-      if (res.success) {
-        const isAdOrGif = (src: string) => {
-          if (!src || typeof src !== 'string') return true;
-          const l = src.toLowerCase();
-          if (l.includes('youtube.com') || l.includes('ytimg.com') || l.includes('googlevideo.com')) {
-            return false;
-          }
-          return l.endsWith('.gif') || l.includes('.gif?') || l.includes('.gif#') || l.includes('.gif') ||
-            l.includes('data:image/gif') || l.includes('doubleclick') || l.includes('googleads') ||
-            l.includes('ad_') || l.includes('ad-') || l.includes('banner') || l.includes('sponsor') ||
-            l.includes('promo') || l.includes('exclusive') || l.includes('trafficjunky') || l.includes('advert');
-        };
-        const ytFallback = (isYt && res.info?.id) ? `https://i.ytimg.com/vi/${res.info.id}/hqdefault.jpg` : '';
-        const resolvedThumb = (!isAdOrGif(options.thumbnail || '') ? options.thumbnail : (!isAdOrGif(res.info?.thumbnail || '') ? res.info?.thumbnail : '')) || ytFallback;
-
-        setYoutubeInfo({
-          ...res.info,
-          thumbnail: resolvedThumb,
-          duration: options.duration || res.info?.duration || 0,
-          title: (() => {
-            const isGeneric = (t?: string) => !t || /^(free\s*movies?|watch\s*(movies?|online|free)|online\s*movies?|movies?|video\s*stream|web\s*video|home|stream|player|free\s*streaming|full\s*movie|watch\s*hd|hd\s*movies?|free\s*videos?|movie\s*stream|streaming|web\s*video\s*stream)$/i.test(t.trim());
-            const isOverlay = (t?: string) => !t ? false : (/previewing|unlock\s*(full\s*)?access|go\s*premium|get\s*premium/i.test(t) || /\d{1,2}:\d{2}\s*\/\s*\d{1,2}:\d{2}/.test(t) || t.length > 100);
-            const isGenericFile = (t?: string) => !t ? false : /^(local|index|master|playlist|stream|chunklist|video|media|output|hls)\.(m3u8|mp4|m4v|webm|mp3|m4a)$/i.test(t.trim());
-            const isBad = (t?: string) => isGeneric(t) || isOverlay(t) || isGenericFile(t);
-            if (options.title && !isBad(options.title)) return options.title;
-            if (res.info?.title && !isBad(res.info.title)) return res.info.title;
-            // Extract meaningful title from URL when all candidates are bad
-            try {
-              const u = new URL(targetUrl);
-              const skipWords = ['spa','videoplaypage','movies','movie','watch','video','play','v','embed','stream','page','streams','hls','dash','media','content','api','public'];
-              const genericFiles = /^(local|index|master|playlist|stream|chunklist|video|media|output|hls|dash|content|main|default|source|play|file|data)\.(m3u8|mp4|m4v|webm|mkv|mov|mp3|m4a)$/i;
-              const parts = u.pathname.split('/').filter(Boolean);
-              for (let i = parts.length - 1; i >= 0; i--) {
-                const p = parts[i];
-                if (skipWords.includes(p.toLowerCase()) || genericFiles.test(p)) continue;
-                if (!/^[a-f0-9]{20,}$/i.test(p)) {
-                  const clean = p.replace(/\.(m3u8|mp4|m4v|webm|mkv|mov|mp3|m4a)$/i, '').replace(/[-_][a-zA-Z0-9]{6,25}$/, '').replace(/[-_]/g, ' ');
-                  if (clean.trim().length > 2) return clean.trim().replace(/\b\w/g, (c: string) => c.toUpperCase());
-                }
-              }
-              // Hostname fallback
-              const host = u.hostname.replace(/^(www|cdn|api|media|stream|hls|vod)\d*\./i, '').split('.')[0];
-              if (host && host.length > 2) return host.replace(/[-_]/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) + ' Stream';
-            } catch (e) {}
-            return 'Web Video';
-          })(),
-          isYoutube: isYt,
-          pageUrl: options.pageUrl || (isYt ? '' : targetUrl),
-          headers: options.headers
-        });
-        setExtractProgress(100);
-        setTimeout(() => {
-          setFormatLoading(false);
-        }, 300);
-      } else {
-        setExtractError(res.error);
-        setFormatLoading(false);
-      }
-    } catch (err: any) {
-      clearInterval(interval);
-      setExtractError(err.message);
-      setFormatLoading(false);
-    }
-  };
-
-  const handleCloseFormatsModal = () => {
-    setShowFormatModal(false);
-    setFormatLoading(false);
-    setExtractError(null);
-    if (formatsSource === 'add_modal') {
-      setShowAddModal(true);
-    }
-    setFormatsSource(null);
-  };
 
   const handleToggleSelect = (taskId: string) => {
     setSelectedDownloadIds(prev =>
@@ -1527,7 +954,7 @@ export default function App() {
     );
   };
 
-  const handleToggleSelectAll = (filteredDownloadsList: Task[]) => {
+  const handleToggleSelectAll = (filteredDownloadsList: AppTask[]) => {
     if (selectedDownloadIds.length === filteredDownloadsList.length) {
       setSelectedDownloadIds([]);
     } else {
@@ -1581,46 +1008,24 @@ export default function App() {
     setShowClearHistoryModal(false);
   };
 
-  // Modals state
-  const [showAddModal, setShowAddModal] = useState<boolean>(false);
-  const [addUrl, setAddUrl] = useState<string>('');
-  const [addFilename, setAddFilename] = useState<string>('');
-  const [addSaveDir, setAddSaveDir] = useState<string>('');
-  const [startImmediately, setStartImmediately] = useState<boolean>(true);
-  const [isYoutubeCheck, setIsYoutubeCheck] = useState<boolean>(false);
-  const [interceptedHeaders, setInterceptedHeaders] = useState<Record<string, string>>({});
+  // YouTube Playlist modal state is provided by useModals() above
 
-  // YouTube Playlist modal
-  const [showPlaylistModal, setShowPlaylistModal] = useState<boolean>(false);
-  const [playlistLoading, setPlaylistLoading] = useState<boolean>(false);
-  const [playlistInfo, setPlaylistInfo] = useState<any>(null);
+  // Application Settings (provided by useSettings hook)
 
-  // Application Settings
-  const [appSettings, setAppSettings] = useState<AppSettings>({
-    connections: 8,
-    downloadDir: '',
-    autoCompress: false,
-    compressionCRF: 23,
-    maxConcurrent: 2,
-    syncedFolders: []
-  });
+  // ─── Binary Installer ─────────────────────────────────────────────
+  const {
+    binariesInstalled,
+    installingBinaries,
+    installProgress,
+    startInstall: handleInstallBinaries,
+    pauseInstall: handlePauseBinaries,
+    resumeInstall: handleResumeBinaries,
+    cancelInstall: handleCancelInstall,
+  } = useBinaryInstaller();
 
-  // Binary checks (first run setup)
-  const [binariesInstalled, setBinariesInstalled] = useState<boolean>(true);
-  const [installingBinaries, setInstallingBinaries] = useState<boolean>(false);
-  const [installProgress, setInstallProgress] = useState<{ status: string, progress: number, isPaused?: boolean, error?: string }>({ status: 'idle', progress: 0 });
+  // ─── Toast Notifications ──────────────────────────────────────────
+  const { toasts, addToast } = useToasts();
 
-  // Custom toast notifications
-  const [toasts, setToasts] = useState<Array<{ id: string, message: string }>>([]);
-
-  // Format selector states
-  const [showFormatModal, setShowFormatModal] = useState<boolean>(false);
-  const [formatLoading, setFormatLoading] = useState<boolean>(false);
-  const [youtubeInfo, setYoutubeInfo] = useState<any>(null);
-  const [extractError, setExtractError] = useState<string | null>(null);
-
-  // Ref to help load settings initially
-  const loadedSettingsRef = useRef(false);
 
   // resolveDuplicate was removed — duplicate resolution is handled via handleResolveDuplicates (physical delete)
 
@@ -1654,15 +1059,7 @@ export default function App() {
     return res;
   };
 
-  const toggleDuplicateDelete = (path: string) => {
-    setDuplicateDeletePaths(prev => {
-      if (prev.includes(path)) {
-        return prev.filter(p => p !== path);
-      } else {
-        return [...prev, path];
-      }
-    });
-  };
+  // toggleDuplicateDelete is provided by useLibrary()
 
   const handleResolveDuplicates = async () => {
     for (const path of duplicateDeletePaths) {
@@ -1673,79 +1070,32 @@ export default function App() {
   };
 
 
+  // syncLibrary is provided by useLibrary()
 
-  const syncLibrary = async () => {
-    if (!electron) return;
-    setSyncingLibrary(true);
-    try {
-      const files = await electron.ipcRenderer.invoke('sync-media-library');
-
-      // Check for duplicate filenames from different paths
-      const duplicatesMap = new Map<string, any[]>();
-      for (const f of files) {
-        const normName = getNormalizedName(f.name);
-        if (!duplicatesMap.has(normName)) {
-          duplicatesMap.set(normName, []);
-        }
-        duplicatesMap.get(normName)!.push(f);
-      }
-
-      // Find duplicates with different paths
-      const duplicateList: any[] = [];
-      for (const [name, list] of duplicatesMap.entries()) {
-        if (list.length > 1) {
-          const paths = new Set(list.map(f => f.path));
-          if (paths.size > 1) {
-            duplicateList.push({ name, list });
-          }
-        }
-      }
-
-      if (duplicateList.length > 0) {
-        // Duplicates are shown silently in the Duplicates library tab — no dialog
-        // (setPendingDuplicatePrompt removed intentionally)
-      }
-
-      setLibraryFiles(files);
-      if (electron) {
-        electron.ipcRenderer.send('library-synced', files);
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setSyncingLibrary(false);
-    }
-  };
-
-  // Load state and listen to IPC events
+  // ─── Startup IPC listeners (downloads + settings + native intercept + toast) ─
   useEffect(() => {
     if (!electron) return;
 
-    // Check if external binaries are ready
-    electron.ipcRenderer.invoke('check-binaries').then((installed: boolean) => {
-      setBinariesInstalled(installed);
-    });
-
-    // Get downloads list
-    electron.ipcRenderer.invoke('get-downloads').then((list: Task[]) => {
+    // Get downloads list on startup
+    electron.ipcRenderer.invoke('get-downloads').then((list: AppTask[]) => {
       setDownloads(list);
     });
 
-    // Get settings
+    // Get settings on startup
     electron.ipcRenderer.invoke('get-settings').then((s: AppSettings) => {
       setAppSettings(s);
       setAddSaveDir(s.downloadDir);
       loadedSettingsRef.current = true;
     });
 
-    // IPC Download list updates
-    const handleDownloadsUpdated = (_event: any, list: Task[]) => {
+    // IPC: live download list updates
+    const handleDownloadsUpdated = (_event: any, list: AppTask[]) => {
       setDownloads(list);
       syncLibrary();
     };
     electron.ipcRenderer.on('downloads-updated', handleDownloadsUpdated);
 
-    // IPC Browser Integration hijacked link
+    // IPC: browser-intercepted download link
     const handleNativeDownloadReceived = (_event: any, data: any) => {
       setAddUrl(data.url);
       setAddFilename(data.filename || '');
@@ -1755,39 +1105,13 @@ export default function App() {
     };
     electron.ipcRenderer.on('native-download-received', handleNativeDownloadReceived);
 
-    // IPC Completed download notification toast
+    // IPC: completed download toast (now via useToasts)
     const handleDownloadCompletedToast = (_event: any, filename: string) => {
-      const toastId = 'toast_' + Date.now();
-      setToasts(prev => [...prev, { id: toastId, message: `Completed: ${filename}` }]);
-      setTimeout(() => {
-        setToasts(prev => prev.filter(t => t.id !== toastId));
-      }, 5000);
+      addToast(`Completed: ${filename}`);
     };
     electron.ipcRenderer.on('download-completed-toast', handleDownloadCompletedToast);
 
-    // IPC Binary installation progress
-    const handleBinaryInstallProgress = (_event: any, progressData: any) => {
-      setInstallProgress(progressData);
-    };
-    electron.ipcRenderer.on('binary-install-progress', handleBinaryInstallProgress);
-
-    // IPC Player state changes (for mini-player in sidebar)
-    const handlePlayerStateChanged = (_event: any, state: any) => {
-      setMiniPlayerState(state);
-    };
-    electron.ipcRenderer.on('player-state-changed', handlePlayerStateChanged);
-
-    // IPC Real-time network speed
-    const handleNetworkSpeed = (_event: any, speed: number) => {
-      setNetSpeed(speed);
-    };
-    electron.ipcRenderer.on('network-speed-update', handleNetworkSpeed);
-    // Also fetch the initial cached value
-    electron.ipcRenderer.invoke('get-network-speed').then((speed: number) => {
-      if (speed > 0) setNetSpeed(speed);
-    }).catch(() => { });
-
-    // IPC settings changes listener
+    // IPC: settings changed from another window
     const handleSettingsChanged = (_event: any, newSettings: AppSettings) => {
       setAppSettings(newSettings);
       setAddSaveDir(newSettings.downloadDir);
@@ -1795,53 +1119,23 @@ export default function App() {
     };
     electron.ipcRenderer.on('settings-changed', handleSettingsChanged);
 
-    electron?.ipcRenderer.invoke('get-player-state').then((state: any) => {
-      if (state) setMiniPlayerState(state);
-    });
-
     return () => {
       electron.ipcRenderer.removeListener('downloads-updated', handleDownloadsUpdated);
       electron.ipcRenderer.removeListener('native-download-received', handleNativeDownloadReceived);
       electron.ipcRenderer.removeListener('download-completed-toast', handleDownloadCompletedToast);
-      electron.ipcRenderer.removeListener('binary-install-progress', handleBinaryInstallProgress);
-      electron.ipcRenderer.removeListener('player-state-changed', handlePlayerStateChanged);
-      electron.ipcRenderer.removeListener('network-speed-update', handleNetworkSpeed);
       electron.ipcRenderer.removeListener('settings-changed', handleSettingsChanged);
     };
   }, []);
 
-  // Click listener to close context menu
-  useEffect(() => {
-    const handleCloseCtx = () => {
-      setContextMenu(prev => prev.visible ? { ...prev, visible: false } : prev);
-    };
-    window.addEventListener('click', handleCloseCtx);
-    return () => window.removeEventListener('click', handleCloseCtx);
-  }, []);
+  // ─── Keyboard Shortcuts + Context Menu ─────────────────────────────────────
+  useKeyboardShortcuts({
+    selectedLibraryPath,
+    selectedTaskId,
+    downloads,
+    setFlashDriveTarget,
+    setContextMenu,
+  });
 
-  // Keyboard listener for 'S' key to send to flash drive
-  useEffect(() => {
-    const handleGlobalKeys = (e: KeyboardEvent) => {
-      const activeEl = document.activeElement;
-      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.getAttribute('contenteditable') === 'true')) {
-        return;
-      }
-      if (e.key.toLowerCase() === 's') {
-        if (selectedLibraryPath) {
-          e.preventDefault();
-          setFlashDriveTarget(selectedLibraryPath);
-        } else if (selectedTaskId) {
-          const task = downloads.find(t => t.id === selectedTaskId);
-          if (task && task.status === 'completed') {
-            e.preventDefault();
-            setFlashDriveTarget(task.saveDir + '\\' + task.filename);
-          }
-        }
-      }
-    };
-    window.addEventListener('keydown', handleGlobalKeys);
-    return () => window.removeEventListener('keydown', handleGlobalKeys);
-  }, [selectedLibraryPath, selectedTaskId, downloads]);
 
   // Keyboard listener for Backspace/Delete key to delete file selected in library
   useEffect(() => {
@@ -1931,65 +1225,8 @@ export default function App() {
     }
   };
 
-  const handleInstallBinaries = async () => {
-    if (!electron) return;
-    setInstallingBinaries(true);
-    setInstallProgress({ status: 'Starting...', progress: 0 });
-    const res = await electron.ipcRenderer.invoke('install-binaries');
-    if (res.success) {
-      setBinariesInstalled(true);
-      setInstallingBinaries(false);
-    } else {
-      if (res.error === 'Aborted') {
-        return;
-      }
-      setInstallProgress(prev => ({
-        status: 'error',
-        progress: prev.progress,
-        error: res.error || 'Failed to install'
-      }));
-    }
-  };
-
-  const handlePauseBinaries = async () => {
-    if (!electron) return;
-    await electron.ipcRenderer.invoke('pause-binary-install');
-  };
-
-  const handleResumeBinaries = async () => {
-    if (!electron) return;
-    setInstallProgress(prev => ({
-      status: prev.status === 'error' ? 'Resuming...' : prev.status,
-      progress: prev.progress,
-      isPaused: false
-    }));
-    await electron.ipcRenderer.invoke('resume-binary-install');
-  };
-
-  const handleCancelInstall = () => {
-    setInstallingBinaries(false);
-    setInstallProgress({ status: 'idle', progress: 0 });
-  };
-
-  const handleDownloadPlaylist = async (url: string) => {
-    if (!electron) return;
-    setPlaylistLoading(true);
-    setShowPlaylistModal(true);
-    try {
-      const res = await electron.ipcRenderer.invoke('get-youtube-playlist', url);
-      setPlaylistLoading(false);
-      if (res.success) {
-        setPlaylistInfo(res.info);
-      } else {
-        setShowPlaylistModal(false);
-        alert('Failed to parse YouTube playlist: ' + res.error);
-      }
-    } catch (e: any) {
-      setPlaylistLoading(false);
-      setShowPlaylistModal(false);
-      alert('Failed to parse YouTube playlist: ' + e.message);
-    }
-  };
+  // handleInstallBinaries → useBinaryInstaller().startInstall (already aliased above)
+  // handleDownloadPlaylist → useFormatPicker().handleDownloadPlaylist (already wired above)
 
   const handleAddDownload = async () => {
     if (!electron || !addUrl) return;
@@ -2057,14 +1294,6 @@ export default function App() {
     }
   };
 
-  const updateSetting = async (key: keyof AppSettings, value: any) => {
-    const nextSettings = { ...appSettings, [key]: value };
-    setAppSettings(nextSettings);
-    if (electron) {
-      await electron.ipcRenderer.invoke('save-settings', nextSettings);
-    }
-  };
-
   const handleRegisterBrowserIntegration = async () => {
     if (!electron) return;
     const res = await electron.ipcRenderer.invoke('install-browser-integration');
@@ -2095,14 +1324,6 @@ export default function App() {
     setActiveTab('downloads');
   };
 
-  const pauseDownload = (id: string) => {
-    if (electron) electron.ipcRenderer.invoke('pause-download', id);
-  };
-
-  const resumeDownload = (id: string) => {
-    if (electron) electron.ipcRenderer.invoke('resume-download', id);
-  };
-
   const deleteDownload = (id: string, deleteFile = false) => {
     const task = downloads.find(t => t.id === id);
     const filename = task ? task.filename : 'this download';
@@ -2123,11 +1344,11 @@ export default function App() {
     });
   };
 
-  const openFile = (task: Task) => {
+  const openFile = (task: AppTask) => {
     if (electron) electron.ipcRenderer.invoke('open-file', { saveDir: task.saveDir, filename: task.filename });
   };
 
-  const openFolder = (task: Task) => {
+  const openFolder = (task: AppTask) => {
     if (electron) electron.ipcRenderer.invoke('open-folder', task.saveDir);
   };
 
@@ -2173,7 +1394,7 @@ export default function App() {
     ].filter(x => x !== null).join(':');
   };
 
-  const getPercentage = (task: Task) => {
+  const getPercentage = (task: AppTask) => {
     if (task.isYoutube || (task as any).useYtDlp || task.displayProgress !== undefined) {
       return task.displayProgress !== undefined ? task.displayProgress : 0;
     }
@@ -2185,14 +1406,14 @@ export default function App() {
   };
 
   // Active download count for smart filtering (excluding archived items)
-  const activeDownloadCount = downloads.filter(t => {
+  const activeDownloadCount = useMemo(() => downloads.filter(t => {
     const fullPath = t.saveDir ? `${t.saveDir}\\${t.filename}` : t.filename;
     return !isItemArchived(fullPath) &&
       ['downloading', 'merging', 'preparing', 'compressing'].includes(t.status);
-  }).length;
+  }).length, [downloads, isItemArchived]);
 
   // Filter downloads: when >10 active, show only active ones; otherwise show all matching search (excluding archived items)
-  const filteredDownloads = downloads.filter(t => {
+  const filteredDownloads = useMemo(() => downloads.filter(t => {
     const fullPath = t.saveDir ? `${t.saveDir}\\${t.filename}` : t.filename;
     if (isItemArchived(fullPath)) return false;
     const matchesSearch = t.filename.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -2201,6 +1422,14 @@ export default function App() {
       return matchesSearch && ['downloading', 'merging', 'preparing', 'compressing'].includes(t.status);
     }
     return matchesSearch;
+  }), [downloads, searchQuery, activeDownloadCount, isItemArchived]);
+
+  // Virtualizer for downloads table — only renders visible rows
+  const downloadsVirtualizer = useVirtualizer({
+    count: filteredDownloads.length,
+    getScrollElement: () => downloadsTableRef.current,
+    estimateSize: () => 49,  // matches td padding: 12px top+bottom + ~25px content
+    overscan: 5,
   });
 
   const selectedTask = downloads.find(t => t.id === selectedTaskId);
@@ -2823,13 +2052,15 @@ export default function App() {
               {/* Central List */}
               <div className="main-content">
                 {(libraryCategory as string) === 'duplicates' ? (
-                  <DuplicatesPanel
-                    libraryFiles={libraryFiles}
-                    duplicateDeletePaths={duplicateDeletePaths}
-                    toggleDuplicateDelete={toggleDuplicateDelete}
-                    handleResolveDuplicates={handleResolveDuplicates}
-                    onClose={() => setLibraryCategory('recent')}
-                  />
+                  <Suspense fallback={<div style={{ padding: '20px', color: 'var(--text-muted)' }}>Loading duplicates...</div>}>
+                    <DuplicatesPanel
+                      libraryFiles={libraryFiles}
+                      duplicateDeletePaths={duplicateDeletePaths}
+                      toggleDuplicateDelete={toggleDuplicateDelete}
+                      handleResolveDuplicates={handleResolveDuplicates}
+                      onClose={() => setLibraryCategory('recent')}
+                    />
+                  </Suspense>
                 ) : (
                   <>
                     <div className="main-header">
@@ -2840,119 +2071,160 @@ export default function App() {
                       {/* Hiding the add URL button as requested */}
                     </div>
 
-                {/* Filter and controls toolbar */}
-                <div className="glass-panel" style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', justifySelf: 'space-between', justifyContent: 'space-between', borderRadius: '12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '280px', position: 'relative' }}>
-                    <Search size={14} style={{ color: 'var(--text-muted)', position: 'absolute', left: '10px' }} />
-                    <input
-                      type="text"
-                      placeholder="Search files..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      style={{
-                        background: 'rgba(255, 255, 255, 0.04)',
-                        border: '1px solid var(--panel-border)',
-                        borderRadius: '8px',
-                        padding: '6px 12px 6px 30px',
-                        fontSize: '12px',
-                        width: '100%',
-                        color: '#fff',
-                        outline: 'none'
-                      }}
-                    />
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    {selectedDownloadIds.length > 0 && (
-                      <div className="glass-panel" style={{ display: 'flex', gap: '8px', alignItems: 'center', padding: '4px 10px', borderRadius: '8px', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', fontSize: '11px', flexShrink: 0 }}>
-                        <span style={{ color: 'var(--text-muted)', fontWeight: 'bold' }}>{selectedDownloadIds.length} selected:</span>
-                        <button className="btn-secondary" style={{ padding: '2px 6px', fontSize: '10px', height: '24px' }} onClick={handleBulkPause}>Pause</button>
-                        <button className="btn-primary" style={{ padding: '2px 6px', fontSize: '10px', height: '24px', background: 'var(--primary)' }} onClick={handleBulkResume}>Resume</button>
-                        <button className="btn-secondary" style={{ padding: '2px 6px', fontSize: '10px', height: '24px', color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.2)' }} onClick={handleBulkDelete}>Delete</button>
+                    {/* Filter and controls toolbar */}
+                    <div className="glass-panel" style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', justifySelf: 'space-between', justifyContent: 'space-between', borderRadius: '12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '280px', position: 'relative' }}>
+                        <Search size={14} style={{ color: 'var(--text-muted)', position: 'absolute', left: '10px' }} />
+                        <input
+                          type="text"
+                          placeholder="Search files..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          style={{
+                            background: 'rgba(255, 255, 255, 0.04)',
+                            border: '1px solid var(--panel-border)',
+                            borderRadius: '8px',
+                            padding: '6px 12px 6px 30px',
+                            fontSize: '12px',
+                            width: '100%',
+                            color: '#fff',
+                            outline: 'none'
+                          }}
+                        />
                       </div>
-                    )}
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <button
-                        className="btn-secondary"
-                        style={{ padding: '6px 12px', fontSize: '11px', borderRadius: '8px' }}
-                        onClick={() => downloads.forEach(t => t.status === 'paused' && resumeDownload(t.id))}
-                      >
-                        Resume All
-                      </button>
-                      <button
-                        className="btn-secondary"
-                        style={{ padding: '6px 12px', fontSize: '11px', borderRadius: '8px' }}
-                        onClick={() => downloads.forEach(t => t.status === 'downloading' && pauseDownload(t.id))}
-                      >
-                        Pause All
-                      </button>
-                      <button
-                        className="btn-secondary"
-                        style={{ padding: '6px 12px', fontSize: '11px', borderRadius: '8px', borderColor: 'rgba(255,255,255,0.06)' }}
-                        onClick={() => setShowClearHistoryModal(true)}
-                        title="Clear records from download history"
-                      >
-                        Clear History
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        {selectedDownloadIds.length > 0 && (
+                          <div className="glass-panel" style={{ display: 'flex', gap: '8px', alignItems: 'center', padding: '4px 10px', borderRadius: '8px', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', fontSize: '11px', flexShrink: 0 }}>
+                            <span style={{ color: 'var(--text-muted)', fontWeight: 'bold' }}>{selectedDownloadIds.length} selected:</span>
+                            <button className="btn-secondary" style={{ padding: '2px 6px', fontSize: '10px', height: '24px' }} onClick={handleBulkPause}>Pause</button>
+                            <button className="btn-primary" style={{ padding: '2px 6px', fontSize: '10px', height: '24px', background: 'var(--primary)' }} onClick={handleBulkResume}>Resume</button>
+                            <button className="btn-secondary" style={{ padding: '2px 6px', fontSize: '10px', height: '24px', color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.2)' }} onClick={handleBulkDelete}>Delete</button>
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button
+                            className="btn-secondary"
+                            style={{ padding: '6px 12px', fontSize: '11px', borderRadius: '8px' }}
+                            onClick={() => downloads.forEach(t => t.status === 'paused' && resumeDownload(t.id))}
+                          >
+                            Resume All
+                          </button>
+                          <button
+                            className="btn-secondary"
+                            style={{ padding: '6px 12px', fontSize: '11px', borderRadius: '8px' }}
+                            onClick={() => downloads.forEach(t => t.status === 'downloading' && pauseDownload(t.id))}
+                          >
+                            Pause All
+                          </button>
+                          <button
+                            className="btn-secondary"
+                            style={{ padding: '6px 12px', fontSize: '11px', borderRadius: '8px', borderColor: 'rgba(255,255,255,0.06)' }}
+                            onClick={() => setShowClearHistoryModal(true)}
+                            title="Clear records from download history"
+                          >
+                            Clear History
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
 
-                {/* Table list */}
-                <div ref={setDownloadsTableRef} className="glass-panel downloads-table-container">
-                  {filteredDownloads.length === 0 ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '10px', color: 'var(--text-muted)' }}>
-                      <Download size={32} strokeWidth={1.5} />
-                      <div style={{ fontSize: '14px' }}>No downloads to display</div>
-                    </div>
-                  ) : (
-                    <table className="downloads-table">
-                      <thead>
-                        <tr>
-                          <th style={{ width: '36px', textAlign: 'center' }}>
-                            <input
-                              type="checkbox"
-                              checked={filteredDownloads.length > 0 && selectedDownloadIds.length === filteredDownloads.length}
-                              onChange={() => handleToggleSelectAll(filteredDownloads)}
-                              style={{ cursor: 'pointer' }}
-                            />
-                          </th>
-                          <th style={{ minWidth: '220px' }}>Filename</th>
-                          <th style={{ width: '80px' }}>Format</th>
-                          <th style={{ width: '100px' }}>Size</th>
-                          <th style={{ width: '180px' }}>Progress</th>
-                          <th style={{ width: '110px' }}>Speed</th>
-                          <th style={{ width: '90px' }}>Duration</th>
-                          <th style={{ width: '100px' }}>Status</th>
-                          <th style={{ textAlign: 'center', width: '100px' }}>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredDownloads.map(task => {
+                    {/* Table list - CSS Grid */}
+                    <div ref={setDownloadsTableRef} className="glass-panel downloads-table-container" style={{ display: 'flex', flexDirection: 'column', overflowY: 'hidden', overflowX: 'auto' }}>
+                      {/* Grid header row */}
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: '28px minmax(140px,1fr) 58px 78px 150px 78px 68px 78px 86px',
+                        gap: 0,
+                        minWidth: '800px',
+                        borderBottom: '1px solid var(--panel-border)',
+                        background: 'rgba(0,0,0,0.2)',
+                        flexShrink: 0,
+                        fontSize: '11px',
+                        fontWeight: '600',
+                        color: 'var(--text-muted)',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.3px',
+                      }}>
+                        <div style={{ padding: '8px', textAlign: 'center' }}>
+                          <input
+                            type="checkbox"
+                            checked={filteredDownloads.length > 0 && selectedDownloadIds.length === filteredDownloads.length}
+                            onChange={() => handleToggleSelectAll(filteredDownloads)}
+                            style={{ cursor: 'pointer' }}
+                          />
+                        </div>
+                        <div style={{ padding: '8px 12px' }}>Filename</div>
+                        <div style={{ padding: '8px 6px' }}>Format</div>
+                        <div style={{ padding: '8px 6px' }}>Size</div>
+                        <div style={{ padding: '8px 6px' }}>Progress</div>
+                        <div style={{ padding: '8px 6px' }}>Speed</div>
+                        <div style={{ padding: '8px 6px' }}>Duration</div>
+                        <div style={{ padding: '8px 6px' }}>Status</div>
+                        <div style={{ padding: '8px 6px', textAlign: 'center' }}>Actions</div>
+                      </div>
+
+                      {filteredDownloads.length === 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: '10px', color: 'var(--text-muted)', padding: '40px' }}>
+                          <Download size={32} strokeWidth={1.5} />
+                          <div style={{ fontSize: '14px' }}>No downloads to display</div>
+                        </div>
+                      ) : (
+                    <div
+                      style={{
+                        flex: 1,
+                        overflowY: 'auto',
+                        overflowX: 'hidden',
+                        position: 'relative',
+                        minHeight: 0,
+                        minWidth: '800px',
+                      }}
+                    >
+                      <div style={{ height: `${downloadsVirtualizer.getTotalSize()}px`, position: 'relative', width: '100%' }}>
+                        {downloadsVirtualizer.getVirtualItems().map(virtualRow => {
+                          const task = filteredDownloads[virtualRow.index];
                           const percentage = getPercentage(task);
                           const isSelected = selectedTaskId === task.id;
                           const isRowChecked = selectedDownloadIds.includes(task.id);
 
                           return (
-                            <tr
+                            <div
                               key={task.id}
+                              data-index={virtualRow.index}
+                              ref={downloadsVirtualizer.measureElement}
                               onClick={() => setSelectedTaskId(isSelected ? null : task.id)}
                               style={{
+                                display: 'grid',
+                                gridTemplateColumns: '28px minmax(140px,1fr) 58px 78px 150px 78px 68px 78px 86px',
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                width: '100%',
+                                transform: `translateY(${virtualRow.start}px)`,
                                 cursor: 'pointer',
-                                background: isRowChecked ? 'rgba(99, 102, 241, 0.04)' : (isSelected ? 'rgba(255, 255, 255, 0.02)' : 'transparent'),
-                                borderLeft: isSelected ? '3px solid var(--primary)' : 'none'
+                                background: isRowChecked
+                                  ? 'rgba(99, 102, 241, 0.06)'
+                                  : isSelected ? 'rgba(255,255,255,0.02)' : 'transparent',
+                                borderBottom: '1px solid rgba(255,255,255,0.03)',
+                                borderLeft: isSelected ? '3px solid var(--primary)' : '3px solid transparent',
+                                alignItems: 'center',
+                                fontSize: '12px',
                               }}
                             >
-                              <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+
+                              {/* Checkbox */}
+                              <div style={{ padding: '8px', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={(e) => e.stopPropagation()}>
                                 <input
                                   type="checkbox"
                                   checked={isRowChecked}
                                   onChange={() => handleToggleSelect(task.id)}
                                   style={{ cursor: 'pointer' }}
                                 />
-                              </td>
-                              <td style={{ maxWidth: '240px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                  {task.thumbnail && !task.thumbnail.toLowerCase().includes('.gif') && !task.thumbnail.toLowerCase().includes('data:image/gif') && !task.thumbnail.toLowerCase().includes('banner') && !task.thumbnail.toLowerCase().includes('sponsor') && !task.thumbnail.toLowerCase().includes('promo') && !task.thumbnail.toLowerCase().includes('exclusive') && !task.thumbnail.toLowerCase().includes('advert') ? (
+                              </div>
+
+                              {/* Filename */}
+                              <div style={{ padding: '8px 12px', overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                                  {task.thumbnail && !task.thumbnail.toLowerCase().includes('.gif') && !task.thumbnail.toLowerCase().includes('banner') && !task.thumbnail.toLowerCase().includes('sponsor') && !task.thumbnail.toLowerCase().includes('advert') ? (
                                     <img
                                       src={task.thumbnail}
                                       alt="thumb"
@@ -2963,137 +2235,104 @@ export default function App() {
                                       <Globe size={12} style={{ color: 'var(--text-dark)' }} />
                                     </div>
                                   )}
-                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {task.filename || (task.isYoutube ? 'Resolving YouTube Video...' : 'Fetching metadata...')}
                                   </span>
                                 </div>
-                              </td>
-                              <td>
+                              </div>
+
+                              {/* Format badge */}
+                              <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center' }}>
                                 {(() => {
                                   const ext = task.filename.split('.').pop()?.toUpperCase();
                                   const displayExt = ext && ext.length <= 4 && ext !== 'PARTS' ? ext : (task.isYoutube ? 'MP4' : 'URL');
-
-                                  let badgeColor = 'rgba(255, 255, 255, 0.08)';
+                                  let badgeColor = 'rgba(255,255,255,0.08)';
                                   let textColor = '#fff';
-                                  if (['MP4', 'MKV', 'WEBM', 'AVI', 'MOV'].includes(displayExt)) {
-                                    badgeColor = 'rgba(129, 140, 248, 0.15)';
-                                    textColor = '#818cf8';
-                                  } else if (['MP3', 'M4A', 'WAV', 'FLAC'].includes(displayExt)) {
-                                    badgeColor = 'rgba(236, 72, 153, 0.15)';
-                                    textColor = '#ec4899';
-                                  } else if (['PDF', 'DOCX', 'TXT', 'ZIP', 'RAR'].includes(displayExt)) {
-                                    badgeColor = 'rgba(59, 130, 246, 0.15)';
-                                    textColor = '#3b82f6';
-                                  }
-
+                                  if (['MP4','MKV','WEBM','AVI','MOV'].includes(displayExt)) { badgeColor = 'rgba(129,140,248,0.15)'; textColor = '#818cf8'; }
+                                  else if (['MP3','M4A','WAV','FLAC'].includes(displayExt)) { badgeColor = 'rgba(236,72,153,0.15)'; textColor = '#ec4899'; }
+                                  else if (['PDF','DOCX','TXT','ZIP','RAR'].includes(displayExt)) { badgeColor = 'rgba(59,130,246,0.15)'; textColor = '#3b82f6'; }
                                   return (
-                                    <span style={{
-                                      fontSize: '10px',
-                                      fontWeight: 'bold',
-                                      background: badgeColor,
-                                      color: textColor,
-                                      padding: '2px 6px',
-                                      borderRadius: '4px',
-                                      border: `1px solid ${badgeColor}`
-                                    }}>
+                                    <span style={{ fontSize: '10px', fontWeight: 'bold', background: badgeColor, color: textColor, padding: '2px 6px', borderRadius: '4px' }}>
                                       {displayExt}
                                     </span>
                                   );
                                 })()}
-                              </td>
-                              <td>
+                              </div>
+
+                              {/* Size */}
+                              <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center', fontSize: '11px' }}>
                                 {task.status === 'completed'
                                   ? (task.totalBytes > 0 ? formatBytes(task.totalBytes) : '—')
                                   : (task.totalBytes > 0
                                     ? <><span style={{ color: 'var(--primary)', fontWeight: '600' }}>{formatBytes(task.downloadedBytes)}</span><span style={{ color: 'var(--text-muted)', fontSize: '10px' }}> / {formatBytes(task.totalBytes)}</span></>
                                     : (task.isYoutube && task.displaySize ? task.displaySize : '—'))
                                 }
-                              </td>
-                              <td style={{ width: '160px' }}>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                  <div style={{ display: 'flex', justifySelf: 'space-between', justifyContent: 'space-between', fontSize: '11px' }}>
+                              </div>
+
+                              {/* Progress */}
+                              <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center' }}>
+                                <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px' }}>
                                     <span>{percentage}%</span>
                                     <span>{task.isYoutube ? '' : formatBytes(task.downloadedBytes)}</span>
                                   </div>
                                   <div className="progress-bar-bg">
-                                    <div
-                                      className={`progress-bar-fill ${task.status}`}
-                                      style={{ width: `${percentage}%` }}
-                                    ></div>
+                                    <div className={`progress-bar-fill ${task.status}`} style={{ width: `${percentage}%` }} />
                                   </div>
                                 </div>
-                              </td>
-                              <td style={{ fontFamily: 'var(--font-title)' }}>
+                              </div>
+
+                              {/* Speed */}
+                              <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center', fontSize: '11px', fontFamily: 'var(--font-title)' }}>
                                 {task.isYoutube && task.displaySpeed ? task.displaySpeed : (task.status === 'downloading' ? formatSpeed(task.speed) : '—')}
-                              </td>
-                              <td>
+                              </div>
+
+                              {/* Duration */}
+                              <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center', fontSize: '11px' }}>
                                 {task.duration && task.duration > 0
-                                  ? (() => {
-                                    const m = Math.floor(task.duration / 60);
-                                    const s = Math.floor(task.duration % 60);
-                                    return `${m}:${s < 10 ? '0' : ''}${s}`;
-                                  })()
+                                  ? (() => { const m = Math.floor(task.duration / 60); const s = Math.floor(task.duration % 60); return `${m}:${s < 10 ? '0' : ''}${s}`; })()
                                   : (task.isYoutube && task.displayEta ? task.displayEta : (task.status === 'downloading' ? formatEta(task.eta) : '—'))
                                 }
-                              </td>
-                              <td>
-                                <span className={`status-badge-gui ${task.status}`}>
-                                  {task.status}
-                                </span>
-                              </td>
-                              <td onClick={(e) => e.stopPropagation()}>
-                                <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                              </div>
+
+                              {/* Status */}
+                              <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center' }}>
+                                <span className={`status-badge-gui ${task.status}`}>{task.status}</span>
+                              </div>
+
+                              {/* Actions */}
+                              <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={(e) => e.stopPropagation()}>
+                                <div style={{ display: 'flex', gap: '4px' }}>
                                   {task.status === 'downloading' || task.status === 'preparing' ? (
-                                    <button
-                                      className="btn-secondary"
-                                      style={{ padding: '4px 6px', borderRadius: '6px', border: 'none', background: 'rgba(255,255,255,0.05)', cursor: 'pointer' }}
-                                      title="Pause"
-                                      onClick={() => pauseDownload(task.id)}
-                                    >
+                                    <button className="btn-secondary" style={{ padding: '4px 6px', borderRadius: '6px', border: 'none', background: 'rgba(255,255,255,0.05)', cursor: 'pointer' }} title="Pause" onClick={() => pauseDownload(task.id)}>
                                       <Pause size={11} />
                                     </button>
                                   ) : task.status === 'completed' ? (
-                                    <button
-                                      className="btn-primary"
-                                      style={{ padding: '4px 6px', borderRadius: '6px', border: 'none', cursor: 'pointer', background: '#22c55e' }}
-                                      title="Play Media"
-                                      onClick={() => {
-                                        const filePath = task.saveDir + '/' + task.filename;
-                                        electron?.ipcRenderer.invoke('open-player-window', { filePath, filename: task.filename });
-                                      }}
-                                    >
+                                    <button className="btn-primary" style={{ padding: '4px 6px', borderRadius: '6px', border: 'none', cursor: 'pointer', background: '#22c55e' }} title="Play Media"
+                                      onClick={() => { const filePath = task.saveDir + '/' + task.filename; electron?.ipcRenderer.invoke('open-player-window', { filePath, filename: task.filename }); }}>
                                       <Play size={11} fill="currentColor" />
                                     </button>
                                   ) : task.status !== 'merging' && task.status !== 'compressing' ? (
-                                    <button
-                                      className="btn-primary"
-                                      style={{ padding: '4px 6px', borderRadius: '6px', border: 'none', cursor: 'pointer', background: 'var(--primary)' }}
-                                      title="Resume"
-                                      onClick={() => resumeDownload(task.id)}
-                                    >
+                                    <button className="btn-primary" style={{ padding: '4px 6px', borderRadius: '6px', border: 'none', cursor: 'pointer', background: 'var(--primary)' }} title="Resume" onClick={() => resumeDownload(task.id)}>
                                       <Play size={11} fill="currentColor" />
                                     </button>
                                   ) : null}
-                                  <button
-                                    className="btn-secondary"
-                                    style={{ padding: '4px 6px', borderRadius: '6px', border: 'none', color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.2)', background: 'rgba(239,68,68,0.05)', cursor: 'pointer' }}
-                                    title="Delete"
-                                    onClick={() => deleteDownload(task.id, false)}
-                                  >
+                                  <button className="btn-secondary" style={{ padding: '4px 6px', borderRadius: '6px', border: 'none', color: 'var(--danger)', background: 'rgba(239,68,68,0.05)', cursor: 'pointer' }} title="Delete" onClick={() => deleteDownload(task.id, false)}>
                                     <Trash2 size={11} />
                                   </button>
                                 </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
+                              </div>
+
+                            </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
 
               {/* Right Panel Drawer: Details & Media Library */}
               {(libraryCategory as string) !== 'duplicates' && (
@@ -4185,183 +3424,7 @@ export default function App() {
 
           {/* Help Center Tab */}
           {(activeTab as string) === 'help' && (
-            <div className="main-content" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-              <div className="main-header" style={{ display: 'flex', justifySelf: 'space-between', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-                <div className="main-title-container">
-                  <h1 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <HelpCircle size={20} style={{ color: 'var(--primary)' }} /> Help & Documentation Center
-                  </h1>
-                  <p>Get help using Panamedia Player & Downloader, view licenses, or contact support.</p>
-                </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    onClick={() => setHelpSubTab('guide')}
-                    className={`btn-secondary ${helpSubTab === 'guide' ? 'active' : ''}`}
-                    style={{
-                      padding: '8px 16px',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                      fontWeight: 'bold',
-                      background: helpSubTab === 'guide' ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
-                      borderColor: helpSubTab === 'guide' ? 'var(--primary)' : 'rgba(255,255,255,0.06)'
-                    }}
-                  >
-                    Usage Guide
-                  </button>
-                  <button
-                    onClick={() => setHelpSubTab('license')}
-                    className={`btn-secondary ${helpSubTab === 'license' ? 'active' : ''}`}
-                    style={{
-                      padding: '8px 16px',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                      fontWeight: 'bold',
-                      background: helpSubTab === 'license' ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
-                      borderColor: helpSubTab === 'license' ? 'var(--primary)' : 'rgba(255,255,255,0.06)'
-                    }}
-                  >
-                    License Agreement
-                  </button>
-                </div>
-              </div>
-
-              {helpSubTab === 'guide' ? (
-                <div style={{ display: 'flex', gap: '20px', flex: 1, minHeight: 0, overflow: 'hidden', padding: '4px' }}>
-                  {/* Left Column */}
-                  <div style={{ flex: 1.5, display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto', paddingRight: '6px' }}>
-                    <div className="glass-panel" style={{ padding: '20px', borderRadius: '12px' }}>
-                      <h3 style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>The Problem It Solves</h3>
-                      <p style={{ fontSize: '13px', lineHeight: '1.6', color: 'rgba(255,255,255,0.8)' }}>
-                        Historically, media workflows were fractured. Users had to download streams using clunky browser extensions, find where the file saved on disk, and then open it with separate player software. Additionally, legacy player tools often lacked H.265/HEVC decoding runtimes, visualizers, or robust equalizers.
-                      </p>
-                      <p style={{ fontSize: '13px', lineHeight: '1.6', color: 'rgba(255,255,255,0.8)', marginTop: '10px' }}>
-                        <strong>Panamedia</strong> bridges this gap by unifying a multi-threaded background downloader, an automatic local folder synchronizer, and a full-featured, hardware-accelerated media player into a single workspace.
-                      </p>
-                    </div>
-
-                    <div className="glass-panel" style={{ padding: '20px', borderRadius: '12px' }}>
-                      <h3 style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px' }}>How to use the player</h3>
-                      <ul style={{ fontSize: '13px', color: 'rgba(255,255,255,0.8)', paddingLeft: '0px', listStyleType: 'none', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                        <li style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                          <span style={{ color: 'var(--primary)', fontSize: '14px', lineHeight: '1' }}>•</span>
-                          <div>
-                            <strong>Direct Playback:</strong> Double-click any finished task in the Downloads tab, or drag and drop any local file directly into the player screen.
-                          </div>
-                        </li>
-                        <li style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                          <span style={{ color: 'var(--primary)', fontSize: '14px', lineHeight: '1' }}>•</span>
-                          <div>
-                            <strong>Syncing Folders:</strong> Configure download folders in Settings, then click the sync icon in the player sidebar to populate your music/video libraries instantly.
-                          </div>
-                        </li>
-                        <li style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                          <span style={{ color: 'var(--primary)', fontSize: '14px', lineHeight: '1' }}>•</span>
-                          <div>
-                            <strong>USB Sendtray:</strong> Plug in a USB flash drive, press <span style={{ background: 'rgba(255,255,255,0.1)', padding: '1px 5px', borderRadius: '4px', fontFamily: 'monospace', fontSize: '11px' }}>S</span> over a playing file or click Sendtray in player sidebar, to copy media files to your drive instantly.
-                          </div>
-                        </li>
-                        <li style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                          <span style={{ color: 'var(--primary)', fontSize: '14px', lineHeight: '1' }}>•</span>
-                          <div>
-                            <strong>Audio EQ pipeline:</strong> Toggle the 5-band equalizer tab (Bass, Mid-Bass, Mid, Mid-Treble, Treble) with presets (Bass Boost, Vocal, Flat) to adjust sound filters in real-time.
-                          </div>
-                        </li>
-                      </ul>
-                    </div>
-                  </div>
-
-                  {/* Right Column */}
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
-                    <div className="glass-panel" style={{ padding: '20px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                      <h3 style={{ fontSize: '14px', fontWeight: 'bold' }}>Developer Contact Center</h3>
-                      
-                      <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
-                        <div style={{ background: 'rgba(255,255,255,0.04)', padding: '8px', borderRadius: '8px' }}><Info size={16} /></div>
-                        <div>
-                          <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Developed By</div>
-                          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#fff' }}>Gift Ilocie</div>
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
-                        <div style={{ background: 'rgba(255,255,255,0.04)', padding: '8px', borderRadius: '8px' }}><Tv size={16} /></div>
-                        <div>
-                          <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Phone Contacts</div>
-                          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#fff' }}>+265 991 972 336 | +265 888 333 673</div>
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
-                        <div style={{ background: 'rgba(255,255,255,0.04)', padding: '8px', borderRadius: '8px' }}><Send size={16} /></div>
-                        <div>
-                          <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Support Emails</div>
-                          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#fff', wordBreak: 'break-all' }}>gilocie@gmail.com<br/>gosavesite@gamil.com</div>
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => {
-                          if (electron) electron.shell.openExternal('https://wa.me/265991972336');
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '10px',
-                          borderRadius: '8px',
-                          background: '#25d366',
-                          color: '#fff',
-                          border: 'none',
-                          fontWeight: 'bold',
-                          fontSize: '12px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '8px',
-                          boxShadow: '0 4px 15px rgba(37, 211, 102, 0.2)'
-                        }}
-                      >
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12.012 2c-5.506 0-9.989 4.478-9.99 9.984a9.96 9.96 0 001.333 4.99L2 22l5.23-1.371a9.936 9.936 0 004.78 1.23h.005c5.502 0 9.985-4.479 9.986-9.987-.001-2.67-1.041-5.18-2.932-7.071C17.18 3.036 14.67 2.001 12.012 2zm6.066 14.075c-.266.75-1.543 1.375-2.11 1.438-.567.062-1.112.28-3.609-.75-3.195-1.317-5.234-4.578-5.395-4.793-.16-.215-1.293-1.72-1.293-3.284 0-1.564.82-2.33 1.113-2.637.293-.307.64-.383.856-.383.215 0 .43.003.618.012.196.009.46-.075.72.568.266.643.91 2.22 1.026 2.453.117.233.096.502-.07.712-.167.21-.363.38-.53.58-.168.196-.347.41-.15.75.195.336.87 1.428 1.865 2.316.994.888 1.83 1.164 2.188 1.343.358.179.566.149.78-.098.214-.247.91-1.055 1.152-1.417.24-.362.48-.302.81-.179.33.123 2.085 1.028 2.448 1.21.363.18.604.269.67.382.067.114.067.66-.2 1.41z"/></svg>
-                        Chat on WhatsApp (+265 991 972 336) ↗
-                      </button>
-                    </div>
-
-                    <div className="glass-panel" style={{ padding: '16px', borderRadius: '12px', borderLeft: '4px solid var(--primary)', background: 'rgba(99, 102, 241, 0.03)' }}>
-                      <p style={{ fontSize: '12px', lineHeight: '1.5', color: 'rgba(255,255,255,0.7)', margin: 0 }}>
-                        <strong>💡 Pro Tip:</strong> Double-clicking the video screen toggles Fullscreen mode. Scroll your mouse wheel over the video area to quickly change volume levels.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="glass-panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, padding: '20px', borderRadius: '12px' }}>
-                  <h3 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '12px', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '8px' }}>End User License Agreement (EULA)</h3>
-                  <div style={{ flex: 1, overflowY: 'auto', fontSize: '12px', lineHeight: '1.7', color: 'rgba(255,255,255,0.75)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', paddingRight: '10px' }}>
-                    {`PANAMEDIA END USER LICENSE AGREEMENT (EULA)
-
-Please read this End User License Agreement ("Agreement") carefully before installing or using Panamedia ("Software").
-
-1. LICENSE GRANT
-Gift Ilocie hereby grants you a personal, non-transferable, non-exclusive license to use the Software on your devices in accordance with the terms of this Agreement.
-
-2. RESTRICTIONS
-You are not permitted to:
-- Edit, alter, modify, adapt, translate or otherwise change the whole or any part of the Software.
-- Decompile, disassemble or reverse engineer the Software.
-- Reproduce, copy, distribute or resell the Software for commercial purposes without prior permission.
-
-3. COPYRIGHT & OWNERSHIP
-Gift Ilocie retains ownership of the Software as originally downloaded and all subsequent downloads. The Software is protected by copyright and other intellectual property laws.
-
-4. NO WARRANTY
-The Software is provided "as is", without warranty of any kind, express or implied. In no event shall the authors or copyright holders be liable for any claim, damages or other liability.
-
-Developed By Gift Ilocie.
-Contact: Phone +265 991 972 336 | +265 888 333 673
-Email: gilocie@gmail.com | gosavesite@gamil.com`}
-                  </div>
-                </div>
-              )}
-            </div>
+            <HelpTab helpSubTab={helpSubTab} setHelpSubTab={setHelpSubTab} />
           )}
 
           {/* Settings Tab */}

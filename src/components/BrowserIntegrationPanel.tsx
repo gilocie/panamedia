@@ -1,8 +1,10 @@
+import { memo } from 'react';
+
 export interface BrowserIntegrationPanelProps {
   onRegister: () => void;
 }
 
-export function BrowserIntegrationPanel({ onRegister }: BrowserIntegrationPanelProps) {
+export const BrowserIntegrationPanel = memo(function BrowserIntegrationPanel({ onRegister }: BrowserIntegrationPanelProps) {
   return (
     <div className="main-content">
       <div className="main-header">
@@ -43,4 +45,4 @@ export function BrowserIntegrationPanel({ onRegister }: BrowserIntegrationPanelP
       </div>
     </div>
   );
-}
+});

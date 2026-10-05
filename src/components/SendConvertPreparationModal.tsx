@@ -8,6 +8,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { electron } from './panamedia/types';
 import {
+  getQueue,
+  subscribeQueue,
+  addToQueue,
+  removeFromQueue,
+  clearQueue,
+  normalizeQueuePath
+} from './panamedia/converterQueue';
+import {
   type SendConvertOptions,
   type SendConvertPreparationModalProps,
   type MediaToolItem,
@@ -30,6 +38,9 @@ import {
   RotateTool,
   WatermarkTool,
   CompressTool,
+  GifTool,
+  DenoiseTool,
+  SplitTool,
   ToolInfoModal
 } from './converter-pro';
 
@@ -59,25 +70,39 @@ export function SendConvertPreparationModal({
   onTogglePauseSingleFile,
   onBack,
   onClose,
+  onQueueFilesRemoved,
 }: SendConvertPreparationModalProps) {
-  const [localQueue, setLocalQueue] = useState<string[]>(() => {
-    let saved: string[] = [];
-    try {
-      const parsed = JSON.parse(localStorage.getItem('converter_queue') || '[]');
-      if (Array.isArray(parsed)) saved = parsed;
-    } catch (e) {}
-    if (saved.length > 0) return saved;
-    const incoming = queuedFiles && queuedFiles.length > 0 ? queuedFiles : (fileName && fileName !== 'media' ? [fileName] : []);
-    if (incoming.length > 0) {
-      localStorage.setItem('converter_queue', JSON.stringify(incoming));
-    }
-    return incoming;
-  });
+  // The queue is owned by converterQueue. This used to keep its own copy seeded
+  // from `converter_queue` and then fall back to `fileName` (the playing file),
+  // re-persisting it -- so entries the user had just removed came straight back.
+  const [localQueue, setLocalQueue] = useState<string[]>(() => getQueue());
+  useEffect(() => subscribeQueue(setLocalQueue), []);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
+
+  // Per-file tool settings (Cut, Crop, Subtitle, Effect, Rotate,
+  // Watermark, Compress). Keyed by normalised path so settings survive
+  // queue reordering. The engine consumes them as options.tools.
+  const [toolSettings, setToolSettings] = useState<Record<string, Record<string, unknown>>>({});
+  const applyToolSettings = (file: string, tool: string, settings: Record<string, unknown>) => {
+    const key = normalizeQueuePath(file);
+    if (!key) return;
+    setToolSettings(prev => ({
+      ...prev,
+      [key]: { ...(prev[key] || {}), [tool]: settings }
+    }));
+  };
+
+  // Phase G: capacity and power, checked before a queue starts rather than
+  // discovered by ffmpeg halfway through. `capacityNote` is advisory -- the
+  // engine still refuses a destination it knows cannot work -- while
+  // `onBattery` explains a queue that is running slower than usual.
+  const [capacityNote, setCapacityNote] = useState<string>('');
+  const [onBattery, setOnBattery] = useState<boolean>(false);
 
   // Window states: Expand/Maximize to fit device screen, Minimize to background
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
   const [isMinimized, setIsMinimized] = useState<boolean>(false);
+
 
   useEffect(() => {
     if (onMinimizeChange) {
@@ -126,23 +151,12 @@ export function SendConvertPreparationModal({
     date: string;
   }>>([]);
 
-  // Sync if queuedFiles prop changes: only append files that are genuinely new
+  // Additions now flow through converterQueue only. This effect used to merge the
+  // `queuedFiles` prop back in and re-persist the result, which resurrected
+  // anything the user had just removed.
   useEffect(() => {
     if (!queuedFiles || queuedFiles.length === 0) return;
-    setLocalQueue(prev => {
-      let saved: string[] = [];
-      try {
-        const parsed = JSON.parse(localStorage.getItem('converter_queue') || '[]');
-        if (Array.isArray(parsed)) saved = parsed;
-      } catch (e) {}
-      // If we have saved queue, only add files if they were newly selected and aren't in saved
-      const base = saved.length > 0 ? saved : prev;
-      const trulyNew = queuedFiles.filter(f => !base.includes(f));
-      if (trulyNew.length === 0) return base;
-      const next = [...base, ...trulyNew];
-      localStorage.setItem('converter_queue', JSON.stringify(next));
-      return next;
-    });
+    addToQueue(queuedFiles);
   }, [queuedFiles]);
 
   // Format Presets - persisted across sessions & reboots
@@ -195,19 +209,21 @@ export function SendConvertPreparationModal({
 
   useEffect(() => {
     if (!electron) return;
+    // Local const so the non-null narrowing survives into the cleanup closure.
+    const bridge = electron;
     const handlePlayerState = (_event: any, state: any) => {
       setAppPlayerState(state);
     };
-    electron.ipcRenderer.on('player-state-changed', handlePlayerState);
-    electron.ipcRenderer.invoke('get-player-state').then((state: any) => {
+    bridge.ipcRenderer.on('player-state-changed', handlePlayerState);
+    bridge.ipcRenderer.invoke('get-player-state').then((state: any) => {
       if (state) setAppPlayerState(state);
     }).catch(() => {});
 
     // Ensure player is paused by default when converter opens
-    electron.ipcRenderer.send('player-remote-command', 'pause');
+    bridge.ipcRenderer.send('player-remote-command', 'pause');
 
     return () => {
-      electron.ipcRenderer.removeListener('player-state-changed', handlePlayerState);
+      bridge.ipcRenderer.removeListener('player-state-changed', handlePlayerState);
     };
   }, []);
 
@@ -243,12 +259,13 @@ export function SendConvertPreparationModal({
   // Listen for restore requests from Player Header progress card
   useEffect(() => {
     if (!electron) return;
+    const bridge = electron;
     const handleRestoreRequest = () => {
       setIsMinimized(false);
     };
-    electron.ipcRenderer.on('converter-restore-request', handleRestoreRequest);
+    bridge.ipcRenderer.on('converter-restore-request', handleRestoreRequest);
     return () => {
-      electron.ipcRenderer.removeListener('converter-restore-request', handleRestoreRequest);
+      bridge.ipcRenderer.removeListener('converter-restore-request', handleRestoreRequest);
     };
   }, []);
 
@@ -484,9 +501,20 @@ export function SendConvertPreparationModal({
       onRemoveFile(idx);
     }
     const removedFile = localQueue[idx];
-    const nextQueue = localQueue.filter((_, i) => i !== idx);
-    setLocalQueue(nextQueue);
-    localStorage.setItem('converter_queue', JSON.stringify(nextQueue));
+
+    // Removing a file must also stop any conversion running for it. Without this
+    // the engine kept encoding. The parent is told to ignore the job's late
+    // progress events so a deleted entry cannot resurrect itself in the UI.
+    if (removedFile) {
+      if (electron) {
+        electron.ipcRenderer.invoke('converter-cancel', removedFile).catch(() => {});
+      }
+      onQueueFilesRemoved?.([removedFile]);
+    }
+
+    // Route through the shared store so the player sidebar and this modal cannot
+    // disagree about what is queued.
+    const nextQueue = removeFromQueue([removedFile]).filter(Boolean);
     if (removedFile) {
       setMediaTypes(prev => {
         const nextMap = { ...prev };
@@ -523,9 +551,23 @@ export function SendConvertPreparationModal({
     if (onClearQueue) {
       onClearQueue();
     }
-    setLocalQueue([]);
+    // Clear the shared store, not just local state, otherwise the player's
+    // sendTrayItems keeps re-seeding this list on the next open.
+    clearQueue();
+    // Stop every conversion still running for a queued file, then mark
+    // those files removed so their late progress events are dropped.
+    const inFlight = Object.entries(externalConversionStatus)
+      .filter(([, s]) => s && (s.status === 'converting' || s.status === 'paused'))
+      .map(([f]) => f);
+    if (inFlight.length > 0) {
+      inFlight.forEach(f => {
+        if (electron) {
+          electron.ipcRenderer.invoke('converter-cancel', f).catch(() => {});
+        }
+      });
+      onQueueFilesRemoved?.(inFlight);
+    }
     setMediaTypes({});
-    localStorage.removeItem('converter_queue');
     localStorage.removeItem('converter_media_types');
     if (electron) {
       electron.ipcRenderer.send('converter-minimize-state', {
@@ -549,9 +591,13 @@ export function SendConvertPreparationModal({
       return;
     }
     const removedFiles = localQueue.filter((_, i) => selectedIndices.has(i));
-    const nextQueue = localQueue.filter((_, i) => !selectedIndices.has(i));
-    setLocalQueue(nextQueue);
-    localStorage.setItem('converter_queue', JSON.stringify(nextQueue));
+    removedFiles.forEach(f => {
+      if (electron) {
+        electron.ipcRenderer.invoke('converter-cancel', f).catch(() => {});
+      }
+    });
+    onQueueFilesRemoved?.(removedFiles);
+    const nextQueue = removeFromQueue(removedFiles).filter(Boolean);
     setMediaTypes(prev => {
       const nextMap = { ...prev };
       removedFiles.forEach(f => delete nextMap[f]);
@@ -573,14 +619,59 @@ export function SendConvertPreparationModal({
     setSelectedFileIdx(0);
   };
 
+  // Capacity is re-read on the destination, the format and the queue size:
+  // those are the three things that change how much room a run needs.
+  // Declared here because it reads customExportFolder and activeMainTab.
+  useEffect(() => {
+    let cancelled = false;
+    const el = (window as any).electron;
+    if (!el || !el.ipcRenderer) return;
+
+    el.ipcRenderer.invoke('get-power-status').then((p: any) => {
+      if (!cancelled && p) setOnBattery(!!p.onBattery);
+    }).catch(() => {});
+
+    const target = customExportFolder || localQueue[0];
+    if (!target) { setCapacityNote(''); return; }
+
+    el.ipcRenderer.invoke('describe-volume', { path: target, files: localQueue }).then((v: any) => {
+      if (cancelled || !v) return;
+      if (v.writable === false) {
+        setCapacityNote('The chosen destination cannot be written to. Pick another folder or reconnect the drive.');
+        return;
+      }
+      const free = typeof v.freeBytes === 'number' ? v.freeBytes : 0;
+      const need = typeof v.neededBytes === 'number' ? v.neededBytes : 0;
+      if (free > 0 && need > 0 && free < need) {
+        setCapacityNote(
+          `About ${(need / (1024 * 1024 * 1024)).toFixed(1)} GB may be needed but only ` +
+          `${(free / (1024 * 1024 * 1024)).toFixed(1)} GB is free. ` +
+          'Smaller files or fewer at a time will fit.'
+        );
+      } else {
+        setCapacityNote('');
+      }
+    }).catch(() => { if (!cancelled) setCapacityNote(''); });
+
+    return () => { cancelled = true; };
+  }, [customExportFolder, localQueue, activeMainTab, selectedVideoFmt, selectedAudioFmt]);
+
   const handleProceed = () => {
-    const perFileOptions: Record<string, { mode: 'original' | 'convert' | 'extract_audio'; format: string; bitrate: string }> = {};
+    const perFileOptions: Record<string, { mode: 'original' | 'convert' | 'extract_audio'; format: string; bitrate: string; audioBitrate?: string; highQuality?: boolean; tools?: Record<string, unknown> }> = {};
     localQueue.forEach(f => {
       const mType = mediaTypes[f] || (isVideoFile(f) ? 'video' : 'audio');
+      const fileTools = toolSettings[normalizeQueuePath(f)];
       perFileOptions[f] = {
         mode: mType === 'video' ? (autoCopy ? 'original' : 'convert') : 'extract_audio',
-        format: mType === 'video' ? selectedVideoFmt : selectedAudioFmt,
-        bitrate: mType === 'video' ? videoQuality : audioBitrate
+        // The GIF tool always produces an animated GIF,
+        // whatever container the dock selector shows.
+        format: fileTools && fileTools.gif
+          ? 'gif'
+          : (mType === 'video' ? selectedVideoFmt : selectedAudioFmt),
+        bitrate: mType === 'video' ? videoQuality : audioBitrate,
+        audioBitrate,
+        highQuality: useHqEngine,
+        tools: fileTools
       };
     });
 
@@ -591,6 +682,8 @@ export function SendConvertPreparationModal({
       mode: hasVideos ? (autoCopy ? 'original' : 'convert') : 'extract_audio',
       format: hasVideos ? selectedVideoFmt : selectedAudioFmt,
       bitrate: hasVideos ? videoQuality : audioBitrate,
+      audioBitrate,
+      highQuality: useHqEngine,
       keepOriginal: true,
       targetFolderId: selectedFolderId,
       exportDestination,
@@ -614,6 +707,7 @@ export function SendConvertPreparationModal({
 
   useEffect(() => {
     if (!electron) return;
+    const bridge = electron;
     const handleRunRequest = () => {
       handleProceed();
     };
@@ -621,11 +715,11 @@ export function SendConvertPreparationModal({
       setIsMinimized(false);
       onClose();
     };
-    electron.ipcRenderer.on('converter-run-request', handleRunRequest);
-    electron.ipcRenderer.on('converter-close-request', handleCloseRequest);
+    bridge.ipcRenderer.on('converter-run-request', handleRunRequest);
+    bridge.ipcRenderer.on('converter-close-request', handleCloseRequest);
     return () => {
-      electron.ipcRenderer.removeListener('converter-run-request', handleRunRequest);
-      electron.ipcRenderer.removeListener('converter-close-request', handleCloseRequest);
+      bridge.ipcRenderer.removeListener('converter-run-request', handleRunRequest);
+      bridge.ipcRenderer.removeListener('converter-close-request', handleCloseRequest);
     };
   }, [handleProceed, onClose]);
 
@@ -665,6 +759,26 @@ export function SendConvertPreparationModal({
         onBack={handleDone}
         onClose={isConverting ? handleMinimizeModal : (onClose || handleDone)}
       />
+
+      {/* Phase G: speak up before starting rather than failing during.
+          Advisory only -- the engine still refuses a destination it knows is
+          unusable, and a tight-but-workable disk is allowed to proceed. */}
+      {(capacityNote || onBattery) && !isConverting && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '10px',
+          padding: '8px 16px', fontSize: '11.5px',
+          background: capacityNote ? 'rgba(251, 191, 36, 0.10)' : 'rgba(6, 182, 212, 0.08)',
+          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          color: capacityNote ? '#fbbf24' : '#67e8f9',
+        }}>
+          {capacityNote && <span>{capacityNote}</span>}
+          {!capacityNote && onBattery && (
+            <span>
+              On battery power: conversions are using fewer threads, so they will take longer and stay cooler.
+            </span>
+          )}
+        </div>
+      )}
 
       {/* ─── 2. MAIN CENTER WORKSPACE (Split Left 65% / Right 35%) ─── */}
       <div style={{
@@ -854,8 +968,8 @@ export function SendConvertPreparationModal({
         <CutTrimTool
           fileName={currentFile}
           duration={appPlayerState?.duration || 180}
-          onApply={(_cutSettings) => {
-            console.log('Applied Cut Settings:', _cutSettings);
+          onApply={(cutSettings) => {
+            applyToolSettings(currentFile, 'cut', cutSettings);
           }}
           onClose={() => setActiveTool(null)}
         />
@@ -864,8 +978,8 @@ export function SendConvertPreparationModal({
       {activeTool?.id === 'crop' && (
         <CropTool
           fileName={currentFile}
-          onApply={(_cropSettings) => {
-            console.log('Applied Crop Settings:', _cropSettings);
+          onApply={(cropSettings) => {
+            applyToolSettings(currentFile, 'crop', cropSettings);
           }}
           onClose={() => setActiveTool(null)}
         />
@@ -874,8 +988,8 @@ export function SendConvertPreparationModal({
       {activeTool?.id === 'subtitle' && (
         <SubtitleTool
           fileName={currentFile}
-          onApply={(_subSettings) => {
-            console.log('Applied Subtitle Settings:', _subSettings);
+          onApply={(subSettings) => {
+            applyToolSettings(currentFile, 'subtitle', subSettings);
           }}
           onClose={() => setActiveTool(null)}
         />
@@ -884,8 +998,8 @@ export function SendConvertPreparationModal({
       {activeTool?.id === 'effect' && (
         <EffectTool
           fileName={currentFile}
-          onApply={(_effectSettings) => {
-            console.log('Applied Effect Settings:', _effectSettings);
+          onApply={(effectSettings) => {
+            applyToolSettings(currentFile, 'effect', effectSettings);
           }}
           onClose={() => setActiveTool(null)}
         />
@@ -894,8 +1008,8 @@ export function SendConvertPreparationModal({
       {activeTool?.id === 'rotate' && (
         <RotateTool
           fileName={currentFile}
-          onApply={(_rotateSettings) => {
-            console.log('Applied Rotate Settings:', _rotateSettings);
+          onApply={(rotateSettings) => {
+            applyToolSettings(currentFile, 'rotate', rotateSettings);
           }}
           onClose={() => setActiveTool(null)}
         />
@@ -904,8 +1018,8 @@ export function SendConvertPreparationModal({
       {activeTool?.id === 'watermark' && (
         <WatermarkTool
           fileName={currentFile}
-          onApply={(_wmSettings) => {
-            console.log('Applied Watermark Settings:', _wmSettings);
+          onApply={(wmSettings) => {
+            applyToolSettings(currentFile, 'watermark', wmSettings);
           }}
           onClose={() => setActiveTool(null)}
         />
@@ -914,14 +1028,57 @@ export function SendConvertPreparationModal({
       {activeTool?.id === 'compress' && (
         <CompressTool
           fileName={currentFile}
-          onApply={(_compSettings) => {
-            console.log('Applied Compress Settings:', _compSettings);
+          onApply={(compSettings) => {
+            applyToolSettings(currentFile, 'compress', compSettings);
           }}
           onClose={() => setActiveTool(null)}
         />
       )}
 
-      {activeTool && !['cut', 'crop', 'subtitle', 'effect', 'rotate', 'watermark', 'compress'].includes(activeTool.id) && (
+      {/* Mirror & Flip is the flip half of the Rotate tool, so
+          both share one settings panel and one engine path. */}
+      {activeTool?.id === 'mirror' && (
+        <RotateTool
+          fileName={currentFile}
+          onApply={(rotateSettings) => {
+            applyToolSettings(currentFile, 'rotate', rotateSettings);
+          }}
+          onClose={() => setActiveTool(null)}
+        />
+      )}
+
+      {activeTool?.id === 'gif' && (
+        <GifTool
+          fileName={currentFile}
+          onApply={(gifSettings) => {
+            applyToolSettings(currentFile, 'gif', gifSettings);
+          }}
+          onClose={() => setActiveTool(null)}
+        />
+      )}
+
+      {activeTool?.id === 'denoise' && (
+        <DenoiseTool
+          fileName={currentFile}
+          onApply={(denoiseSettings) => {
+            applyToolSettings(currentFile, 'denoise', denoiseSettings);
+          }}
+          onClose={() => setActiveTool(null)}
+        />
+      )}
+
+      {activeTool?.id === 'split' && (
+        <SplitTool
+          fileName={currentFile}
+          duration={appPlayerState?.duration || 0}
+          onApply={(splitSettings) => {
+            applyToolSettings(currentFile, 'split', splitSettings);
+          }}
+          onClose={() => setActiveTool(null)}
+        />
+      )}
+
+      {activeTool && !['cut', 'crop', 'subtitle', 'effect', 'rotate', 'watermark', 'compress', 'mirror', 'gif', 'denoise', 'split'].includes(activeTool.id) && (
         <ToolInfoModal
           tool={activeTool}
           fileName={currentFile}

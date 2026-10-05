@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, Menu, Tray, clipboard, nativeImage, session } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, Menu, Tray, clipboard, nativeImage, session, webContents } = require('electron');
 
 // Prevent any unhandled stream/file error (such as transient EMFILE) from crashing the application
 process.on('uncaughtException', (err) => {
@@ -95,6 +95,8 @@ const {
 const { initDownloadManager, cleanUpDownloadManager, getDownloadsList, removeDownloadByPath } = require('./panamedia-downloader/downloadManager.cjs');
 const { getUniversalWebFormats } = require('./panamedia-downloader/web-downloader/webExtractor.cjs');
 const { convertAndSendToDrive, convertMediaFile, togglePauseProcess } = require('./panamedia-downloader/mediaConverter.cjs');
+const coreClient = require('./electron/core-client.cjs');
+require('./electron/output-mover.cjs').register();
 const {
   initPlayerManager,
   setMainWindow,
@@ -195,6 +197,106 @@ function ensurePlayerShortcut() {
   }
 }
 
+// ─── Probe cache (Phase A) ───────────────────────────────────────────
+// Both /transcode and /probe used to spawn a fresh ffprobe.exe per request
+// (~150-250ms each on Windows). Results are memoised in memory keyed on
+// path + size + mtime, so repeat opens and scrub/seek storms cost nothing.
+// Concurrent requests for the same file collapse into a single spawn.
+
+const probeCache = new Map();      // cacheKey -> normalised probe info
+const probeInFlight = new Map();   // cacheKey -> Promise
+const PROBE_CACHE_MAX = 4000;
+
+// Returns a cache key based on identity *and* current stat, so an edited or
+// replaced file naturally invalidates. Returns null if the file is unreadable,
+// which disables caching for that path rather than risking a stale hit.
+function probeCacheKey(filePath) {
+  try {
+    const st = fs.statSync(filePath);
+    return `${filePath}|${st.size}|${Math.round(st.mtimeMs)}`;
+  } catch (e) {
+    return null;
+  }
+}
+
+function rememberProbe(key, info) {
+  if (probeCache.size >= PROBE_CACHE_MAX) {
+    const oldest = probeCache.keys().next().value;
+    probeCache.delete(oldest);
+  }
+  probeCache.set(key, info);
+}
+
+// Single ffprobe spawn, normalised into one shape shared by every caller.
+function runFfprobe(filePath) {
+  return new Promise((resolve) => {
+    execFile(ffprobePath, [
+      '-v', 'error',
+      '-show_entries',
+      'format=duration,bit_rate:stream=codec_name,codec_type,pix_fmt,profile,width,height,duration,bit_rate',
+      '-of', 'json',
+      filePath
+    ], { timeout: 5000 }, (err, stdout) => {
+      if (err || !stdout) return resolve(null);
+      try {
+        const info = JSON.parse(stdout);
+        const streams = info.streams || [];
+        const videoStream = streams.find((s) => s.codec_type === 'video');
+        const audioStream = streams.find((s) => s.codec_type === 'audio');
+
+        let duration = (info.format && info.format.duration)
+          ? parseFloat(info.format.duration)
+          : 0;
+        if ((!duration || duration <= 1) && streams) {
+          for (const s of streams) {
+            if (s.duration) {
+              const d = parseFloat(s.duration);
+              if (d > duration) duration = d;
+            }
+          }
+        }
+
+        resolve({
+          duration: duration > 0 ? duration : 0,
+          width: videoStream ? (videoStream.width || 0) : 0,
+          height: videoStream ? (videoStream.height || 0) : 0,
+          videoCodec: videoStream ? (videoStream.codec_name || '').toLowerCase() : '',
+          audioCodec: audioStream ? (audioStream.codec_name || '').toLowerCase() : '',
+          pixelFormat: videoStream ? (videoStream.pix_fmt || '').toLowerCase() : '',
+          hasAudio: !!audioStream,
+          streams
+        });
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  });
+}
+
+// Cached probe. Resolves to null when ffprobe fails, so callers keep their
+// existing ffmpeg -i fallback behaviour unchanged.
+function getProbeInfo(filePath) {
+  const key = probeCacheKey(filePath);
+  if (!key) return Promise.resolve(null);
+
+  if (probeCache.has(key)) return Promise.resolve(probeCache.get(key));
+  if (probeInFlight.has(key)) return probeInFlight.get(key);
+
+  const pending = runFfprobe(filePath).then((info) => {
+    probeInFlight.delete(key);
+    if (info) rememberProbe(key, info);
+    return info;
+  });
+
+  probeInFlight.set(key, pending);
+  return pending;
+}
+
+function clearProbeCache() {
+  probeCache.clear();
+  probeInFlight.clear();
+}
+
 function parseFfmpegOutput(rawText) {
   let duration = 0;
   let videoCodec = '';
@@ -268,11 +370,14 @@ if (!fs.existsSync(publicDir)) {
   try { fs.mkdirSync(publicDir, { recursive: true }); } catch(e) {}
 }
 
-function saveSettings() {
+async function saveSettings() {
+  const tmp = settingsFile + '.tmp';
   try {
-    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2), 'utf8');
+    await fs.promises.writeFile(tmp, JSON.stringify(settings, null, 2), 'utf8');
+    await fs.promises.rename(tmp, settingsFile);
   } catch (e) {
     console.error('Failed to save settings', e);
+    try { fs.unlinkSync(tmp); } catch (_) {}
   }
 }
 
@@ -426,7 +531,7 @@ let isAppQuitting = false;
 const pendingCoreRequests = new Map();
 let coreRequestSeq = 0;
 
-function sendCoreRequest(action, payload = {}) {
+function sendCoreRequest(action, payload = {}, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     if (!coreProcess) {
       return reject(new Error("C++ Core Engine process is not running."));
@@ -438,7 +543,7 @@ function sendCoreRequest(action, payload = {}) {
       timeout: setTimeout(() => {
         pendingCoreRequests.delete(requestId);
         reject(new Error(`Core request timeout: ${action}`));
-      }, 5000) 
+      }, timeoutMs) 
     });
 
     const message = JSON.stringify({
@@ -475,6 +580,14 @@ function initCoreResponseListener() {
           console.log(`[Node Bridge] C++ Core Engine streaming port: ${cppStreamingPort}`);
         }
 
+        // Events carry no `id`, so they never matched a pending request and were
+        // silently dropped. Without this branch the engine's progress reporting
+        // (scan_progress, convert_progress, convert_complete) reached nobody.
+        if (response.event) {
+          handleCoreEvent(response.event, parsedPayload);
+          return;
+        }
+
         if (response.id && pendingCoreRequests.has(response.id)) {
           const req = pendingCoreRequests.get(response.id);
           clearTimeout(req.timeout);
@@ -491,6 +604,22 @@ function initCoreResponseListener() {
       }
     }
   });
+}
+
+/**
+ * Routes an event emitted by the C++ engine.
+ *
+ * Events carry no `id`, so they never matched a pending request and were
+ * previously dropped entirely -- which is why the engine's `scan_progress` and
+ * `convert_progress` output reached nobody.
+ *
+ * This is a pure dispatcher. Consumers (e.g. the conversion listener in
+ * hardwareEngine.cjs) subscribe with coreClient.onEvent and drive their own
+ * onProgress callbacks, so renderer delivery happens in exactly one place per
+ * caller instead of being duplicated here.
+ */
+function handleCoreEvent(eventName, payload) {
+  coreClient.dispatchEvent(eventName, payload);
 }
 
 function startCoreEngine() {
@@ -521,6 +650,8 @@ function startCoreEngine() {
       
       console.log(`C++ Core Engine spawned: ${corePath}`);
       useCppEngine = true;
+      coreClient.register(sendCoreRequest);
+      coreClient.setEnabled(true);
       
       // Bind response stream parser
       initCoreResponseListener();
@@ -537,6 +668,11 @@ function startCoreEngine() {
         console.log(`C++ Core Engine exited with code ${code}`);
         coreProcess = null;
         useCppEngine = false;
+        // Notify subscribers before disabling, so in-flight work (a running
+        // conversion) fails loudly instead of waiting on an event that can
+        // never arrive.
+        coreClient.dispatchEvent('engine_exit', { code });
+        coreClient.setEnabled(false);
         if (!isAppQuitting) {
           setTimeout(() => {
             if (!coreProcess && !isAppQuitting) {
@@ -944,12 +1080,7 @@ function startLocalServer() {
         });
       };
 
-      execFile(ffprobePath, [
-        '-v', 'error',
-        '-show_entries', 'stream=codec_name,codec_type,pix_fmt,width,height',
-        '-of', 'json',
-        filePath
-      ], { timeout: 5000 }, (probeErr, stdout) => {
+      getProbeInfo(filePath).then((info) => {
         let width = 0;
         let height = 0;
         let videoCodec = '';
@@ -957,23 +1088,13 @@ function startLocalServer() {
         let pixelFormat = '';
         let hasAudio = false;
 
-        if (!probeErr && stdout) {
-          try {
-            const info = JSON.parse(stdout);
-            const streams = info.streams || [];
-            const videoStream = streams.find(s => s.codec_type === 'video');
-            const audioStream = streams.find(s => s.codec_type === 'audio');
-            if (videoStream) {
-              width = videoStream.width || 0;
-              height = videoStream.height || 0;
-              videoCodec = (videoStream.codec_name || '').toLowerCase();
-              pixelFormat = (videoStream.pix_fmt || '').toLowerCase();
-            }
-            if (audioStream) {
-              hasAudio = true;
-              audioCodec = (audioStream.codec_name || '').toLowerCase();
-            }
-          } catch (e) {}
+        if (info) {
+          width = info.width;
+          height = info.height;
+          videoCodec = info.videoCodec;
+          audioCodec = info.audioCodec;
+          pixelFormat = info.pixelFormat;
+          hasAudio = info.hasAudio;
         }
 
         if (!videoCodec || !audioCodec) {
@@ -1781,29 +1902,12 @@ ipcMain.handle('check-media-info', async (event, filePath) => {
         });
       };
 
-      const args = [
-        '-v', 'error',
-        '-show_entries', 'format=duration,bit_rate:stream=codec_name,codec_type,pix_fmt,profile,width,height,duration,bit_rate',
-        '-of', 'json',
-        targetPath
-      ];
-
-      execFile(ffprobePath, args, { timeout: 5000 }, (err, stdout, stderr) => {
-        if (err) {
+      getProbeInfo(targetPath).then((info) => {
+        if (!info) {
           return runFfmpegFallback();
         }
         try {
-          const info = JSON.parse(stdout);
-          let duration = info.format && info.format.duration ? parseFloat(info.format.duration) : 0;
-          
-          if ((!duration || duration <= 1) && info.streams) {
-            for (const stream of info.streams) {
-              if (stream.duration) {
-                const d = parseFloat(stream.duration);
-                if (d > duration) duration = d;
-              }
-            }
-          }
+          const duration = info.duration;
 
           if (!duration || duration <= 1) {
             return runFfmpegFallback(info);
@@ -1812,12 +1916,12 @@ ipcMain.handle('check-media-info', async (event, filePath) => {
           const streams = info.streams || [];
           const videoStream = streams.find(s => s.codec_type === 'video');
           const audioStream = streams.find(s => s.codec_type === 'audio');
-          
-          let videoCodec = videoStream ? (videoStream.codec_name || '').toLowerCase() : '';
-          let audioCodec = audioStream ? (audioStream.codec_name || '').toLowerCase() : '';
-          let pixelFormat = videoStream ? (videoStream.pix_fmt || '').toLowerCase() : '';
-          let width = videoStream ? (videoStream.width || 0) : 0;
-          let height = videoStream ? (videoStream.height || 0) : 0;
+
+          const videoCodec = info.videoCodec;
+          const audioCodec = info.audioCodec;
+          const pixelFormat = info.pixelFormat;
+          const width = info.width;
+          const height = info.height;
 
           if (!videoCodec || !audioCodec) {
             return runFfmpegFallback(info);
@@ -1996,9 +2100,74 @@ ipcMain.handle('register-media-folder', (event, filePath) => {
 
 
 
+// Free space, writability and mains/battery state for a destination.
+// Called before a queue starts so a conversion that cannot finish, or a
+// machine about to run flat, is visible before any CPU is spent.
+ipcMain.handle('describe-volume', async (_event, { path: targetPath, files } = {}) => {
+  const asked = typeof targetPath === 'string' ? targetPath : '';
+  const list = Array.isArray(files) ? files.filter(f => typeof f === 'string') : [];
+
+  // The size of the queue is summed here, in the main process, because that
+  // is where fs lives. The renderer has no business statting the filesystem.
+  let neededBytes = 0;
+  for (const f of list) {
+    try { neededBytes += Math.floor(fs.statSync(f).size * 1.15); } catch { /* missing file: ignore */ }
+  }
+
+  const volume = await coreClient.call('describe_volume', { path: asked });
+  if (volume && typeof volume === 'object') {
+    return { ...volume, neededBytes, sufficient: volume.freeBytes >= neededBytes };
+  }
+
+  // Engine-down fallback.
+  const out = { freeBytes: 0, totalBytes: 0, writable: false, volumeLabel: '' };
+  try {
+    if (asked) {
+      const resolved = path.resolve(asked);
+      const root = path.parse(resolved).root;
+      const dir = fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()
+        ? resolved : path.dirname(resolved);
+      const stats = fs.statfsSync(dir);
+      out.freeBytes = stats.bavail * stats.bsize;
+      out.totalBytes = stats.blocks * stats.bsize;
+      out.volumeLabel = root;
+      // Writability is proven by writing, same as the engine does.
+      const probe = path.join(dir, '.panamedia-write-test');
+      const fd = fs.openSync(probe, 'w');
+      fs.closeSync(fd);
+      fs.unlinkSync(probe);
+      out.writable = true;
+    }
+  } catch (e) {
+    out.writable = false;
+    out.reason = String((e && e.message) || e);
+  }
+  return { ...out, neededBytes, sufficient: out.freeBytes >= neededBytes };
+});
+
+ipcMain.handle('get-power-status', async () => {
+  const fromEngine = await coreClient.call('power_status');
+  if (fromEngine && typeof fromEngine === 'object') return fromEngine;
+
+  // Node has no battery API, so this reports unknown rather than guessing.
+  // A false "on mains" would let a full-speed queue flatten a battery.
+  return { onBattery: false, percent: -1, charging: false, reason: 'unavailable' };
+});
+
 ipcMain.handle('get-flash-drives', async () => {
+  // C++ queries the Win32 drive API directly. The PowerShell fallback below costs
+  // 1-3 seconds of process startup for an answer that takes ~1ms this way.
+  const cppDrives = await coreClient.call('list_removable_drives');
+  // `null` means the engine is unavailable, which is what selects the fallback.
+  if (Array.isArray(cppDrives)) {
+    console.log(`[get-flash-drives] C++ engine: ${cppDrives.length} removable drive(s)`);
+    return cppDrives;
+  }
   return new Promise((resolve) => {
-    const cmd = `powershell -Command "[System.IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq 'Removable' } | ForEach-Object { [PSCustomObject]@{ Name = $_.Name; Label = $_.VolumeLabel } } | ConvertTo-Json"`;
+    // Reports readiness and free space so the renderer sees the same shape
+    // whichever side answered. `ready` is what stops a job being queued onto
+    // a card reader with no card in it.
+    const cmd = `powershell -Command "[System.IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq 'Removable' -and $_.IsReady } | ForEach-Object { [PSCustomObject]@{ Name = $_.Name; Label = $_.VolumeLabel; Free = $_.AvailableFreeSpace } } | ConvertTo-Json"`;
     exec(cmd, (err, stdout, stderr) => {
       if (err) {
         console.error('Failed to get flash drives', err);
@@ -2013,7 +2182,9 @@ ipcMain.handle('get-flash-drives', async () => {
           .filter(d => d && d.Name)
           .map(d => ({
             letter: d.Name,
-            label: d.Label || 'USB Drive'
+            label: d.Label || 'USB Drive',
+            ready: true,
+            freeBytes: Number(d.Free) || 0,
           }));
         resolve(formatted);
       } catch (e) {
@@ -2076,6 +2247,32 @@ ipcMain.handle('convert-and-send-to-drive', async (event, { filePath, driveLette
         error: progressData.error
       });
     });
+
+    // Split writes a numbered series (name001.ext, name002.ext, ...)
+    // rather than one file. Expand the pattern so the caller can
+    // register every segment instead of a path that does not exist.
+    if (result && result.outputPath && options && options.tools && options.tools.split) {
+      try {
+        const dir = path.dirname(result.outputPath);
+        const base = path.basename(result.outputPath);
+        const m = base.match(/^(.*)%03d(.*)$/);
+        if (m && fs.existsSync(dir)) {
+          const segments = fs.readdirSync(dir)
+            .filter(n => n.startsWith(m[1]) && n.endsWith(m[2]))
+            .map(n => path.join(dir, n))
+            .sort();
+          if (segments.length > 0) {
+            result.outputPath = segments[0];
+            result.outputs = segments;
+            result.segments = segments.length;
+            console.log(`[convert-media-file] split produced ${segments.length} segment(s)`);
+          }
+        }
+      } catch (expandErr) {
+        console.warn('[convert-media-file] could not expand split output:', expandErr);
+      }
+    }
+
     return { success: true, ...result };
   } catch (err) {
     console.error('[convert-and-send-to-drive error]:', err);
@@ -2089,39 +2286,124 @@ ipcMain.handle('convert-and-send-to-drive', async (event, { filePath, driveLette
   }
 });
 
-ipcMain.handle('convert-media-file', async (event, { filePath, targetDir, options = {} }) => {
+ipcMain.handle('convert-media-file', async (event, { filePath, targetDir, destination, driveLetter, options = {} }) => {
   try {
-    const format = (options.format || (options.mode === 'extract_audio' ? 'mp3' : 'mp4')).toLowerCase();
+    const mode = options.mode || 'convert';
+    const format = (options.format || (mode === 'extract_audio' ? 'mp3' : 'mp4')).toLowerCase();
+
+    // Prefer the engine's planner so ffmpeg writes straight to the destination.
+    // The output used to be written beside the source and relocated afterwards,
+    // which meant a file being played and converted at the same time shared a
+    // directory with the writer and could collide with it.
+    let plannedPath = null;
+    if (destination && useCppEngine) {
+      const planned = await sendCoreRequest('plan_output', {
+        filePath,
+        // tools travel with the plan so the space estimate knows about a
+        // compression target instead of always assuming input-sized output.
+        options: { mode, format, destination, destPath: targetDir, driveLetter, tools: options.tools }
+      }, 8000).catch(() => null);
+
+      if (planned && planned.outputPath) {
+        plannedPath = planned.outputPath;
+        if (planned.collision === 'source') {
+          console.log('[convert-media-file] avoided overwriting source: ' + plannedPath);
+        }
+        if (planned.warning) {
+          // Reported, not silently dropped: the UI shows this next to the
+          // queue so the user hears about tight space before the encode.
+          console.warn('[convert-media-file] destination: ' + planned.warning);
+        }
+        if (planned.writable === false) {
+          throw new Error('Cannot write to the destination: ' + (planned.warning || 'drive not available'));
+        }
+      } else if (planned && planned.error) {
+        console.warn('[convert-media-file] plan_output failed:', planned.error);
+      }
+    }
+
     const ext = path.extname(filePath);
     const baseName = path.basename(filePath, ext);
-    const outFolder = targetDir || path.dirname(filePath);
+    const srcFolder = path.dirname(filePath);
+    const outFolder = targetDir || srcFolder;
+
     let outputFilename;
-    if (options.mode === 'extract_audio') {
+    if (mode === 'extract_audio') {
       outputFilename = `${baseName}.${format}`;
-    } else if (options.mode === 'convert_video') {
-      outputFilename = `${baseName}_converted.${format}`;
     } else {
-      outputFilename = path.basename(filePath);
+      // If converting in the same folder with the same extension, append _converted so it never locks/overwrites the playing file!
+      if (path.resolve(outFolder).toLowerCase() === path.resolve(srcFolder).toLowerCase() && ext.toLowerCase() === `.${format}`) {
+        outputFilename = `${baseName}_converted.${format}`;
+      } else {
+        outputFilename = `${baseName}.${format}`;
+      }
     }
-    const outputPath = path.join(outFolder, outputFilename);
+
+    // Fallback path used only when the engine did not plan a destination.
+    let outputPath = plannedPath || path.join(outFolder, outputFilename);
+    if (!plannedPath && path.resolve(outputPath).toLowerCase() === path.resolve(filePath).toLowerCase()) {
+      outputPath = path.join(outFolder, `${baseName}_converted.${format}`);
+    }
+
+    // Engine-down fallback for the same capacity check. Without this the only
+    // warning came from the engine, so losing the engine also lost the guard
+    // against filling someone's disk to zero and handing back a truncated file.
+    if (!plannedPath) {
+      try {
+        const srcSize = fs.statSync(filePath).size;
+        const stats = fs.statfsSync(path.dirname(outputPath));
+        const freeBytes = stats.bavail * stats.bsize;
+        // Same floor as the engine: 10% of the source, 50 MB minimum.
+        const floorBytes = Math.max(Math.floor(srcSize * 0.1), 50 * 1024 * 1024);
+        if (srcSize > 0 && freeBytes < floorBytes) {
+          throw new Error(
+            `Not enough free space at the destination (${Math.floor(freeBytes / (1024 * 1024))} MB left) ` +
+            'to hold this conversion'
+          );
+        }
+      } catch (e) {
+        // statfs is advisory here: only a capacity verdict should stop the job.
+        if (e && /Not enough free space/.test(String(e.message || e))) throw e;
+      }
+    }
 
     const result = await convertMediaFile(filePath, outputPath, options, (progressData) => {
-      event.sender.send('copy-progress', {
-        filePath,
-        progress: progressData.progress,
-        status: progressData.status,
-        error: progressData.error
-      });
+      const pct = Math.round((progressData.progress || 0) * 100);
+      if (event && event.sender && !event.sender.isDestroyed()) {
+        event.sender.send('copy-progress', {
+          filePath,
+          progress: progressData.progress,
+          status: progressData.status,
+          error: progressData.error
+        });
+      }
+
+      // Broadcast live progress to all player and main windows
+      try {
+        const { broadcastConverterState } = require('./electron/converter-manager.cjs');
+        broadcastConverterState({
+          converting: progressData.status === 'converting' || progressData.status === 'paused',
+          isPaused: progressData.status === 'paused',
+          progress: pct,
+          currentFile: path.basename(filePath),
+          status: progressData.status,
+          statusText: progressData.status === 'completed'
+            ? 'Conversion Complete!'
+            : `Converting (${pct}%)`
+        });
+      } catch (e) {}
     });
     return { success: true, outputPath, ...result };
   } catch (err) {
     console.error('[convert-media-file error]:', err);
-    event.sender.send('copy-progress', {
-      filePath,
-      progress: 0,
-      status: 'failed',
-      error: err.message
-    });
+    if (event && event.sender && !event.sender.isDestroyed()) {
+      event.sender.send('copy-progress', {
+        filePath,
+        progress: 0,
+        status: 'failed',
+        error: err.message
+      });
+    }
     return { success: false, error: err.message };
   }
 });
@@ -2541,7 +2823,22 @@ ipcMain.handle('open-converter-folder', async (_event, folderPath) => {
 
 ipcMain.handle('get-converter-output-files', async (_event, dirPath) => {
   try {
-    if (!dirPath || !fs.existsSync(dirPath)) return [];
+    if (!dirPath) return [];
+
+    // C++ does the directory walk and returns raw values already sorted newest
+    // first. Formatting stays here in the UI layer, matching the previous shape.
+    const cppFiles = await coreClient.call('output_files', { dirPath }, 10000);
+    if (Array.isArray(cppFiles)) {
+      return cppFiles.map((f) => ({
+        name: f.name,
+        path: f.path,
+        size: (f.sizeBytes / (1024 * 1024)).toFixed(1) + ' MB',
+        format: (f.ext || '').toUpperCase(),
+        date: new Date(f.mtimeMs).toLocaleString()
+      }));
+    }
+
+    if (!fs.existsSync(dirPath)) return [];
     const files = fs.readdirSync(dirPath);
     const results = [];
     for (const f of files) {
@@ -2780,19 +3077,86 @@ ipcMain.handle('sync-media-library', async (event, folderPath) => {
   const fileList = [];
   const scannedPaths = new Set();
 
+  // ── Prefer the C++ engine for traversal + duplicate detection ──────────────
+  // It runs out-of-process with a thread pool and a directory-mtime cache, so a
+  // large sync no longer blocks the Electron main process (the Node path below
+  // is synchronous and freezes the UI). Falls back to the Node implementation
+  // whenever the engine is unavailable or errors, so behaviour is preserved.
+  if (useCppEngine && coreProcess) {
+    try {
+      const res = await sendCoreRequest('library_sync', { folders: foldersToScan }, 120000);
+      const cppFiles = (res && res.files) || [];
+      const cppDuplicates = (res && res.duplicates) || [];
+      console.log(`[library] C++ scan: ${cppFiles.length} files, ` +
+                  `${cppDuplicates.length} duplicate groups, ` +
+                  `${res && res.stats ? res.stats.elapsedMs : '?'}ms in-engine`);
+
+      for (const pWin of getActivePlayerWindows()) {
+        if (pWin && !pWin.isDestroyed()) {
+          pWin.webContents.send('library-synced', cppFiles);
+        }
+      }
+      return { files: cppFiles, duplicates: cppDuplicates };
+    } catch (e) {
+      console.warn('[library] C++ scan failed, falling back to Node:', e.message);
+      // fall through to the synchronous Node implementation
+    }
+  }
+
   for (const dir of foldersToScan) {
     if (fs.existsSync(dir)) {
       scanDirRecursive(dir, fileList, scannedPaths, 0);
     }
   }
   saveDirCache();
+
+  // ── Duplicate detection (done here, not in renderer) ──────────────────────
+  // Group files by normalized base name (strips copy suffixes, trailing numbers, etc.)
+  const nameGroups = new Map();
+  for (const f of fileList) {
+    const normName = normalizeDupName(f.name);
+    if (!nameGroups.has(normName)) nameGroups.set(normName, []);
+    nameGroups.get(normName).push(f);
+  }
+
+  // Build duplicate groups — only keep groups with >1 distinct path
+  const duplicates = [];
+  for (const [name, group] of nameGroups.entries()) {
+    if (group.length > 1) {
+      const distinctPaths = new Set(group.map(f => f.path));
+      if (distinctPaths.size > 1) {
+        duplicates.push({ name, list: group });
+      }
+    }
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
+  const result = { files: fileList, duplicates };
+
   for (const pWin of getActivePlayerWindows()) {
     if (pWin && !pWin.isDestroyed()) {
       pWin.webContents.send('library-synced', fileList);
     }
   }
-  return fileList;
+  return result;
 });
+
+// Normalizes a filename for duplicate comparison:
+// strips extension, trailing copy markers, numeric suffixes, lowercases
+function normalizeDupName(filename) {
+  if (!filename) return '';
+  const extIdx = filename.lastIndexOf('.');
+  const ext = extIdx !== -1 ? filename.substring(extIdx) : '';
+  const base = extIdx !== -1 ? filename.substring(0, extIdx) : filename;
+  const normalized = base
+    .replace(/\s*\(\d+\)$/g, '')
+    .replace(/_\d+$/g, '')
+    .replace(/\s*-\s*Copy$/gi, '')
+    .replace(/\s*\(Copy\)$/gi, '')
+    .trim()
+    .toLowerCase();
+  return normalized + ext.toLowerCase();
+}
 
 ipcMain.on('library-synced', (event, files) => {
   for (const pWin of getActivePlayerWindows()) {

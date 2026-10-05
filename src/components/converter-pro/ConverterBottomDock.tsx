@@ -8,16 +8,16 @@ import type { VideoFormatPreset, AudioFormatPreset, MediaToolItem } from './type
 
 export const MEDIA_TOOLS: MediaToolItem[] = [
   { id: 'cut', label: 'Cut / Trim', sub: 'Trim clip range', icon: <Scissors size={18} />, color: '#38bdf8', desc: 'Set start and end markers to trim unwanted parts or isolate specific scenes.' },
-  { id: 'crop', label: 'Crop', sub: '16:9 / Zoom', icon: <Crop size={18} />, color: '#818cf8', desc: 'Crop black bars, change aspect ratio to 16:9, 4:3, or custom frame.' },
+  { id: 'crop', label: 'Crop', sub: '16:9 / Zoom', icon: <Crop size={18} />, color: '#818cf8', desc: 'Reframe the picture to 16:9, 4:3, 1:1 or 9:16, with a zoom control to crop into the shot.' },
   { id: 'subtitle', label: 'Subtitle', sub: 'Embed .srt track', icon: <MessageSquare size={18} />, color: '#c084fc', desc: 'Add or burn external subtitles (.srt, .ass, .vtt) into the video stream.' },
   { id: 'effect', label: 'Effect', sub: 'Filters & color', icon: <Sparkles size={18} />, color: '#ec4899', desc: 'Adjust brightness, contrast, hue, saturation, and apply color grading filters.' },
-  { id: 'rotate', label: 'Rotate', sub: '90° / 180° / 270°', icon: <RotateCw size={18} />, color: '#f59e0b', desc: 'Rotate video orientation 90 degrees clockwise, counter-clockwise, or 180 degrees.' },
+  { id: 'rotate', label: 'Rotate', sub: '90° / 180° / 270°', icon: <RotateCw size={18} />, color: '#f59e0b', desc: 'Rotate by 90, 180 or 270 degrees, and flip horizontally or vertically.' },
   { id: 'watermark', label: 'Watermark', sub: 'Custom logo PNG', icon: <ImageIcon size={18} />, color: '#34d399', desc: 'Overlay transparent logo image or custom copyright text on the video.' },
   { id: 'mirror', label: 'Mirror & Flip', sub: 'Horizontal / Vert', icon: <FlipHorizontal size={18} />, color: '#60a5fa', desc: 'Flip video horizontally or vertically for selfie or inverted camera footage.' },
-  { id: 'compress', label: 'Compress', sub: 'Reduce file size', icon: <Minimize2 size={18} />, color: '#2dd4bf', desc: 'Intelligently compress media to target file size while preserving high visual fidelity.' },
+  { id: 'compress', label: 'Compress', sub: 'Reduce file size', icon: <Minimize2 size={18} />, color: '#2dd4bf', desc: 'Shrink the file by a chosen percentage. Encoding is constant-quality, so the reduction lands on the quantiser rather than a guessed bitrate.' },
   { id: 'gif', label: 'Make GIF', sub: 'Animated loop', icon: <Zap size={18} />, color: '#fbbf24', desc: 'Create a lightweight animated GIF loop from any segment of this video.' },
-  { id: 'denoise', label: 'Denoise / Vol', sub: 'Audio cleanup', icon: <Volume2 size={18} />, color: '#a78bfa', desc: 'Remove background noise, normalize volume peaks, or boost quiet dialogue.' },
-  { id: 'split', label: 'Split File', sub: 'Segment video', icon: <Split size={18} />, color: '#f87171', desc: 'Split long media into multiple equal chunks by duration or file size.' },
+  { id: 'denoise', label: 'Denoise / Vol', sub: 'Audio cleanup', icon: <Volume2 size={18} />, color: '#a78bfa', desc: 'Remove steady background hiss, soften video grain, and normalise loudness to broadcast level.' },
+  { id: 'split', label: 'Split File', sub: 'Segment video', icon: <Split size={18} />, color: '#f87171', desc: 'Split a long clip into numbered segments of a chosen length, each independently playable.' },
 ];
 
 interface ConverterBottomDockProps {

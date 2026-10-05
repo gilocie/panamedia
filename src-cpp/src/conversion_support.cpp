@@ -1,0 +1,720 @@
+#include "conversion_support.hpp"
+#include "binary_resolver.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <utility>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <mutex>
+#include <sstream>
+#include <thread>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shlobj.h>   // SHGetKnownFolderPath / FOLDERID_Documents
+#define popen _popen
+#define pclose _pclose
+#endif
+
+using json = nlohmann::json;
+namespace fs = std::filesystem;
+
+namespace Panamedia {
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    // ffmpeg/ffprobe locations are resolved (and health-checked) by
+    // BinaryResolver, which mirrors youtube.cjs's candidate order but skips
+    // binaries that crash on startup.
+
+    // Runs a command and captures stdout. On Windows we wrap the whole thing in
+    // an extra pair of quotes to survive cmd.exe quote-stripping; this mirrors
+    // what media_prober.cpp already does.
+    static std::string captureCommand(const std::string& exe, const std::string& args,
+                                      int* outExitCode = nullptr) {
+        std::stringstream cmd;
+#ifdef _WIN32
+        cmd << "\"\"" << exe << "\" " << args << "\"";
+#else
+        cmd << "\"" << exe << "\" " << args;
+#endif
+        FILE* pipe = popen(cmd.str().c_str(), "r");
+        if (!pipe) {
+            if (outExitCode) *outExitCode = -1;
+            return "";
+        }
+
+        std::string out;
+        std::array<char, 4096> buf;
+        while (fgets(buf.data(), static_cast<int>(buf.size()), pipe) != nullptr) {
+            out += buf.data();
+        }
+        int rc = pclose(pipe);
+        if (outExitCode) *outExitCode = rc;
+        return out;
+    }
+
+    static uint64_t toEpochMs(const fs::file_time_type& ft) {
+        // MSVC's fs::file_time_type counts 100ns ticks since 1601-01-01 UTC.
+        auto ticks = ft.time_since_epoch().count();
+        const int64_t kTicksPerSecond = 10000000LL;
+        const int64_t kEpochDeltaSeconds = 11644473600LL;
+        int64_t unixTicks = (int64_t)ticks - kEpochDeltaSeconds * kTicksPerSecond;
+        if (unixTicks < 0) return 0;
+        return (uint64_t)(unixTicks / 10000LL);
+    }
+
+    // Mirrors Node's path.extname(f).toLowerCase().replace('.', ''):
+    // the substring from the last dot, lowercased, without the dot.
+    // A leading dot is part of the name, not an extension, so ".gitignore"
+    // yields "" just like Node does.
+    static std::string extensionOf(const std::string& fileName) {
+        size_t dot = fileName.find_last_of('.');
+        if (dot == std::string::npos || dot == 0 || dot + 1 >= fileName.size()) {
+            return "";
+        }
+        std::string ext = fileName.substr(dot + 1);
+        std::transform(ext.begin(), ext.end(), ext.begin(),
+                       [](unsigned char c) { return (char)std::tolower(c); });
+        return ext;
+    }
+
+#ifdef _WIN32
+    static std::wstring utf8ToWide(const std::string& s) {
+        if (s.empty()) return std::wstring();
+        int needed = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+        if (needed <= 0) {
+            needed = MultiByteToWideChar(CP_ACP, 0, s.c_str(), (int)s.size(), nullptr, 0);
+            if (needed <= 0) return std::wstring();
+        }
+        std::wstring out((size_t)needed, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &out[0], needed);
+        return out;
+    }
+
+    static std::string wideToUtf8(const std::wstring& w) {
+        if (w.empty()) return "";
+        int needed = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+        if (needed <= 0) return "";
+        std::string out((size_t)needed, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), out.data(), needed, nullptr, nullptr);
+        return out;
+    }
+#endif
+
+    // Attributes + size + mtime in a single syscall. std::filesystem needs a
+    // separate call for is_regular_file / file_size / last_write_time, which is
+    // roughly 4x the I/O and measurably slower than Node's one fs.statSync.
+    struct FileStat {
+        bool ok = false;
+        bool isRegular = false;
+        uint64_t sizeBytes = 0;
+        uint64_t mtimeMs = 0;
+    };
+
+#ifdef _WIN32
+    static uint64_t fileTimeToEpochMs(const FILETIME& ft) {
+        ULARGE_INTEGER u;
+        u.LowPart = ft.dwLowDateTime;
+        u.HighPart = ft.dwHighDateTime;
+        const uint64_t kEpochDelta100ns = 116444736000000000ULL; // 1601 -> 1970
+        if (u.QuadPart < kEpochDelta100ns) return 0;
+        return (u.QuadPart - kEpochDelta100ns) / 10000ULL;
+    }
+
+    static FileStat statFast(const fs::path& p) {
+        FileStat s;
+        WIN32_FILE_ATTRIBUTE_DATA fad;
+        if (!GetFileAttributesExW(p.wstring().c_str(), GetFileExInfoStandard, &fad)) return s;
+        s.ok = true;
+        s.isRegular = (fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+        ULARGE_INTEGER sz;
+        sz.LowPart = fad.nFileSizeLow;
+        sz.HighPart = fad.nFileSizeHigh;
+        s.sizeBytes = sz.QuadPart;
+        s.mtimeMs = fileTimeToEpochMs(fad.ftLastWriteTime);
+        return s;
+    }
+#else
+    static FileStat statFast(const fs::path& p) {
+        FileStat s;
+        std::error_code ec;
+        if (!fs::exists(p, ec)) return s;
+        s.ok = true;
+        s.isRegular = fs::is_regular_file(p, ec);
+        if (ec) { s.isRegular = false; return s; }
+        s.sizeBytes = fs::file_size(p, ec);
+        if (ec) s.sizeBytes = 0;
+        std::error_code mtEc;
+        s.mtimeMs = toEpochMs(fs::last_write_time(p, mtEc));
+        if (mtEc) s.mtimeMs = 0;
+        return s;
+    }
+#endif
+
+    // ── hardware acceleration ────────────────────────────────────────────────
+
+    // Cached for the engine's lifetime.
+    static std::string s_gpuCodec;
+    static std::mutex s_gpuMutex;
+
+    // Encoding one tiny synthetic frame is the only reliable way to know whether
+    // a hardware encoder can actually initialise on this machine.
+    //
+    // `ffmpeg -encoders` lists encoders *compiled into the binary*, which says
+    // nothing about the hardware present. A gyan.dev build ships with
+    // --enable-nvenc, so on an Intel-only machine it still advertises h264_nvenc;
+    // selecting it then makes every video conversion fail with
+    // "Cannot load nvcuda.dll" and exit code 1.
+    static bool encoderActuallyWorks(const std::string& encoder) {
+        std::string args =
+            "-v error -f lavfi -i color=c=black:s=64x64:d=0.2 -frames:v 1 "
+            "-c:v " + encoder + " -f null -";
+        int rc = 1;
+        captureCommand(BinaryResolver::ffmpeg(), args, &rc);
+        return rc == 0;
+    }
+
+    std::string ConversionSupport::detectHardwareAcceleration() {
+        std::lock_guard<std::mutex> lock(s_gpuMutex);
+
+        bool wasCached = !s_gpuCodec.empty();
+        if (wasCached) {
+            json r;
+            r["codec"] = s_gpuCodec;
+            r["cached"] = true;
+            return r.dump();
+        }
+
+        // Cheap pre-filter: only probe encoders this ffmpeg build even has.
+        std::string encoders = captureCommand(BinaryResolver::ffmpeg(), "-hide_banner -encoders");
+
+        // Preference order, best available first.
+        const std::pair<const char*, const char*> kCandidates[] = {
+            {"nvenc", "h264_nvenc"},
+            {"qsv",   "h264_qsv"},
+            {"amf",   "h264_amf"},
+            {"mf",    "h264_mf"},
+        };
+
+        std::string codec = "cpu";
+        for (const auto& c : kCandidates) {
+            if (encoders.find(c.second) == std::string::npos) continue;  // not built in
+            // Built in but possibly unusable here (no NVIDIA/AMD device, or no
+            // Media Foundation). Probe rather than trust the listing.
+            if (encoderActuallyWorks(c.second)) { codec = c.first; break; }
+        }
+
+        s_gpuCodec = codec;
+
+        json r;
+        r["codec"] = codec;
+        r["cached"] = false;
+        return r.dump();
+    }
+
+    // ── thread budget ────────────────────────────────────────────────────────
+
+    int ConversionSupport::getOptimalThreadCount() {
+        unsigned int cores = std::thread::hardware_concurrency();
+        if (cores == 0) cores = 4;
+        // Keep at least half the machine free for the UI and the OS.
+        int threads = (int)(cores / 2);
+        if (threads < 1) threads = 1;
+        if (threads > 4) threads = 4;
+
+#ifdef _WIN32
+        // Phase G: on battery, take the ceiling down to 2. A four-thread
+        // x264 run is perfectly reasonable on mains and is exactly the kind
+        // of thing that turns a laptop unusable twenty minutes into a flight
+        // -- so the queue gets gentler the moment the cable comes out. The
+        // user can still convert everything at once; it just takes longer.
+        SYSTEM_POWER_STATUS pwr;
+        ZeroMemory(&pwr, sizeof(pwr));
+        if (GetSystemPowerStatus(&pwr) && pwr.ACLineStatus == 0) {
+            if (threads > 2) threads = 2;
+        }
+#endif
+        return threads;
+    }
+
+    std::string ConversionSupport::getPowerStatus() {
+        json r;
+#ifdef _WIN32
+        SYSTEM_POWER_STATUS pwr;
+        ZeroMemory(&pwr, sizeof(pwr));
+        if (GetSystemPowerStatus(&pwr)) {
+            // BatteryLife is 255 for a desktop with no battery fitted, and
+            // is byte-clamped by the API, so both sentinels are folded away.
+            int percent = (pwr.BatteryLifePercent == 255) ? -1 : (int)pwr.BatteryLifePercent;
+            r["percent"] = percent;
+            r["charging"] = (pwr.BatteryFlag & 8) != 0;   // BATTERY_FLAG_CHARGING
+            bool onBattery = (pwr.ACLineStatus == 0);
+            r["onBattery"] = onBattery;
+            r["reason"] = onBattery ? "battery" : ((pwr.ACLineStatus == 1) ? "AC" : "unknown");
+        } else {
+            r["percent"] = -1;
+            r["charging"] = false;
+            r["onBattery"] = false;
+            r["reason"] = "unavailable";
+        }
+#else
+        r["percent"] = -1;
+        r["charging"] = false;
+        r["onBattery"] = false;
+        r["reason"] = "unavailable";
+#endif
+        return r.dump();
+    }
+
+    std::string ConversionSupport::describeVolume(const std::string& path) {
+        json r;
+        r["freeBytes"] = 0;
+        r["totalBytes"] = 0;
+        r["writable"] = false;
+        r["volumeLabel"] = "";
+
+#ifdef _WIN32
+        std::wstring wide = utf8ToWide(path);
+        if (wide.size() < 2 || wide[1] != L':') {
+            // Not a drive-rooted path (UNC, relative or extended form).
+            // Report it as unwritable rather than guessing: the caller asked
+            // about a volume and there is no volume to describe.
+            return r.dump();
+        }
+        std::wstring root;
+        root += wide[0];
+        root += L":\\";
+
+        DWORD driveType = GetDriveTypeW(root.c_str());
+        // DRIVE_NO_ROOT_DIR means the letter is not mounted at all -- the
+        // classic signature of a USB stick that has been pulled.
+        if (driveType == DRIVE_NO_ROOT_DIR) {
+            r["reason"] = "drive not present";
+            return r.dump();
+        }
+
+        wchar_t labelBuf[MAX_PATH + 1];
+        ZeroMemory(labelBuf, sizeof(labelBuf));
+        GetVolumeInformationW(root.c_str(), labelBuf, MAX_PATH, nullptr, nullptr, nullptr, nullptr, 0);
+        std::string label = wideToUtf8(std::wstring(labelBuf));
+        if (label.empty()) label = wideToUtf8(root);
+        r["volumeLabel"] = label;
+
+        ULARGE_INTEGER avail, total, totalFree;
+        ZeroMemory(&avail, sizeof(avail));
+        if (GetDiskFreeSpaceExW(root.c_str(), &avail, &total, &totalFree)) {
+            r["freeBytes"] = (uint64_t)avail.QuadPart;
+            r["totalBytes"] = (uint64_t)total.QuadPart;
+        }
+
+        // Writability is probed in the directory that will actually receive the
+        // file, not at the volume root.
+        //
+        // Two reasons that matters. The root of a drive is not writable by an
+        // ordinary user account on current Windows, so probing there reports
+        // "C: is read-only" on a perfectly healthy system. And writability is
+        // really a property of the directory -- a folder can be read-only or
+        // permission-locked while the drive around it is fine, which is the
+        // case that matters when an export is refused.
+        fs::path target = fs::u8path(path);
+        fs::path probeDir = target;
+        std::error_code pec;
+        while (!probeDir.empty() && !fs::is_directory(probeDir, pec)) {
+            fs::path up = probeDir.parent_path();
+            if (up.empty() || up == probeDir) { probeDir = fs::path(); break; }
+            probeDir = up;
+        }
+        if (probeDir.empty()) probeDir = fs::path(root);
+
+        fs::path probeFile = probeDir / ".panamedia-write-test";
+        HANDLE h = CreateFileW(probeFile.c_str(), GENERIC_WRITE,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, CREATE_ALWAYS,
+                               FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+        if (h != INVALID_HANDLE_VALUE) {
+            CloseHandle(h);
+            r["writable"] = true;
+        } else {
+            DWORD err = GetLastError();
+            r["writable"] = false;
+            // ERROR_NOT_READY is what a card reader with no card in it
+            // reports; ERROR_DEV_NOT_EXIST and ERROR_PATH_NOT_FOUND are what a
+            // pulled stick looks like once its letter has been cleared.
+            if (err == ERROR_NOT_READY || err == ERROR_DEV_NOT_EXIST) {
+                r["reason"] = "no media in the drive";
+            } else if (err == ERROR_PATH_NOT_FOUND) {
+                r["reason"] = "the drive is no longer connected";
+            } else if (err == ERROR_ACCESS_DENIED || err == ERROR_WRITE_PROTECT ||
+                       err == ERROR_USER_MAPPED_FILE) {
+                r["reason"] = "the destination is read-only or access is denied";
+            } else {
+                r["reason"] = "the destination cannot be written to (error " +
+                              std::to_string((unsigned long)err) + ")";
+            }
+        }
+#else
+        (void)path;
+#endif
+        return r.dump();
+    }
+
+    std::string ConversionSupport::longPathIfNeeded(const std::string& path) {
+        if (path.empty()) return path;
+#ifdef _WIN32
+        // Below the safe length there is nothing to gain, and leaving short
+        // paths alone keeps log output and error messages readable.
+        static const size_t kExtendedFrom = 240;
+        if (path.size() < kExtendedFrom) return path;
+
+        if (path.rfind("\\\\?\\", 0) == 0) return path;   // already extended
+
+        if (path.rfind("\\\\", 0) == 0) {
+            // UNC share: \\server\share\... -> \\?\UNC\server\share\...
+            return "\\\\?\\UNC" + path.substr(1);
+        }
+        if (path.size() >= 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) {
+            // Strip the trailing separator GetDiskFreeSpaceExW and friends
+            // dislike in extended form; root paths keep theirs.
+            std::string body = path.substr(2);
+            while (body.size() > 1 && (body.back() == '\\' || body.back() == '/')) body.pop_back();
+            return "\\\\?\\" + path.substr(0, 2) + body;
+        }
+        return path;
+#else
+        return path;
+#endif
+    }
+
+    // ── duration probe ───────────────────────────────────────────────────────
+
+    std::string ConversionSupport::probeDuration(const std::string& filePath) {
+        json r;
+        std::error_code ec;
+        if (filePath.empty() || !fs::exists(fs::u8path(filePath), ec)) {
+            r["duration"] = 0.0;
+            return r.dump();
+        }
+
+        std::string quoted = "\"" + filePath + "\"";
+        int rc = 0;
+        std::string out = captureCommand(
+            BinaryResolver::ffprobe(),
+            "-v error -show_entries format=duration "
+            "-of default=noprint_wrappers=1:nokey=1 " + quoted,
+            &rc);
+
+        double duration = 0.0;
+        try {
+            std::string trimmed = out;
+            // ffprobe may emit a trailing newline
+            while (!trimmed.empty() && (trimmed.back() == '\n' || trimmed.back() == '\r' ||
+                                        trimmed.back() == ' ' || trimmed.back() == '\t')) {
+                trimmed.pop_back();
+            }
+            if (!trimmed.empty()) {
+                duration = std::stod(trimmed);
+                if (duration < 0 || std::isnan(duration)) duration = 0.0;
+            }
+        } catch (...) {
+            duration = 0.0;
+        }
+
+        r["duration"] = duration;
+        // Surface the probe outcome instead of silently reporting 0. A duration
+        // of 0 makes callers fall back to estimated progress, which reads as a
+        // hung conversion -- exactly the failure we are trying to make visible.
+        r["ok"] = (rc == 0 && duration > 0);
+        r["exitCode"] = rc;
+        r["backend"] = BinaryResolver::ffprobe();
+        return r.dump();
+    }
+
+    // ── output directory listing ─────────────────────────────────────────────
+
+    std::string ConversionSupport::listOutputFiles(const std::string& dirPath) {
+        json arr = json::array();
+
+        std::error_code ec;
+        if (dirPath.empty() || !fs::exists(dirPath, ec) || !fs::is_directory(dirPath, ec)) {
+            return arr.dump();
+        }
+
+        struct Entry {
+            std::string name;
+            std::string path;
+            std::string ext;
+            uint64_t sizeBytes;
+            uint64_t mtimeMs;
+        };
+        std::vector<Entry> entries;
+
+        for (fs::directory_iterator it(dirPath, ec), end; !ec && it != end; it.increment(ec)) {
+            const fs::path& p = it->path();
+
+            FileStat st = statFast(p);
+            if (!st.ok || !st.isRegular) continue;
+
+            std::string name = p.filename().u8string();
+            if (name.empty() || name[0] == '.') continue; // matches Node's dotfile skip
+
+            Entry e;
+            e.name = name;
+            e.path = p.u8string();
+            e.ext = extensionOf(name);
+            e.sizeBytes = st.sizeBytes;
+            e.mtimeMs = st.mtimeMs;
+
+            entries.push_back(std::move(e));
+        }
+
+        // Newest first, matching Node's descending-date sort. stable_sort keeps
+        // directory order for equal timestamps, which is what V8's (stable)
+        // Array.prototype.sort did, so ties line up instead of shuffling.
+        std::stable_sort(entries.begin(), entries.end(),
+                         [](const Entry& a, const Entry& b) { return a.mtimeMs > b.mtimeMs; });
+
+        for (const auto& e : entries) {
+            json o;
+            o["name"] = e.name;
+            o["path"] = e.path;
+            o["ext"] = e.ext;
+            o["sizeBytes"] = e.sizeBytes;
+            o["mtimeMs"] = e.mtimeMs;
+            arr.push_back(std::move(o));
+        }
+
+        return arr.dump();
+    }
+
+    // ── removable drives ─────────────────────────────────────────────────────
+
+    std::string ConversionSupport::listRemovableDrives() {
+        json arr = json::array();
+
+#ifdef _WIN32
+        DWORD mask = GetLogicalDrives();
+        for (int i = 0; i < 26; ++i) {
+            if (!(mask & (1UL << i))) continue;
+
+            std::wstring root;
+            root += (wchar_t)('A' + i);
+            root += L":\\";
+
+            if (GetDriveTypeW(root.c_str()) != DRIVE_REMOVABLE) continue;
+
+            wchar_t labelBuf[MAX_PATH + 1];
+            ZeroMemory(labelBuf, sizeof(labelBuf));
+            GetVolumeInformationW(root.c_str(), labelBuf, MAX_PATH, nullptr, nullptr, nullptr, nullptr, 0);
+
+            std::string letter;
+            letter += (char)('A' + i);
+            letter += ":\\";
+
+            std::string label = wideToUtf8(std::wstring(labelBuf));
+            if (label.empty()) label = "USB Drive";
+
+            json d;
+            d["letter"] = letter;
+            d["label"] = label;
+
+            // Phase G: readiness is probed, not assumed. A card reader with
+            // no card, or a stick that is still enumerating right after
+            // being plugged in, both report removable but accept no writes.
+            json v = json::parse(describeVolume(letter));
+            d["ready"] = v.value("writable", false);
+            d["freeBytes"] = v.value("freeBytes", (uint64_t)0);
+            arr.push_back(std::move(d));
+        }
+#else
+        (void)arr;
+#endif
+
+        return arr.dump();
+    }
+
+// ── output path planning ─────────────────────────────────────────────────
+
+#ifdef _WIN32
+    // Documents via the Known Folder API, so we agree with Explorer instead of
+    // assuming %USERPROFILE%\Documents (which is redirected on many setups).
+    static std::string getDocumentsDir() {
+        PWSTR raw = nullptr;
+        if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, 0, nullptr, &raw)) && raw) {
+            std::wstring w(raw);
+            CoTaskMemFree(raw);
+            if (!w.empty()) return wideToUtf8(w);
+        }
+        const char* profile = std::getenv("USERPROFILE");
+        if (profile) return (fs::path(profile) / "Documents").string();
+        return (fs::path(".") / "Documents").string();
+    }
+
+    static std::string getSendtrayDir() {
+        return (fs::path(getDocumentsDir()) / "Panamedia" / "Sendtray").string();
+    }
+#else
+    static std::string getSendtrayDir() {
+        const char* home = std::getenv("HOME");
+        return (fs::path(home ? home : ".") / "Panamedia" / "Sendtray").string();
+    }
+#endif
+
+    // Case-insensitive path comparison. Separators are unified, repeats
+    // collapsed and a trailing slash dropped, so "C:/a//b/" and
+    // "C:\a\b" compare equal.
+    static bool samePath(const std::string& a, const std::string& b) {
+        auto norm = [](std::string s) {
+            std::replace(s.begin(), s.end(), '\\', '/');
+            std::string t;
+            t.reserve(s.size());
+            for (size_t i = 0; i < s.size(); ++i) {
+                if (s[i] == '/' && !t.empty() && t.back() == '/') continue;
+                t += s[i];
+            }
+            while (t.size() > 1 && t.back() == '/') t.pop_back();
+            std::transform(t.begin(), t.end(), t.begin(),
+                           [](unsigned char c) { return (char)std::tolower(c); });
+            return t;
+        };
+        return norm(a) == norm(b);
+    }
+
+    static bool pathExists(const fs::path& p) {
+        std::error_code ec;
+        return fs::exists(p, ec);
+    }
+
+    std::string ConversionSupport::planOutputPath(const std::string& filePath,
+                                                  const std::string& optionsJson) {
+        json opts = json::parse(optionsJson.empty() ? "{}" : optionsJson);
+        json out;
+
+        if (filePath.empty()) {
+            out["error"] = "filePath is required";
+            return out.dump();
+        }
+
+        std::string mode = opts.value("mode", std::string("extract_audio"));
+        std::string format = opts.value("format", mode == "extract_audio" ? "mp3" : "mp4");
+        std::transform(format.begin(), format.end(), format.begin(),
+                       [](unsigned char c) { return (char)std::tolower(c); });
+
+        std::string destination = opts.value("destination", std::string("source"));
+
+        fs::path srcPath = fs::u8path(filePath);
+        fs::path srcDir = srcPath.parent_path();
+        fs::path targetDir = srcDir;
+
+        if (destination == "folder" && opts.contains("destPath") && opts["destPath"].is_string()) {
+            std::string dp = opts["destPath"].get<std::string>();
+            if (!dp.empty()) targetDir = fs::u8path(dp);
+        } else if (destination == "sendtray") {
+            targetDir = fs::path(getSendtrayDir());
+        } else if (destination == "drive" && opts.contains("driveLetter") && opts["driveLetter"].is_string()) {
+            std::string dl = opts["driveLetter"].get<std::string>();
+            if (!dl.empty()) targetDir = fs::u8path(dl);
+        }
+
+        std::string stem = srcPath.stem().u8string();
+        std::string fileName = stem + "." + format;
+        fs::path candidate = targetDir / fileName;
+
+        // Never write over the file being read.
+        if (samePath(candidate.u8string(), filePath)) {
+            fileName = stem + "_converted." + format;
+            candidate = targetDir / fileName;
+            out["collision"] = "source";
+        } else {
+            out["collision"] = false;
+            // Never clobber an existing export either.
+            if (pathExists(candidate)) {
+                for (int n = 1; n <= 999 && pathExists(candidate); ++n) {
+                    fileName = stem + " (" + std::to_string(n) + ")." + format;
+                    candidate = targetDir / fileName;
+                }
+                out["collision"] = "existing";
+            }
+        }
+
+        std::error_code ec;
+        fs::create_directories(targetDir, ec);
+        if (ec) {
+            out["error"] = "Cannot create destination directory: " + targetDir.u8string();
+            return out.dump();
+        }
+
+        out["outputPath"] = candidate.u8string();
+        out["directory"] = targetDir.u8string();
+        out["fileName"] = fileName;
+        out["isSourceDir"] = samePath(targetDir.u8string(), srcDir.u8string());
+
+        // --- Phase G: will the result actually fit, and can we write there? ---
+        //
+        // Running out of room part-way through leaves a truncated file that
+        // looks like a successful export, which is worse than refusing. So the
+        // space needed is estimated before any work starts.
+        uintmax_t srcBytes = 0;
+        std::error_code sec;
+        if (fs::is_regular_file(srcPath, sec) && !sec) srcBytes = fs::file_size(srcPath, sec);
+
+        // The estimate is deliberately pessimistic: assume the output is as
+        // large as the input unless something tells us otherwise. Over-asking
+        // produces a warning; under-asking produces a corrupt export.
+        double factor = 1.15;                       // same size, plus container overhead
+        if (mode == "extract_audio") {
+            factor = 0.35;                           // audio track only
+        }
+        try {
+            if (opts.contains("tools") && opts["tools"].is_object() &&
+                opts["tools"].contains("compress") && opts["tools"]["compress"].is_object()) {
+                const json& cz = opts["tools"]["compress"];
+                // Same unit rule as the encoder: anything above 1 is the UI's
+                // percentage rather than a fraction.
+                double reduction = cz.value("targetReduction", 0.0);
+                if (reduction > 1.0) reduction = reduction / 100.0;
+                if (reduction > 0.0 && reduction < 0.95) {
+                    factor = (1.0 - reduction) * 1.15;
+                }
+            }
+        } catch (...) {}
+
+        uintmax_t estimated = (uintmax_t)((double)srcBytes * factor);
+
+        json vol = json::parse(describeVolume(candidate.u8string()));
+        uintmax_t freeBytes = vol.value("freeBytes", (uint64_t)0);
+        bool writable = vol.value("writable", false);
+
+        out["sourceBytes"] = srcBytes;
+        out["estimatedBytes"] = estimated;
+        out["freeBytes"] = freeBytes;
+        out["writable"] = writable;
+        out["volumeLabel"] = vol.value("volumeLabel", std::string());
+
+        bool sufficient = freeBytes >= estimated;
+        out["sufficient"] = sufficient;
+
+        // A warning, not an error: the caller decides whether to proceed.
+        // It is reported for a locked or absent drive and for tight space,
+        // so the UI can speak before the job rather than after it fails.
+        std::string warning;
+        if (!writable) {
+            warning = vol.value("reason", std::string("The destination is not writable"));
+        } else if (!sufficient) {
+            warning = "Not enough free space at the destination for this conversion";
+        }
+        out["warning"] = warning;
+        return out.dump();
+    }
+
+} // namespace Panamedia

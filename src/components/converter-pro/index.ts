@@ -16,4 +16,7 @@ export * from './features/EffectTool';
 export * from './features/RotateTool';
 export * from './features/WatermarkTool';
 export * from './features/CompressTool';
+export * from './features/GifTool';
+export * from './features/DenoiseTool';
+export * from './features/SplitTool';
 export * from './features/ToolInfoModal';

@@ -123,19 +123,20 @@ function setupIpcHandlers() {
   ipcMain.on('converter-restore-request', (event) => {
     const senderWin = (event && event.sender) ? BrowserWindow.fromWebContents(event.sender) : null;
     const activePlayers = getActivePlayerWindowsFn ? getActivePlayerWindowsFn() : [];
-    const isFromPlayer = activePlayers.has ? activePlayers.has(senderWin) : false;
+    // activePlayers is an Array — use .some() not .has() which only exists on Set/Map
+    const isFromPlayer = senderWin && Array.isArray(activePlayers)
+      ? activePlayers.some(w => w === senderWin)
+      : (activePlayers.has ? activePlayers.has(senderWin) : false);
 
+    // Only reply to the sender window — never touch mainWindow if the request came from a player
     if (senderWin && !senderWin.isDestroyed()) {
       senderWin.webContents.send('converter-restore-request');
     }
 
-    // Only forward to mainWindow and show mainWindow if this request did NOT originate from a player window!
+    // Only forward to mainWindow if this request did NOT originate from a player window
     const mainWindow = getMainWindowFn ? getMainWindowFn() : null;
     if (!isFromPlayer && mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('converter-restore-request');
-      if (!mainWindow.isMinimized() && mainWindow.isVisible()) {
-        mainWindow.focus();
-      }
     }
   });
 
@@ -143,12 +144,17 @@ function setupIpcHandlers() {
   ipcMain.on('converter-open-request', (event) => {
     const senderWin = (event && event.sender) ? BrowserWindow.fromWebContents(event.sender) : null;
     const activePlayers = getActivePlayerWindowsFn ? getActivePlayerWindowsFn() : [];
-    const isFromPlayer = activePlayers.has ? activePlayers.has(senderWin) : false;
+    // activePlayers is an Array — use .some() not .has() which only exists on Set/Map
+    const isFromPlayer = senderWin && Array.isArray(activePlayers)
+      ? activePlayers.some(w => w === senderWin)
+      : (activePlayers.has ? activePlayers.has(senderWin) : false);
 
+    // Only reply to the sender window
     if (senderWin && !senderWin.isDestroyed()) {
       senderWin.webContents.send('converter-open-request');
     }
 
+    // Only forward to mainWindow if this request did NOT originate from a player window
     const mainWindow = getMainWindowFn ? getMainWindowFn() : null;
     if (!isFromPlayer && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
       mainWindow.webContents.send('converter-open-request');
@@ -159,8 +165,28 @@ function setupIpcHandlers() {
   ipcMain.handle('converter-toggle-pause', async (_event, filePath) => {
     try {
       const { togglePauseProcess } = require('../panamedia-downloader/conversion-engine/hardwareEngine.cjs');
-      const isPaused = togglePauseProcess(filePath);
+      // Now async: it asks the C++ engine to suspend/resume the ffmpeg process.
+      const isPaused = await togglePauseProcess(filePath);
       return { success: true, isPaused };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Cancel a running conversion outright.
+  //
+  // The engine already had convert_cancel, but nothing exposed it, so removing a
+  // file mid-conversion left ffmpeg running and its progress events kept
+  // updating state for a file no longer in the queue.
+  ipcMain.handle('converter-cancel', async (_event, filePath) => {
+    try {
+      const coreClient = require('./core-client.cjs');
+      const res = await coreClient.call('convert_cancel', { jobId: filePath }, 8000);
+      if (res && res.cancelled) {
+        console.log('[Converter] cancelled job:', filePath);
+        return { success: true };
+      }
+      return { success: false, error: (res && res.error) || 'No running job for that file' };
     } catch (err) {
       return { success: false, error: err.message };
     }

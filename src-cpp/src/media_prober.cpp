@@ -1,4 +1,5 @@
 #include "media_prober.hpp"
+#include "binary_resolver.hpp"
 #include <iostream>
 #include <memory>
 #include <array>
@@ -15,15 +16,11 @@
 namespace Panamedia {
 
     static std::string getFFprobePath() {
-        const char* appData = std::getenv("APPDATA");
-        if (appData) {
-            std::filesystem::path p(appData);
-            p = p / "net-downloader" / "bin" / "ffprobe.exe";
-            if (std::filesystem::exists(p)) {
-                return p.string();
-            }
-        }
-        return "ffprobe.exe"; // Fallback to system PATH
+        // Health-checked resolution. The previous hardcoded
+        // %APPDATA%/net-downloader/bin lookup ignored the app's primary bin
+        // directory and could not detect a corrupt binary; a crashing ffprobe
+        // silently produced "File not found"-style probe failures everywhere.
+        return BinaryResolver::ffprobe();
     }
 
     std::string MediaProber::probeFile(const std::string& filePath) {
