@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   Send, ChevronLeft, HardDrive, MoveRight, 
   Loader2, ChevronRight, Heart, Lock, CheckCircle2, AlertCircle,
@@ -15,6 +15,7 @@ import {
   mapWithConcurrency,
   conversionConcurrency
 } from './panamedia/converterQueue';
+import { registerOutputs, classifyOutput } from './panamedia/converterOutputs';
 import { 
   SendConvertPreparationModal, 
   type SendConvertOptions, 
@@ -106,8 +107,11 @@ export function SendToFlashModal({
   // is no longer read here at all, so nothing about the player can reach the
   // queue without an explicit add.
   const [isMinimized, setIsMinimized] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const isPausedRef = useRef(false);
+  // Pause state is NOT held here. It lives in `fileConversionMap`, one entry per
+  // file, because that is the only place a card's own Pause button writes to --
+  // and having a second copy is what broke the footer: pausing a card left
+  // `isPaused` false, so the big button kept reading PAUSE and kept pulsing
+  // while the card read RESUME. It is derived below instead.
   const [fileConversionMap, setFileConversionMap] = useState<Record<string, { status: 'idle' | 'converting' | 'paused' | 'completed' | 'failed'; progress: number; error?: string }>>({});
 
   // Files the user deleted from the queue while converting. Their
@@ -121,6 +125,60 @@ export function SendToFlashModal({
   // Mirror of the above, readable from callbacks without re-creating them.
   const fileConversionMapRef = useRef(fileConversionMap);
   fileConversionMapRef.current = fileConversionMap;
+
+  /**
+   * Splits the live jobs into the ones running and the ones held.
+   *
+   * Driven by the map's own keys rather than by the queue. A file only has an
+   * entry once it has actually been handed to the engine, so this is exactly
+   * the set that can be paused -- and it keeps this independent of `allFiles`,
+   * which is derived further down, so the IPC handlers that use it can be
+   * registered once instead of being rebuilt on every queue change.
+   */
+  const splitInFlight = useCallback((map: Record<string, { status: string }>) => {
+    const running: string[] = [];
+    const held: string[] = [];
+    for (const f of Object.keys(map)) {
+      const s = map[f]?.status;
+      if (s === 'converting') running.push(f);
+      else if (s === 'paused') held.push(f);
+    }
+    return { running, held };
+  }, []);
+
+  /**
+   * The footer's single Pause/Resume control has to answer one question about N
+   * independently pausable jobs. It reads "held" only when every in-flight job is
+   * held -- that is the only state where Resume is the honest label. With a mix,
+   * the button still offers Pause, and clicking it pauses whichever jobs are
+   * actually running without disturbing the ones the user held on purpose.
+   *
+   */
+  const isPaused = useMemo(() => {
+    const { running, held } = splitInFlight(fileConversionMap);
+    return held.length > 0 && running.length === 0;
+  }, [fileConversionMap, splitInFlight]);
+
+  /** Applies a pause state to specific jobs in the engine and in the map. */
+  const applyPauseTo = useCallback(async (targets: string[], toPaused: boolean) => {
+    if (!electron || targets.length === 0) return;
+    const bridge = electron;
+    await Promise.all(targets.map(async (f) => {
+      try {
+        await bridge.ipcRenderer.invoke('converter-toggle-pause', f);
+      } catch (e) {}
+    }));
+    setFileConversionMap(prev => {
+      const next = { ...prev };
+      for (const f of targets) {
+        const item = next[f];
+        if (!item) continue;
+        next[f] = { ...item, status: toPaused ? 'paused' : 'converting' };
+      }
+      return next;
+    });
+  }, []);
+
   const [isConvertingBatch, setIsConvertingBatch] = useState(false);
 
   useEffect(() => {
@@ -164,13 +222,18 @@ export function SendToFlashModal({
       setIsMinimized(false);
       onClose();
     };
+    // These used to flip a local boolean and nothing else, so pausing from the
+    // tray or the title bar relabelled the button while every ffmpeg kept
+    // running. They now go through the same path as the on-screen controls.
     const handlePause = () => {
-      setIsPaused(true);
-      isPausedRef.current = true;
+      const { running } = splitInFlight(fileConversionMapRef.current);
+      if (running.length === 0) return;
+      applyPauseTo(running, true);
     };
     const handleResume = () => {
-      setIsPaused(false);
-      isPausedRef.current = false;
+      const { held } = splitInFlight(fileConversionMapRef.current);
+      if (held.length === 0) return;
+      applyPauseTo(held, false);
     };
     bridge.ipcRenderer.on('converter-open-request', handleDirectOpen);
     bridge.ipcRenderer.on('converter-restore-request', handleRestore);
@@ -184,7 +247,7 @@ export function SendToFlashModal({
       bridge.ipcRenderer.removeListener('converter-pause-request', handlePause);
       bridge.ipcRenderer.removeListener('converter-resume-request', handleResume);
     };
-  }, [onClose]);
+  }, [onClose, splitInFlight, applyPauseTo]);
 
 
   const handleAddFilesToQueue = async () => {
@@ -469,6 +532,10 @@ export function SendToFlashModal({
 
         try {
           if (dest === 'drive' && options.exportDriveLetter) {
+            // Both branches can produce output; the copy branch has no output
+            // path of its own, hence the outer declaration.
+            let driveOutputs: string[] = [];
+
             if (options.mode === 'original') {
               const res = await bridge.ipcRenderer.invoke('copy-file-to-drive', {
                 filePath: target,
@@ -489,11 +556,19 @@ export function SendToFlashModal({
                 }
               });
               if (!res.success) throw new Error(res.error || 'Conversion to drive failed');
+              if (res.outputs && res.outputs.length) driveOutputs = res.outputs;
+              else if (res.outputPath) driveOutputs = [res.outputPath];
             }
+
+            // Same bookkeeping as the sendtray/folder branch below: record what
+            // was produced so it appears under Video or Audio, and take the
+            // source off the queue so a finished job stops looking pending.
+            registerOutputs(driveOutputs, classifyOutput(itemOpt.mode, target, driveOutputs[0] || ''));
             setFileConversionMap(prev => ({
               ...prev,
-              [target]: { status: 'completed', progress: 1.0 }
+              [target]: { status: 'completed', progress: 1.0, outputPath: driveOutputs[0] }
             }));
+            removeFromQueue([target]);
           } else {
             // Export to Sendtray or custom folder. Passing the destination
             // lets the engine write straight there instead of writing
@@ -542,6 +617,20 @@ export function SendToFlashModal({
               if (dest === 'sendtray') {
                 outputs.forEach(seg => handleMoveFileToSendtray(seg, options.targetFolderId));
               }
+
+              // Record the finished files against the side they belong to.
+              // The output tabs read a directory scan, and the sendtray -- the
+              // default destination -- is not that directory, so without this a
+              // completed conversion was simply never visible anywhere.
+              //
+              // Classified by the mode used for *this* file, not by the source
+              // extension: extracting audio from an .mp4 is the common case, and
+              // it produced an audio file that the video tab then claimed.
+              registerOutputs(
+                outputs,
+                classifyOutput(itemOpt.mode, target, finalPath || res.outputPath)
+              );
+
               setFileConversionMap(prev => ({
                 ...prev,
                 [target]: {
@@ -549,6 +638,11 @@ export function SendToFlashModal({
                   segments: res.segments
                 }
               }));
+
+              // Done means done: the source leaves the queue. Only failures stay
+              // behind, so they can be retried, and the title-bar badge stops
+              // counting finished jobs as work still to do.
+              removeFromQueue([target]);
 
               // Save completed event
               try {
@@ -618,32 +712,21 @@ export function SendToFlashModal({
   };
 
   const handleTogglePauseConversion = async () => {
-    const nextPaused = !isPausedRef.current;
-    isPausedRef.current = nextPaused;
-    setIsPaused(nextPaused);
+    // Derived from the per-file statuses rather than from a toggled flag. The
+    // flag version had two failure modes: it read false whenever the user had
+    // paused an individual card (so the footer said PAUSE over a paused job),
+    // and when it did fire it toggled *every* in-flight job, silently undoing
+    // whichever ones the user had deliberately singled out.
+    const { running, held } = splitInFlight(fileConversionMapRef.current);
+    if (!electron) return;
 
-    // Several files convert at once, so the main control pauses/resumes every
-    // in-flight job. It previously paused only allFiles[currentFileIndex],
-    // which was pinned to the first entry.
-    const inFlight = allFiles.filter((f) => {
-      const st = fileConversionMapRef.current[f]?.status;
-      return st === 'converting' || st === 'paused';
-    });
+    // Resume only when there is nothing left running, which is exactly the
+    // condition under which the button is labelled RESUME.
+    const toPaused = !(held.length > 0 && running.length === 0);
+    const targets = toPaused ? running : held;
+    if (targets.length === 0) return;
 
-    if (inFlight.length === 0 || !electron) return;
-
-    // Local const so the non-null narrowing survives into the async closure.
-    const bridge = electron;
-    await Promise.all(inFlight.map(async (f) => {
-      try {
-        await bridge.ipcRenderer.invoke('converter-toggle-pause', f);
-      } catch (e) {}
-      setFileConversionMap(prev => {
-        const item = prev[f];
-        if (!item) return prev;
-        return { ...prev, [f]: { ...item, status: nextPaused ? 'paused' : 'converting' } };
-      });
-    }));
+    await applyPauseTo(targets, toPaused);
   };
 
   const handleConvertSingleFile = async (targetFile: string) => {
@@ -694,8 +777,16 @@ export function SendToFlashModal({
 
   const handleTogglePauseSingleFile = async (targetFile: string) => {
     if (!electron || !targetFile) return;
+
+    // What this file is doing now, before the round trip. Used as the fallback
+    // when the engine does not answer, so the button still moves rather than
+    // silently sticking -- it used to fall back to the *global* flag, which is
+    // how a single-file pause could leave the footer reading PAUSE.
+    const wasPaused = fileConversionMapRef.current[targetFile]?.status === 'paused';
+
     const res = await electron.ipcRenderer.invoke('converter-toggle-pause', targetFile);
-    const isNowPaused = res?.isPaused ?? !isPausedRef.current;
+    const isNowPaused = typeof res?.isPaused === 'boolean' ? res.isPaused : !wasPaused;
+
     setFileConversionMap(prev => {
       const curr = prev[targetFile];
       if (!curr) return prev;
@@ -704,6 +795,8 @@ export function SendToFlashModal({
         [targetFile]: { ...curr, status: isNowPaused ? 'paused' : 'converting' }
       };
     });
+    // No aggregate update needed: the footer's state is derived from this map,
+    // so holding the only running job now reads RESUME there automatically.
   };
 
   const handleMoveToSendtray = (folderId?: string) => {

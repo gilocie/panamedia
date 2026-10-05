@@ -40,6 +40,136 @@
   outline: none !important;
 }
 
+/* ─── Tooltips ───────────────────────────────────────────────────────────
+   Replaces the browser's native `title` attribute throughout the app.
+
+   The native one could not be styled at all: a grey OS rectangle, system font,
+   ~1s delay, sharp corners, and drawn above the player's own controls. Every
+   hint had to be squeezed into a single run-on string because there was no way
+   to show a second line or a shortcut.
+
+   These carry three parts -- a name, an optional key chip, and an optional
+   explanation -- and flip away from the viewport edge rather than clipping.
+   ---------------------------------------------------------------------- */
+
+.pn-tooltip-anchor {
+  /* No box: the wrapper must not affect the parent's layout at all. */
+  display: contents;
+}
+
+.pn-tooltip {
+  position: fixed;
+  z-index: 2147483000;
+  max-width: 280px;
+  padding: 8px 11px;
+  border-radius: 10px;
+
+  /* The arrow is a rotated square sitting on the tooltip's own border, so it
+     picks up the gradient outline without a separate colour. */
+  background: linear-gradient(180deg, rgba(28, 28, 46, 0.98) 0%, rgba(16, 16, 28, 0.98) 100%);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+
+  color: #f8fafc;
+  font-family: var(--font-main);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  pointer-events: none;
+
+  /* Positioned off-screen until measured, then fades in. Without this the
+     tooltip would appear for one frame at the wrong place. */
+  opacity: 0;
+  transform: translateY(3px) scale(0.97);
+  transition: opacity 0.13s ease, transform 0.13s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pn-tooltip--in {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.pn-tooltip__arrow {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  /* Undo the tooltip's own translate/scale so the arrow stays square. */
+  transform: rotate(45deg);
+  background: linear-gradient(135deg, rgba(28, 28, 46, 0.98), rgba(22, 22, 38, 0.98));
+  border-left: 1px solid rgba(139, 92, 246, 0.35);
+  border-top: 1px solid rgba(139, 92, 246, 0.35);
+  left: var(--tip-arrow-left, 50%);
+  top: var(--tip-arrow-top, 50%);
+  margin-left: -5px;
+  margin-top: -5px;
+}
+
+/* Placed left or right of the anchor: the arrow rotates so it points at the
+   control from the correct side. */
+.pn-tooltip[data-side='left'] .pn-tooltip__arrow {
+  border: 0;
+  border-right: 1px solid rgba(139, 92, 246, 0.35);
+  border-top: 1px solid rgba(139, 92, 246, 0.35);
+}
+.pn-tooltip[data-side='right'] .pn-tooltip__arrow {
+  border: 0;
+  border-left: 1px solid rgba(139, 92, 246, 0.35);
+  border-bottom: 1px solid rgba(139, 92, 246, 0.35);
+}
+.pn-tooltip[data-side='bottom'] .pn-tooltip__arrow {
+  border: 0;
+  border-left: 1px solid rgba(139, 92, 246, 0.35);
+  border-bottom: 1px solid rgba(139, 92, 246, 0.35);
+}
+
+.pn-tooltip__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pn-tooltip__label {
+  font-weight: 700;
+  letter-spacing: 0.1px;
+  white-space: nowrap;
+}
+
+/* Key chip. Sits inline with the name so the hint reads as part of the control
+   rather than as a second sentence. */
+.pn-tooltip__hint {
+  font-family: var(--font-main);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 5px;
+  color: #c7d2fe;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(129, 140, 248, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+}
+
+.pn-tooltip__note {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: rgba(226, 232, 240, 0.72);
+  white-space: normal;
+}
+
+/* The arrow colour is carried on the element so each side can pick the edge it
+   needs without a second gradient. */
+.pn-tooltip[data-side='top'] .pn-tooltip__arrow { top: 100%; }
+.pn-tooltip[data-side='bottom'] .pn-tooltip__arrow { top: 0; }
+.pn-tooltip[data-side='left'] .pn-tooltip__arrow { left: 100%; }
+.pn-tooltip[data-side='right'] .pn-tooltip__arrow { left: 0; }
+
 
 body {
   font-family: var(--font-main);

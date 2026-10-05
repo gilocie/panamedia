@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Sparkles, Loader2, CheckCircle2, AlertCircle, CopyPlus } from 'lucide-react';
 import { electron } from './types';
 import { getQueue, subscribeQueue } from './converterQueue';
+import { Tooltip } from './Tooltip';
 
 interface PlayerTitleBarProps {
   currentTitle: string;
@@ -88,13 +89,33 @@ export function PlayerTitleBar({ currentTitle, onHelpClick, onOpenConverter }: P
     ? 'linear-gradient(135deg,#ec4899,#8b5cf6)'
     : 'linear-gradient(135deg,#06b6d4,#6366f1)';
 
-  const btnTitle = isRunning
-    ? `Converting... ${pct}% — click to open`
-    : isDone   ? 'Done — click to open'
-    : isPaused ? 'Paused — click to open'
-    : hasActiveQueue ? `${activeQueueCount} file${activeQueueCount !== 1 ? 's' : ''} queued — click to open`
-    : 'Converter Pro — click to open';
+  // The title doubles as the badge readout: the ring, the spinner and the dot
+  // all come from the same two sources, so what the icon shows and what the
+  // tooltip says cannot disagree.
+  const statusLine = isRunning
+    ? `Converting — ${pct}%`
+    : isDone   ? 'Conversion complete'
+    : isFailed ? 'Conversion failed'
+    : isPaused ? 'Conversion paused'
+    : activeQueueCount > 0
+      ? `${activeQueueCount} file${activeQueueCount !== 1 ? 's' : ''} ready`
+      : 'Nothing queued';
 
+  const statusNote = isRunning
+    ? `${converterState?.currentFile || 'Media'} is being converted. Click to open the converter.`
+    : isFailed
+      ? 'Open the converter to see the error and try again.'
+      : isDone
+        ? 'The finished file is in the converter history. Click to open it.'
+        : isPaused
+          ? 'Progress is held. Click to open the converter and resume.'
+          : activeQueueCount > 0
+            ? 'Queued and waiting. Click to open the converter and start.'
+            : 'Opens Converter Pro. It does not add anything to the queue by itself.';
+
+  // The tooltip leads with the live status rather than the product name, so the
+  // first thing it says is what the icon is doing right now. The name itself is
+  // already on screen next to the icon.
   return (
     <div
       className="titlebar"
@@ -145,12 +166,12 @@ export function PlayerTitleBar({ currentTitle, onHelpClick, onOpenConverter }: P
         `}</style>
 
         {/* Converter icon — uses div instead of button to avoid browser default padding/border offset */}
+        <Tooltip label={statusLine} note={statusNote} side="bottom" delay={220}>
         <div
           role="button"
           tabIndex={0}
           onClick={handleOpenConverter}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleOpenConverter(); }}
-          title={btnTitle}
           style={{
             position: 'relative',
             width: '32px',
@@ -234,36 +255,46 @@ export function PlayerTitleBar({ currentTitle, onHelpClick, onOpenConverter }: P
             />
           )}
         </div>
+        </Tooltip>
 
         {/* New player window */}
+        <Tooltip label="New Player Window" note="Opens a second player, so two things can play at once." side="bottom">
         <button
           className="titlebar-btn"
           onClick={() => electron?.ipcRenderer.invoke('open-new-player-window')}
-          title="Open New Player Window"
           style={{ WebkitAppRegion: 'no-drag' } as any}
         >
           <CopyPlus size={13} style={{ opacity: 0.85 }} />
         </button>
+        </Tooltip>
 
         {/* Help */}
-        <button className="titlebar-btn" onClick={onHelpClick} title="Keyboard Shortcuts" style={{ WebkitAppRegion: 'no-drag' } as any}>
+        <Tooltip label="Keyboard Shortcuts" hint="?" note="Every shortcut in the player, on one screen." side="bottom">
+        <button className="titlebar-btn" onClick={onHelpClick} style={{ WebkitAppRegion: 'no-drag' } as any}>
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="10" />
             <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
             <line x1="12" y1="17" x2="12.01" y2="17" />
           </svg>
         </button>
+        </Tooltip>
 
         {/* Window controls */}
-        <button className="titlebar-btn" onClick={() => electron?.ipcRenderer.send('player-minimize-to-sidebar')} title="Minimize">
+        <Tooltip label="Minimise" note="Keeps playing in the tray." side="bottom">
+        <button className="titlebar-btn" onClick={() => electron?.ipcRenderer.send('player-minimize-to-sidebar')}>
           <svg viewBox="0 0 10 1" width="10" height="1"><line x1="0" y1="0" x2="10" y2="0" stroke="currentColor" strokeWidth="2" /></svg>
         </button>
-        <button className="titlebar-btn" onClick={() => electron?.ipcRenderer.send('window-maximize')} title="Maximize">
+        </Tooltip>
+        <Tooltip label="Maximise" side="bottom">
+        <button className="titlebar-btn" onClick={() => electron?.ipcRenderer.send('window-maximize')}>
           <svg viewBox="0 0 10 10" width="10" height="10"><rect x="1" y="1" width="8" height="8" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
         </button>
-        <button className="titlebar-btn close" onClick={() => electron?.ipcRenderer.send('window-close')} title="Close">
+        </Tooltip>
+        <Tooltip label="Close" note="Playback stops and the window closes." side="bottom">
+        <button className="titlebar-btn close" onClick={() => electron?.ipcRenderer.send('window-close')}>
           <svg viewBox="0 0 10 10" width="10" height="10"><path d="M1,1 L9,9 M9,1 L1,9" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
         </button>
+        </Tooltip>
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import {
   MoreHorizontal
 } from 'lucide-react';
 import { formatTime, type VideoFilters, DEFAULT_VIDEO_FILTERS } from './types';
+import { Tooltip } from './Tooltip';
 
 interface PlayerControlsProps {
   isFullscreen: boolean;
@@ -395,15 +396,24 @@ export function PlayerControls({
       {/* Transport controls */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', minWidth: 0, width: '100%' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: controlGap, minWidth: 0, flexShrink: 0 }}>
+          <Tooltip label="Previous" hint="P" note="Steps back one file in the playlist." side="top">
           <button
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => { (e.currentTarget as HTMLElement).blur(); handlePrev(); }}
             className="btn-secondary"
             style={{ padding: containerWidth < 500 ? '5px' : '6px', borderRadius: '50%' }}
-            title="Previous File"
           >
             <SkipBack size={containerWidth < 500 ? 12 : 14} />
           </button>
+          </Tooltip>
+          <Tooltip
+            label={isMediaLocked ? 'Locked' : playing ? 'Pause' : 'Play'}
+            hint="Space"
+            note={isMediaLocked
+              ? 'This file is behind the archive PIN. Unlock it to play.'
+              : playing ? 'Holds the picture. Playback position is kept.' : 'Starts or resumes this file.'}
+            side="top"
+          >
           <button
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
@@ -421,32 +431,50 @@ export function PlayerControls({
               cursor: isMediaLocked ? 'not-allowed' : 'pointer',
               opacity: isMediaLocked ? 0.55 : 1
             }}
-            title={isMediaLocked ? 'Secured Media Locked (enter PIN to play)' : (playing ? 'Pause' : 'Play')}
           >
             {playing && !isMediaLocked ? <Pause size={containerWidth < 500 ? 14 : 16} /> : <Play size={containerWidth < 500 ? 14 : 16} />}
           </button>
+          </Tooltip>
           {showStop && (
+            <Tooltip label="Stop" note="Ends playback and rewinds to the start." side="top">
             <button
               onMouseDown={(e) => e.preventDefault()}
               onClick={(e) => { (e.currentTarget as HTMLElement).blur(); handleStop(); }}
               className="btn-secondary"
               style={{ padding: containerWidth < 500 ? '5px' : '6px', borderRadius: '50%' }}
-              title="Stop"
             >
               <div style={{ width: '11px', height: '11px', background: '#fff', borderRadius: '2px' }}></div>
             </button>
+            </Tooltip>
           )}
+          <Tooltip label="Next" hint="N" note="Skips ahead one file in the playlist." side="top">
           <button
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => { (e.currentTarget as HTMLElement).blur(); handleNext(); }}
             className="btn-secondary"
             style={{ padding: containerWidth < 500 ? '5px' : '6px', borderRadius: '50%' }}
-            title="Next File"
           >
             <SkipForward size={containerWidth < 500 ? 12 : 14} />
           </button>
+          </Tooltip>
 
           {showRepeat && (
+            // The old title crammed the whole cycle into one string --
+            // "Repeat: Off (click to enable Repeat One)". Split it: the label
+            // names the current mode, the note says what clicking does next.
+            <Tooltip
+              label={repeatMode === 'off' ? 'Repeat off'
+                : repeatMode === 'one' ? 'Repeat one'
+                : repeatMode === 'folder' ? 'Repeat folder'
+                : 'Repeat all'}
+              note={`Click to switch to ${
+                repeatMode === 'off' ? 'repeat one'
+                : repeatMode === 'one' ? 'repeat folder'
+                : repeatMode === 'folder' ? 'repeat everything'
+                : 'off'
+              }.`}
+              side="top"
+            >
             <button
               onMouseDown={(e) => e.preventDefault()}
               onClick={(e) => {
@@ -462,7 +490,6 @@ export function PlayerControls({
                 borderColor: repeatMode !== 'off' ? 'var(--primary)' : 'rgba(255,255,255,0.08)',
                 color: repeatMode !== 'off' ? 'var(--primary)' : 'var(--text-muted)'
               }}
-              title={repeatMode === 'off' ? 'Repeat: Off (click to enable Repeat One)' : repeatMode === 'one' ? 'Repeat One (click for Repeat Folder)' : repeatMode === 'folder' ? 'Repeat Folder (click for Repeat All Folders)' : 'Repeat All Folders (click to turn off)'}
             >
               <Repeat size={14} />
               {repeatMode !== 'off' && (
@@ -483,6 +510,7 @@ export function PlayerControls({
                 </span>
               )}
             </button>
+            </Tooltip>
           )}
         </div>
 
@@ -490,6 +518,7 @@ export function PlayerControls({
           {/* Settings popover - full view */}
           {showSettings && (
             <div style={{ position: 'relative' }}>
+              <Tooltip label="Settings" note="Playback quality, aspect ratio, equaliser and visual filters." side="top">
               <button
                 onClick={() => setShowSettingsPopover(!showSettingsPopover)}
                 className={`btn-secondary ${showSettingsPopover ? 'active' : ''}`}
@@ -503,10 +532,10 @@ export function PlayerControls({
                 justifyContent: 'center',
                 cursor: 'pointer'
               }}
-              title="Playback & Visual Settings"
             >
               <Settings size={14} />
             </button>
+            </Tooltip>
 
             {showSettingsPopover && (
               <div
@@ -657,23 +686,30 @@ export function PlayerControls({
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '8px' }}>
-                  <button
-                    onClick={() => setForceTranscode(!forceTranscode)}
-                    className="btn-secondary"
-                    style={{
-                      width: '100%',
-                      padding: '6px',
-                      fontSize: '10px',
-                      background: forceTranscode ? 'rgba(245, 158, 11, 0.2)' : 'transparent',
-                      borderColor: forceTranscode ? '#f59e0b' : 'rgba(255,255,255,0.08)',
-                      color: forceTranscode ? '#fbbf24' : 'var(--text-muted)',
-                      justifyContent: 'center',
-                      cursor: 'pointer'
-                    }}
-                    title="Force transcoding to fix unsupported format codec errors"
+                  <Tooltip
+                    label={forceTranscode ? 'Repair: on' : 'Repair: off'}
+                    note={forceTranscode
+                      ? 'The stream is being re-encoded on the fly. Costs CPU and startup time — leave it off unless a file will not play.'
+                      : 'Re-encodes the stream on the fly. Reach for this only when a file will not play, since it costs CPU and adds delay.'}
+                    side="right"
                   >
-                    🛠️ {forceTranscode ? 'Transcoding Active' : 'Repair (Transcode)'}
-                  </button>
+                    <button
+                      onClick={() => setForceTranscode(!forceTranscode)}
+                      className="btn-secondary"
+                      style={{
+                        width: '100%',
+                        padding: '6px',
+                        fontSize: '10px',
+                        background: forceTranscode ? 'rgba(245, 158, 11, 0.2)' : 'transparent',
+                        borderColor: forceTranscode ? '#f59e0b' : 'rgba(255,255,255,0.08)',
+                        color: forceTranscode ? '#fbbf24' : 'var(--text-muted)',
+                        justifyContent: 'center',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {forceTranscode ? 'Transcoding Active' : 'Repair (Transcode)'}
+                    </button>
+                    </Tooltip>
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '8px' }}>
@@ -692,17 +728,25 @@ export function PlayerControls({
 
           {/* Volume control with horizontal triangle UI (turns red past 100%) */}
           <div style={{ display: 'flex', alignItems: 'center', gap: containerWidth < 500 ? '3px' : '6px', minWidth: 0, flexShrink: 0 }}>
+            <Tooltip label={volume === 0 ? 'Unmute' : 'Mute'} note="Drops to zero or restores your last level." side="top">
             <button
               onMouseDown={(e) => e.preventDefault()}
               onClick={(e) => { (e.currentTarget as HTMLElement).blur(); toggleMute(); }}
               className="btn-secondary"
               style={{ border: 'none', padding: '3px' }}
-              title={volume === 0 ? "Unmute" : "Mute"}
             >
               {volume === 0 ? <VolumeX size={13} /> : <Volume2 size={13} color={volume > 100 ? '#ef4444' : undefined} />}
             </button>
+            </Tooltip>
 
             {/* Single unified horizontal triangle volume bar */}
+            <Tooltip
+              label={`Volume ${volume}%`}
+              note={volume > 100
+                ? 'Boosted above 100%. The notch marks unity — past it is amplified and can distort on loud passages.'
+                : 'Scroll on the bar to change it. The notch marks 100%, and it goes to 200%.'}
+              side="top"
+            >
             <div
               style={{
                 position: 'relative',
@@ -717,7 +761,6 @@ export function PlayerControls({
                 cursor: 'pointer',
                 flexShrink: 0
               }}
-              title={`Volume: ${volume}% (Max 200%)`}
             >
               {/* 100% Volume benchmark notch (at 50% width since max is 200%) */}
               <div
@@ -773,6 +816,7 @@ export function PlayerControls({
                 }}
               />
             </div>
+            </Tooltip>
 
             <span style={{
               fontSize: '9.5px',
@@ -790,6 +834,13 @@ export function PlayerControls({
 
           {/* Sendtray button - wide mode only */}
           {showSendtray && (
+            <Tooltip
+              label="Sendtray"
+              note={sendTrayItems.length > 0
+                ? `${sendTrayItems.length} file${sendTrayItems.length !== 1 ? 's' : ''} waiting to be sent. Click to open the tray.`
+                : 'Files staged for copying out. Nothing waiting yet.'}
+              side="top"
+            >
             <button
               onClick={() => {
                 setSidebarTab('sendtray');
@@ -797,7 +848,6 @@ export function PlayerControls({
               }}
               className={`btn-secondary ${sidebarTab === 'sendtray' && showPlaylist ? 'active' : ''}`}
               style={{ padding: '5px 8px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10.5px', position: 'relative', flexShrink: 0 }}
-              title="Sendtray — files queued for sending"
             >
               <Inbox size={12} /> Sendtray
               {sendTrayItems.length > 0 && (
@@ -810,6 +860,7 @@ export function PlayerControls({
                 }}>{sendTrayItems.length}</span>
               )}
             </button>
+            </Tooltip>
           )}
 
           {/* Fullscreen playlist toggle (only in fullscreen & wide) */}
@@ -826,6 +877,11 @@ export function PlayerControls({
           {/* More Tools Overflow Button (When tools are collapsed, renders icon cleanly) */}
           {hasOverflowTools && (
             <div ref={moreToolsRef} style={{ position: 'relative', flexShrink: 0 }}>
+              <Tooltip
+                label="More"
+                note="The controls that did not fit this window width. The dot means something here is active."
+                side="top"
+              >
               <button
                 onClick={() => setShowMoreTools(!showMoreTools)}
                 className={`btn-secondary ${showMoreTools ? 'active' : ''}`}
@@ -841,8 +897,7 @@ export function PlayerControls({
                   cursor: 'pointer',
                   position: 'relative'
                 }}
-                title="More Tools & Options"
-              >
+                >
                 <MoreHorizontal size={15} />
                 {(repeatMode !== 'off' || sendTrayItems.length > 0 || forceTranscode) && (
                   <span style={{
@@ -857,6 +912,7 @@ export function PlayerControls({
                   }} />
                 )}
               </button>
+              </Tooltip>
 
               {showMoreTools && (
                 <div
@@ -889,14 +945,15 @@ export function PlayerControls({
 
                   {/* Playback Actions */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Tooltip label="Stop" note="Ends playback and rewinds to the start." side="right">
                     <button
                       onClick={handleStop}
                       className="btn-secondary"
                       style={{ flex: 1, padding: '6px 8px', fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-                      title="Stop Playback"
                     >
                       <div style={{ width: '10px', height: '10px', background: '#fff', borderRadius: '2px' }} /> Stop
                     </button>
+                    </Tooltip>
 
                     <button
                       onClick={() => setRepeatMode(m => m === 'off' ? 'one' : m === 'one' ? 'folder' : m === 'folder' ? 'all' : 'off')}
@@ -1057,15 +1114,21 @@ export function PlayerControls({
           )}
 
           {/* Fullscreen toggle */}
+          <Tooltip
+            label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            hint="F"
+            note={isFullscreen ? 'Returns to the windowed layout.' : 'Fills the screen. Escape comes back out.'}
+            side="top"
+          >
           <button
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => { (e.currentTarget as HTMLElement).blur(); toggleFullscreen(); }}
             className={`btn-secondary ${isFullscreen ? 'active' : ''}`}
             style={{ padding: '6px' }}
-            title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
           >
             {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </button>
+          </Tooltip>
         </div>
       </div>
     </div>

@@ -14,6 +14,7 @@ import {
   clearQueue,
   normalizeQueuePath
 } from './panamedia/converterQueue';
+import { getOutputs, subscribeOutputs } from './panamedia/converterOutputs';
 import {
   type SendConvertOptions,
   type SendConvertPreparationModalProps,
@@ -399,21 +400,99 @@ export function SendConvertPreparationModal({
     return localStorage.getItem('panamedia_audio_output_dir') || '';
   });
 
+  /**
+   * Builds one output tab: the folder scan, plus everything the converter
+   * actually produced, merged on normalised path.
+   *
+   * This used to be the folder scan alone, assigned wholesale. That is why a
+   * finished conversion never showed up. The destination defaults to the
+   * sendtray (or a flash drive, or a custom folder), and only the two
+   * Documents\Panamedia output folders were ever read -- so the default path
+   * wrote to a place nothing looked at. Assigning rather than merging also
+   * meant any entry remembered elsewhere was erased by the next refresh.
+   *
+   * The scan still runs, because browsing those folders by hand is a real
+   * feature; it is simply no longer the only source.
+   */
+  const buildOutputList = (
+    scanned: any[] | null | undefined,
+    kind: 'video' | 'audio'
+  ) => {
+    const fromScan: Array<{
+      name: string; path: string; size?: string; format: string;
+      resolutionOrBitrate?: string; date: string;
+    }> = Array.isArray(scanned)
+      ? scanned.map((f: any) => ({
+          name: f.name,
+          path: f.path,
+          size: f.size,
+          format: f.format,
+          resolutionOrBitrate: f.resolutionOrBitrate,
+          date: f.date,
+        }))
+      : [];
+
+    const fromRegistry: typeof fromScan = getOutputs(kind).map((o) => ({
+      name: o.name,
+      path: o.path,
+      size: o.size,
+      format: o.format,
+      resolutionOrBitrate: o.detail,
+      date: o.date,
+    }));
+
+    // Registry entries win on conflict: they carry the kind the user actually
+    // chose, whereas the scan has no idea what produced the file.
+    const seen = new Set<string>();
+    const merged: typeof fromScan = [];
+    for (const item of [...fromRegistry, ...fromScan]) {
+      if (!item.path) continue;
+      const key = normalizeQueuePath(item.path);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+    }
+    // Newest first. Dates are localised strings, so fall back to keeping the
+    // registry's order rather than pretending to compare them.
+    return merged.sort((a, b) => {
+      const ta = Date.parse(a.date);
+      const tb = Date.parse(b.date);
+      if (Number.isNaN(ta) || Number.isNaN(tb)) return 0;
+      return tb - ta;
+    });
+  };
+
   const refreshOutputFiles = useCallback(() => {
     if (!electron) return;
     const vPath = videoOutputPath || localStorage.getItem('panamedia_video_output_dir');
     const aPath = audioOutputPath || localStorage.getItem('panamedia_audio_output_dir');
+
+    // Whatever the scan returns, or fails to return, the registry still shows
+    // everything that was converted.
+    setConvertedVideos(buildOutputList(null, 'video'));
+    setConvertedAudios(buildOutputList(null, 'audio'));
+
     if (vPath) {
       electron.ipcRenderer.invoke('get-converter-output-files', vPath).then((files: any) => {
-        if (Array.isArray(files)) setConvertedVideos(files);
+        setConvertedVideos(buildOutputList(files, 'video'));
       }).catch(() => {});
     }
     if (aPath) {
       electron.ipcRenderer.invoke('get-converter-output-files', aPath).then((files: any) => {
-        if (Array.isArray(files)) setConvertedAudios(files);
+        setConvertedAudios(buildOutputList(files, 'audio'));
       }).catch(() => {});
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoOutputPath, audioOutputPath]);
+
+  // Conversions run in the parent, so this component never saw a completion
+  // event -- it only refreshed on mount, on tab change and on folder change.
+  // That is the second reason the output tabs stayed empty: even for output
+  // that did land in a scanned folder, the list did not update until the user
+  // navigated away and back. Subscribing to the registry closes that gap.
+  useEffect(() => {
+    return subscribeOutputs(() => refreshOutputFiles());
+  }, [refreshOutputFiles]);
 
   // Fetch or create default Documents\Panamedia\Video Output & Audio Output folders
   useEffect(() => {

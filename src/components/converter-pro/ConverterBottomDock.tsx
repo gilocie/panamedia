@@ -5,6 +5,7 @@ import {
   Image as ImageIcon, FlipHorizontal, Minimize2, Zap, Volume2, Split
 } from 'lucide-react';
 import type { VideoFormatPreset, AudioFormatPreset, MediaToolItem } from './types';
+import { Tooltip } from '../panamedia/Tooltip';
 
 export const MEDIA_TOOLS: MediaToolItem[] = [
   { id: 'cut', label: 'Cut / Trim', sub: 'Trim clip range', icon: <Scissors size={18} />, color: '#38bdf8', desc: 'Set start and end markers to trim unwanted parts or isolate specific scenes.' },
@@ -168,6 +169,16 @@ export const ConverterBottomDock: React.FC<ConverterBottomDockProps> = ({
             }
           }
         `}</style>
+        <Tooltip
+          label={isConverting ? (isPaused ? 'Resume' : 'Pause all') : 'Run'}
+          note={isConverting
+            ? (isPaused
+                ? 'Every job on hold starts again.'
+                : 'Pauses every job that is running. Files you paused on their own stay paused.')
+            : 'Starts converting everything queued, using the settings above.'}
+          side="top"
+          delay={220}
+        >
         <button
           type="button"
           onClick={isConverting ? (onTogglePause || onRunConvert) : onRunConvert}
@@ -198,7 +209,6 @@ export const ConverterBottomDock: React.FC<ConverterBottomDockProps> = ({
             flexShrink: 0,
             animation: isConverting && !isPaused ? 'runPulseGlow 1.8s infinite ease-in-out' : 'none'
           }}
-          title={isConverting ? (isPaused ? "Resume conversion" : "Pause conversion") : "Start converting all queued media (RUN)"}
         >
           {isConverting && !isPaused ? (
             <Pause size={24} fill="#fff" />
@@ -209,6 +219,7 @@ export const ConverterBottomDock: React.FC<ConverterBottomDockProps> = ({
             {isConverting ? (isPaused ? 'RESUME' : 'PAUSE') : 'RUN'}
           </span>
         </button>
+        </Tooltip>
       </div>
     </div>
   );
