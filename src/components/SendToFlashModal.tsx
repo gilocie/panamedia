@@ -803,6 +803,38 @@ export function SendToFlashModal({
     filePath && filePath !== 'media' && isInQueue(filePath)
   );
 
+  // This button is the explicit "add this to the converter" action, so it is
+  // where the queue write belongs.
+  //
+  // It used to rely on two implicit feeders instead: an effect in this modal
+  // that added `filePath` whenever it changed, and another in
+  // SendConvertPreparationModal that wrote the `queuedFiles` prop back to
+  // storage. Those ran whether or not the user ever chose Convert, which made
+  // right-click itself queue the file and made the playing file undeletable.
+  //
+  // Now the only path into the queue is this button, which is what the label
+  // says it does.
+  const handleConvert = () => {
+    // `allFiles` rather than `filePath`: the modal can also be opened from the
+    // converter's own tray with a batch selected, and Convert should take all
+    // of it, not just the one the modal was pointed at.
+    const targets = allFiles.length > 0 ? allFiles : [filePath];
+    const usable = targets.filter((f) => f && f !== 'media');
+    if (usable.length === 0) return;
+
+    const { added, duplicates } = addToQueue(usable);
+    if (added.length > 0) {
+      // The queue grew, so any copy of it held elsewhere is now stale.
+      if (setSendTrayItems) setSendTrayItems(getQueue());
+    }
+    if (added.length === 0 && duplicates.length > 0) {
+      console.log('[Converter] already in queue, opening it');
+    }
+
+    setPendingAction('convert');
+    setActiveSection('prepare');
+  };
+
   const convertOption = {
     id: 'convert',
     icon: <Sparkles size={18} style={{ color: isAlreadyInConverterQueue ? '#6b7280' : '#c084fc' }} />,
@@ -811,11 +843,7 @@ export function SendToFlashModal({
     fullTitle: isAlreadyInConverterQueue ? 'Already added to Converter queue' : 'Convert Media (Audio extraction, video format conversion & export)',
     color: isAlreadyInConverterQueue ? '#6b7280' : '#a855f7',
     disabled: isAlreadyInConverterQueue,
-    action: () => {
-      if (isAlreadyInConverterQueue) return;
-      setPendingAction('convert');
-      setActiveSection('prepare');
-    }
+    action: handleConvert
   };
 
   const bottomRowOptions = [

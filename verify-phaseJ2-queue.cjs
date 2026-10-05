@@ -79,13 +79,20 @@ check('the flag is not read anywhere',
   !/__openConverterProDirect\b/.test(player + flash + prep));
 
 // ── adding happens only on an explicit act ────────────────────────────────
-section('only an explicit user action adds to the queue');
-// Opening the converter must never add. Right-click may, because right-click IS
-// the convert gesture -- but it has to be the only place in this file that does.
+section('only the Convert button adds to the queue');
+// Nothing may add implicitly. The one place that writes is the Convert button,
+// because that is what the label says it does.
 const addCallSites = (player.match(/addToQueue\s*\(/g) || []).length;
-check('panamediaPlayer adds exactly once (the right-click handler)',
-  addCallSites === 1,
+check('panamediaPlayer never adds to the queue itself',
+  addCallSites === 0,
   addCallSites + ' call site(s)');
+
+// Two explicit user actions live in this modal: the Add button and the Convert
+// button. Both are deliberate, and neither runs on its own.
+const flashAddSites = (flash.match(/addToQueue\s*\(/g) || []).length;
+check('SendToFlashModal adds from exactly two places (Add and Convert)',
+  flashAddSites === 2,
+  flashAddSites + ' call site(s)');
 
 check('SendToFlashModal no longer adds filePath on open',
   !/addToQueue\s*\(\s*\[\s*filePath\s*\]/.test(flash),
@@ -102,37 +109,30 @@ check('the IPC converter-open handler has no queue write in it',
   !ipcHandler || !/addToQueue|player_sendTray/.test(ipcHandler[0]),
   ipcHandler ? ipcHandler[0].slice(0, 120) : 'handler not found');
 
-// ── right-click is the convert gesture ────────────────────────────────────
-section('right-click on media queues it directly');
+// ── right-click opens the action menu ─────────────────────────────────────
+section('right-click opens the action modal without queueing');
 const rc = /let\s+Bn\s*=\s*\(0,\s*_\.useCallback\)\(\([^)]*\)\s*=>\s*\{([\s\S]*?)\n\s*\},/.exec(player);
 check('the right-click handler was found', !!rc,
   'panamediaPlayer no longer matches the expected handler shape');
 const rcBody = rc ? rc[1] : '';
 
-check('right-click on media adds the clicked file',
-  /addToQueue\(\s*\[\s*n\s*\]\s*\)/.test(rcBody),
-  'right-click must add the clicked path to the queue');
-check('right-click goes through converterQueue, not localStorage',
-  !/localStorage/.test(rcBody));
-check('right-click opens the preparation screen',
-  /__openConverterProOpen|converter-open-request/.test(rcBody),
-  'queueing alone is not enough -- the user must land on the converter');
-check('right-click never touches the conversion options',
-  !/sendConvertOptions|setSendConvertOptions/.test(rcBody));
+// Right-click must stay a menu. It used to skip straight to the converter,
+// which silently took away the user's other choices: copy to a drive, move to a
+// sendtray folder, mark favourite, archive behind the PIN.
+check('right-click does not queue anything',
+  !/addToQueue/.test(rcBody),
+  'right-click must not add to the queue');
+check('right-click opens the modal on the clicked path',
+  /De\(\s*n\s*\)/.test(rcBody));
+check('right-click passes the folder flag through',
+  /H\(\s*r\s*\)/.test(rcBody));
+check('right-click is not batch',
+  /Ae\(\s*!1\s*\)|Ae\(\s*false\s*\)/.test(rcBody));
+check('right-click does not touch the converter screens',
+  !/__openConverterProOpen|setActiveSection|addToQueue/.test(rcBody),
+  'right-click must land on the action menu, not the preparation screen');
 
-// Folders are a different thing: a batch destination choice, which is genuinely
-// the send/copy modal's job. Only media short-circuits to the converter.
-check('folders still open the send/copy modal',
-  /if\s*\(\s*r\s*\)\s*\{[\s\S]{0,200}?return/.test(rcBody));
-check('the folder branch sets the folder flag',
-  /H\(\s*!0\s*\)|H\(\s*true\s*\)/.test(rcBody));
-check('the media branch clears the folder flag',
-  /H\(\s*!1\s*\)|H\(\s*false\s*\)/.test(rcBody));
-check('an already-open converter is told to show the prepare screen',
-  /if\s*\(\s*Ee\s*\)[\s\S]{0,400}?converter-open-request/.test(rcBody),
-  'the modal will not remount, so its state initializer will not run again');
-
-// Both surfaces must route here rather than opening the send/copy modal.
+// Both surfaces must route here.
 check('right-clicking the video routes to the handler',
   /onContextMenu:\s*\(e\)\s*=>\s*\{[\s\S]{0,120}?Bn\(/.test(player));
 check('right-clicking a playlist item routes to the handler',
@@ -147,8 +147,49 @@ check('the video surface preventDefaults the browser menu',
 check('the video surface still blocks right-click while archive-locked',
   /onContextMenu=\{\(e\)\s*=>\s*\{\s*if\s*\(\s*isMediaLocked\s*\)[\s\S]{0,120}?return/.test(video));
 
-check('player imports addToQueue from converterQueue',
-  /import\s*\{[^}]*\baddToQueue\b[^}]*\}\s*from\s*'\.\/panamedia\/converterQueue'/.test(player));
+// ── the Convert button is what queues ─────────────────────────────────────
+section('the Convert button in the modal queues the file');
+const handleConvert = /const\s+handleConvert\s*=\s*\(\)\s*=>\s*\{([\s\S]*?)\n\s*\};/.exec(flash);
+check('the Convert handler was found', !!handleConvert,
+  'SendToFlashModal no longer matches the expected handler shape');
+const hcBody = handleConvert ? handleConvert[1] : '';
+
+check('Convert adds through converterQueue',
+  /addToQueue\(\s*usable\s*\)/.test(hcBody),
+  'the explicit button is the only allowed path into the queue');
+check('Convert does not write localStorage directly',
+  !/localStorage/.test(hcBody));
+check('Convert takes the whole batch, not just the one file',
+  /allFiles\.length\s*>\s*0\s*\?\s*allFiles\s*:\s*\[\s*filePath\s*\]/.test(hcBody),
+  'opened from the converter tray, Convert must take everything selected');
+check('Convert filters out the placeholder and empty paths',
+  /filter\(\s*\(f\)\s*=>\s*f\s*&&\s*f\s*!==\s*`media`\s*\)/.test(hcBody) ||
+  /filter\(\s*\(f\)\s*=>\s*f\s*&&\s*f\s*!==\s*'media'\s*\)/.test(hcBody));
+check('Convert bails out when there is nothing to queue',
+  /usable\.length\s*===\s*0\s*\)\s*return/.test(hcBody));
+check('Convert mirrors the grown queue to the player sidebar',
+  /setSendTrayItems\(\s*getQueue\(\)\s*\)/.test(hcBody),
+  'the player keeps its own copy and would otherwise show a stale count');
+check('Convert still opens the preparation screen',
+  /setActiveSection\(\s*`prepare`\s*\)/.test(hcBody) || /setActiveSection\(\s*'prepare'\s*\)/.test(hcBody));
+check('Convert sets the pending action',
+  /setPendingAction\(\s*`convert`\s*\)|setPendingAction\(\s*'convert'\s*\)/.test(hcBody));
+check('the convert option uses that handler',
+  /action:\s*handleConvert/.test(flash));
+check('Convert is disabled once the file is already queued',
+  /disabled:\s*isAlreadyInConverterQueue/.test(flash));
+
+// The Add button is the other legitimate writer. It is only reached from a click
+// or a drag-drop of real paths.
+const enqueue = /const\s+enqueue\s*=\s*\(paths:\s*string\[\]\)\s*=>\s*\{([\s\S]*?)\n\s*\};/.exec(flash);
+check('the Add handler was found', !!enqueue);
+check('Add ignores an empty selection',
+  /if\s*\(!paths\.length\)\s*return/.test(enqueue ? enqueue[1] : ''));
+check('Add mirrors only the newly added entries to the sidebar',
+  /setSendTrayItems\(\s*added\s*\)/.test(enqueue ? enqueue[1] : ''),
+  'the player list is the full queue; mirroring a partial list loses entries');
+check('Add does not write localStorage directly',
+  !/localStorage/.test(enqueue ? enqueue[1] : ''));
 
 // ── exactly one writer ────────────────────────────────────────────────────
 section('converterQueue is the only writer');

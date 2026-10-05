@@ -148,7 +148,7 @@ import { EqualizerPanel as Ft } from './panamedia/EqualizerPanel';
 import { SendtrayPanel as It } from './panamedia/SendtrayPanel';
 import { SendToFlashModal as Dt } from './SendToFlashModal';
 import { PlayerHelpModal as Lt } from './panamedia/PlayerHelpModal';
-import { addToQueue } from './panamedia/converterQueue';
+
 import { AlertTriangle as Ze } from 'lucide-react';
 
 // ─── EXTRACTED SOURCE (pretty-printed from production bundle) ────────────────
@@ -1301,45 +1301,16 @@ function tn({ filePath: e, title: t }) {
   }, [Se, we]);
   // ── right-click on media ────────────────────────────────────────────────
   //
-  // Right-clicking the video or a playlist entry used to open the send-to-flash
-  // modal, where a second click on "Convert" was what actually added the file to
-  // the converter queue. Two clicks to express one intent, and the modal's
-  // title said "send to flash" while the button said "convert".
+  // Right-click opens the send-to-flash action modal for the clicked item. It
+  // does not queue anything: the modal is a menu of what to do with this media
+  // (convert, copy to a drive, move to a sendtray folder, favourite, archive),
+  // and choosing Convert there is what adds it to the converter queue.
   //
-  // Right-clicking media now IS the convert action: the file goes into the
-  // converter queue and the preparation screen opens on it. No intermediate
-  // modal, nothing to click twice.
-  //
-  // Folders still open the send-to-flash modal. A folder is not a single piece
-  // of media -- it is a batch destination choice (which drives, which sendtray
-  // folder), and that decision is genuinely the modal's job.
-  //
-  // The queue write goes through converterQueue, so right-clicking the same file
-  // twice is a no-op rather than a duplicate entry, and the playing file becomes
-  // removable like any other queued item.
+  // This used to differ from that, adding the file to the queue on right-click
+  // and skipping the modal, which took the user's other four choices away.
   let Bn = (0, _.useCallback)((_e, _t, n, r = !1) => {
-    if (r) {
-      // Folder: unchanged -- the send/copy modal decides what happens to it.
-      De(n), H(!0), Ae(!1);
-      return;
-    }
-    if (!n || n === `media`) return;
-
-    let { added, duplicates } = addToQueue([n]);
-    if (added.length === 0 && duplicates.length > 0) {
-      console.log(`[Converter] already queued, opening it anyway`);
-    }
-
-    if (Ee) {
-      // Converter is already open, so it will not remount and would keep
-      // whatever screen it was on. The IPC event is the existing way to tell a
-      // mounted converter to show the preparation screen.
-      K?.ipcRenderer?.send(`converter-open-request`);
-    } else {
-      (window as any).__openConverterProOpen = !0;
-    }
-    De(n), H(!1), Ae(!1);
-  }, [Ee, K]);
+    (De(n), H(r), Ae(!1));
+  }, []);
   return (
     (0, _.useEffect)(() => {
       localStorage.setItem(`player_volume`, String(c));
