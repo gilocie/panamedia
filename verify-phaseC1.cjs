@@ -10,8 +10,9 @@ const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { resolveEnginePath } = require('./verify-engine.cjs');
 
-const EXE = path.join(__dirname, 'src-cpp', 'build', 'bin', 'Release', 'panamedia-core.exe');
+const EXE = resolveEnginePath();
 const { ffmpegPath, ffprobePath } = require('./panamedia-downloader/youtube.cjs');
 
 if (!fs.existsSync(EXE)) {

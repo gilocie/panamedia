@@ -12,6 +12,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { resolveEnginePath } = require('./verify-engine.cjs');
 
 const SRC = process.argv[2];
 if (!SRC || !fs.existsSync(SRC)) {
@@ -29,7 +30,7 @@ function check(name, ok, detail) {
   }
 }
 
-const ENGINE = path.join(__dirname, 'src-cpp', 'build', 'bin', 'Release', 'panamedia-core.exe');
+const ENGINE = resolveEnginePath();
 const engine = spawn(ENGINE, [], { stdio: ['pipe', 'pipe', 'pipe'], cwd: __dirname });
 let buf = '', q = 0;
 const pend = new Map();

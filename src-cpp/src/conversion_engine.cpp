@@ -327,6 +327,38 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
         // quantiser. Previously this checkbox was stored and
         // then never read anywhere.
         bool highQuality = opts.value("highQuality", false);
+
+        // Audio track selection. Indices are positions among audio streams,
+        // counting from zero -- the same numbering probe_media reports and the
+        // same numbering `-map 0:a:N` uses, so the picker and the command can
+        // never disagree about what "track 2" means.
+        std::vector<int> audioTrackIdx;
+        if (opts.contains("audioTracks") && opts["audioTracks"].is_array()) {
+            for (const auto& v : opts["audioTracks"]) {
+                if (!v.is_number_integer()) continue;
+                long long idx = v.get<long long>();
+                // Negative or absurd indices would produce a literal
+                // "-map 0:a:-1" that ffmpeg rejects outright. Anything past a
+                // few dozen tracks is a bug in the caller, not a real file.
+                if (idx < 0 || idx > 63) continue;
+                if (std::find(audioTrackIdx.begin(), audioTrackIdx.end(), (int)idx) ==
+                    audioTrackIdx.end()) {
+                    audioTrackIdx.push_back((int)idx);
+                }
+            }
+        }
+        // A picker that resolved to nothing must not fall back to "keep the
+        // default track" -- that would look like the user's choice silently
+        // did nothing. An empty result maps no audio at all, which the UI
+        // prevents by always sending at least one index.
+        bool hasAudioPick = !audioTrackIdx.empty();
+
+        // Chapters and container metadata. "keep" is ffmpeg's default, "strip"
+        // is the option most people actually want before sharing a file.
+        std::string chapterMode = opts.value("chapters", std::string("keep"));
+        std::string metadataMode = opts.value("metadataMode", std::string("keep"));
+        const json& metadataFields = opts.contains("metadata") && opts["metadata"].is_object()
+            ? opts["metadata"] : json::object();
         // Audio target for video conversions. The settings modal carries
         // it separately from the video resolution label, so it arrives
         // in its own field rather than inside `bitrate`.
@@ -515,16 +547,40 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
             if (deinterlace) vf = vf.empty() ? "yadif" : ("yadif," + vf);
             if (!vf.empty()) { a.push_back("-vf"); a.push_back(vf); }
 
-            if (softSub) {
-                // With a second input present, ffmpeg's default stream
-                // selection would grab the wrong tracks, so map them
-                // explicitly. The "?" suffix makes each optional: a
-                // source without audio, or a subtitle file without a
-                // subtitle stream, must not fail the conversion.
+            // Explicit stream mapping.
+            //
+            // ffmpeg's automatic selection takes the best video stream, the
+            // best audio stream and -- as a documented special case -- every
+            // subtitle stream. That default has to be replaced by hand the
+            // moment the user picks audio tracks, because a `-map` switches
+            // off the automatic rules entirely. Getting this wrong is silent:
+            // the file converts fine and the embedded subtitles are just gone.
+            if (softSub || hasAudioPick) {
                 a.push_back("-map"); a.push_back("0:v:0");
-                a.push_back("-map"); a.push_back("0:a:0?");
-                a.push_back("-map"); a.push_back("1:s:0?");
-                a.push_back("-c:s"); a.push_back(format == "mkv" ? "ass" : "mov_text");
+
+                if (hasAudioPick) {
+                    for (size_t k = 0; k < audioTrackIdx.size(); ++k) {
+                        // The trailing '?' makes each audio stream optional. A
+                        // track the probe listed but ffmpeg cannot reach should
+                        // cost that one track, not the whole conversion -- and
+                        // picking the first track as a fallback would be
+                        // silently converting with audio the user deselected.
+                        a.push_back("-map");
+                        a.push_back("0:a:" + std::to_string(audioTrackIdx[k]) + "?");
+                    }
+                } else {
+                    a.push_back("-map"); a.push_back("0:a:0?");
+                }
+
+                if (softSub) {
+                    // A second input carries the external subtitle file.
+                    a.push_back("-map"); a.push_back("1:s:0?");
+                    a.push_back("-c:s"); a.push_back(format == "mkv" ? "ass" : "mov_text");
+                } else if (hasAudioPick) {
+                    // No external subtitle, so the source's own have to be
+                    // asked for by hand to keep the automatic behaviour.
+                    a.push_back("-map"); a.push_back("0:s?");
+                }
             }
         }
 
@@ -602,6 +658,46 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
         // Split: segment muxing writes a numbered series of
         // files instead of one. reset_timestamps makes each
         // segment independently playable from any position.
+        // Chapters. ffmpeg copies them by default for the containers that support
+        // them, so "keep" is stated explicitly to make the command say what it
+        // means, and "strip" is the single most-requested thing people do to a
+        // file before sharing it.
+        if (opts.contains("chapters")) {
+            if (chapterMode == "strip") {
+                a.push_back("-map_chapters"); a.push_back("-1");
+            } else {
+                a.push_back("-map_chapters"); a.push_back("0");
+            }
+        }
+
+        // Container metadata. Same reasoning as chapters: keep by default,
+        // strip on request, and individual fields can be overwritten.
+        if (opts.contains("metadataMode")) {
+            if (metadataMode == "strip") {
+                a.push_back("-map_metadata"); a.push_back("-1");
+            } else {
+                a.push_back("-map_metadata"); a.push_back("0");
+            }
+        }
+        // Field edits apply in "keep" mode too: overriding one key must not
+        // throw the rest away. An empty string is how a field gets cleared,
+        // which is a real operation and not the same as omitting the key.
+        static const char* kMetadataKeys[] = {
+            "title", "artist", "album", "album_artist", "genre", "date",
+            "comment", "track", "disc", "composer", "encoder", "copyright"
+        };
+        if (metadataMode != "strip") {
+            for (const char* key : kMetadataKeys) {
+                auto it = metadataFields.find(key);
+                if (it == metadataFields.end() || !it->is_string()) continue;
+                // An '=' inside the value would be read by ffmpeg as the end
+                // of the key, so only keys that survive that check are used.
+                std::string v = it->get<std::string>();
+                a.push_back("-metadata");
+                a.push_back(std::string(key) + "=" + v);
+            }
+        }
+
         std::string outputArg = outputPath;
         if (!splitTool.empty()) {
             int segmentSec = splitTool.value("segmentSec", 60);

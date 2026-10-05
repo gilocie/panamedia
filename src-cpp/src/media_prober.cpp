@@ -1,4 +1,5 @@
 #include "media_prober.hpp"
+#include "playback_support.hpp"
 #include "binary_resolver.hpp"
 #include <iostream>
 #include <memory>
@@ -151,29 +152,21 @@ namespace Panamedia {
                 for (auto& c : ext) c = std::tolower(c);
             }
             bool isAudioExt = (ext == ".mp3" || ext == ".m4a" || ext == ".wav" || ext == ".flac" || ext == ".ogg" || ext == ".aac" || ext == ".opus" || ext == ".wma" || ext == ".weba");
-            bool isNativeContainer = (ext == ".mp4" || ext == ".webm" || isAudioExt);
-            
-            // Native support lists
-            std::vector<std::string> nativeVideo = {"h264", "vp8", "vp9", "av1", "theora"};
-            std::vector<std::string> nativeAudio = {"aac", "mp3", "opus", "vorbis", "flac", "pcm_u8", "pcm_s16le", "pcm_s24le"};
-            std::vector<std::string> nativePix = {"yuv420p", "yuvj420p"};
-            
-            bool needsTranscode = !isNativeContainer;
-            if (!isAudioExt) {
-                if (!videoCodec.empty()) {
-                    bool isNativeVid = std::find(nativeVideo.begin(), nativeVideo.end(), videoCodec) != nativeVideo.end();
-                    bool isNativePx = std::find(nativePix.begin(), nativePix.end(), pixelFormat) != nativePix.end();
-                    if (!isNativeVid || !isNativePx) {
-                        needsTranscode = true;
-                    }
-                }
-                if (!audioCodec.empty() && !needsTranscode) {
-                    bool isNativeAud = std::find(nativeAudio.begin(), nativeAudio.end(), audioCodec) != nativeAudio.end();
-                    if (!isNativeAud) {
-                        needsTranscode = true;
-                    }
-                }
-            }
+
+            // Shared with the HTTP server and Electron so all three agree on
+            // what the browser can play. This file previously carried a fourth
+            // copy of the rule, with yet another codec list.
+            PlaybackSupport::MediaInfo info;
+            info.videoCodec = videoCodec;
+            info.audioCodec = audioCodec;
+            info.pixelFormat = pixelFormat;
+            info.width = width;
+            info.height = height;
+            // Audio extensions play directly; the container list does not
+            // include them because a video container is what needs demuxing.
+            bool needsTranscode = isAudioExt
+                ? false
+                : PlaybackSupport::needsTranscode(filePath, info);
             
             response["videoCodec"] = videoCodec;
             response["audioCodec"] = audioCodec;

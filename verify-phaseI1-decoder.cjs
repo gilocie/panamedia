@@ -3,7 +3,8 @@
 // answering with invented 1920x1080 values.
 const { spawn } = require('child_process');
 const path = require('path');
-const ENGINE = path.join(__dirname, 'src-cpp', 'build', 'bin', 'Release', 'panamedia-core.exe');
+const { resolveEnginePath } = require('./verify-engine.cjs');
+const ENGINE = resolveEnginePath();
 const engine = spawn(ENGINE, [], { stdio: ['pipe', 'pipe', 'pipe'], cwd: __dirname });
 let buf = '', q = 0; const pend = new Map();
 engine.stdout.on('data', (d) => {

@@ -264,6 +264,11 @@ function runFfprobe(filePath) {
           audioCodec: audioStream ? (audioStream.codec_name || '').toLowerCase() : '',
           pixelFormat: videoStream ? (videoStream.pix_fmt || '').toLowerCase() : '',
           hasAudio: !!audioStream,
+          // Overall bitrate of the source in bits/sec. The playback transcode
+          // needs this to pick an output bitrate: without it, libx264 falls
+          // back to CRF 23, which on a well-compressed source produces a
+          // *larger* file than the one we started from.
+          bitrate: info.format && info.format.bit_rate ? parseInt(info.format.bit_rate, 10) || 0 : 0,
           streams
         });
       } catch (e) {
@@ -851,46 +856,27 @@ function startLocalServer() {
       const fileSize = stat.size;
       const range = req.headers.range;
       
-      const ext = path.extname(filePath).toLowerCase();
-      let contentType = 'video/mp4';
-      if (ext === '.mp3') contentType = 'audio/mpeg';
-      else if (ext === '.m4a') contentType = 'audio/mp4';
-      else if (ext === '.wav') contentType = 'audio/wav';
-      else if (ext === '.flac') contentType = 'audio/flac';
-      else if (ext === '.ogg') contentType = 'audio/ogg';
-      else if (ext === '.aac') contentType = 'audio/aac';
-      else if (ext === '.opus') contentType = 'audio/opus';
-      else if (ext === '.wma') contentType = 'audio/x-ms-wma';
-      else if (ext === '.weba') contentType = 'audio/webm';
-      else if (ext === '.webm') contentType = 'video/webm';
-      else if (ext === '.mkv') contentType = 'video/x-matroska';
-      else if (ext === '.avi') contentType = 'video/x-msvideo';
-      else if (ext === '.mov') contentType = 'video/quicktime';
-      else if (ext === '.mpeg' || ext === '.mpg') contentType = 'video/mpeg';
-      else if (ext === '.ts' || filePath.toLowerCase().endsWith('.net.ts')) contentType = 'video/mp2t';
-      else if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
-      else if (ext === '.png') contentType = 'image/png';
+      // Shared with the tests. No guessed 'video/mp4' default: a wrong
+      // container type makes the browser reject files it could otherwise play,
+      // and the failure points nowhere near the real cause.
+      const contentType = contentTypeForPath(filePath);
       
-      if (range) {
-        const rangeClean = range.replace(/bytes=/, "").trim();
-        const parts = rangeClean.split("-");
-        let start = 0;
-        let end = fileSize - 1;
-        if (parts[0] === '' && parts[1]) {
-          // Suffix range: bytes=-524288 (e.g. read moov atom at end of file)
-          const suffix = parseInt(parts[1], 10);
-          if (!isNaN(suffix) && suffix > 0) {
-            start = Math.max(0, fileSize - suffix);
-          }
-        } else {
-          start = parseInt(parts[0], 10) || 0;
-          if (parts[1]) {
-            const parsedEnd = parseInt(parts[1], 10);
-            if (!isNaN(parsedEnd) && parsedEnd >= start) {
-              end = Math.min(fileSize - 1, parsedEnd);
-            }
-          }
-        }
+      const parsedRange = parseByteRange(range, fileSize);
+
+      if (parsedRange.kind === 'unsatisfiable') {
+        // 416 with the real size is what lets the browser recover: it clamps
+        // the seek instead of treating the request as a network failure.
+        res.writeHead(416, {
+          'Content-Range': `bytes */${fileSize}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Type': 'text/plain',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges'
+        });
+        res.end();
+      } else if (parsedRange.kind === 'range') {
+        const start = parsedRange.start;
+        const end = parsedRange.end;
         const chunksize = (end - start) + 1;
         const file = fs.createReadStream(filePath, { start, end });
         const destroyFile = () => {
@@ -958,7 +944,7 @@ function startLocalServer() {
 
       const { execFile, spawn } = require('child_process');
 
-      const executeTranscode = (videoCodec, audioCodec, pixelFormat, width, height, hasAudio) => {
+      const executeTranscode = (videoCodec, audioCodec, pixelFormat, width, height, hasAudio, sourceBitrate = 0) => {
         const ext = path.extname(filePath).toLowerCase();
         const isAudioExt = ['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.aac', '.opus', '.wma'].includes(ext);
         const isVideoExt = !isAudioExt;
@@ -966,8 +952,20 @@ function startLocalServer() {
         const args = [];
         const isAudioOnly = isAudioExt || (!videoCodec && !isVideoExt);
 
-        const isCompatibleVideo = ['h264', 'avc1'].includes(videoCodec);
-        const isCompatiblePix = ['yuv420p', 'yuvj420p', 'yuv420p10le', ''].includes(pixelFormat);
+        const {
+  canStreamCopy,
+  transcodeVideoArgs,
+  contentTypeForPath,
+  parseByteRange
+} = require('./electron/playback-support.cjs');
+
+// Codecs Chromium decodes itself, so re-encoding them to H.264 buys nothing
+        // and costs a whole core per file. This used to be just h264/avc1, which
+        // meant every VP8, VP9 and AV1 file was re-encoded in full before
+        // playback -- a 2.5 hour VP9 video turned into minutes of libx264 work
+        // for a picture the browser could already display as-is.
+        // The rule itself lives in playback-support.cjs so it can be tested
+        // without booting Electron.
 
         const baseName = filePath.substring(0, filePath.lastIndexOf('.'));
         let subPath = '';
@@ -979,7 +977,15 @@ function startLocalServer() {
           }
         }
 
-        const canDirectCopy = !isAudioOnly && isCompatibleVideo && isCompatiblePix && !subPath && (quality === 'original' || (width <= 1920 && height <= 1080));
+        const hasSidecarSubtitle = !!subPath;
+
+        // One rule, one implementation, shared with the tests.
+        const canDirectCopy = canStreamCopy({
+          videoCodec, audioCodec, pixelFormat,
+          width, height, quality,
+          hasSubtitle: hasSidecarSubtitle,
+          audioOnly: isAudioOnly
+        });
 
         if (!isAudioOnly && !canDirectCopy) {
           args.push('-hwaccel', 'auto');
@@ -1021,14 +1027,9 @@ function startLocalServer() {
               args.push('-vf', filters.join(','));
             }
 
-            args.push(
-              '-err_detect', 'ignore_err',
-              '-c:v', 'libx264',
-              '-pix_fmt', 'yuv420p',
-              '-preset', 'ultrafast',
-              '-tune', 'zerolatency',
-              '-g', '30'
-            );
+            // A real transcode. The bitrate ceiling comes from playback-support.cjs,
+            // sized from the source so the output never inflates the stream.
+            args.push('-err_detect', 'ignore_err', ...transcodeVideoArgs({ width, height, sourceBitrate }));
           }
         } else {
           args.push('-vn');
@@ -1067,9 +1068,14 @@ function startLocalServer() {
         const ffmpegProc = spawn(ffmpegPath, args);
         ffmpegProc.stdout.pipe(res);
 
+        let killed = false;
         const killFfmpeg = () => {
+          if (killed) return;
+          killed = true;
+          if (idleTimer) clearTimeout(idleTimer);
           try { ffmpegProc.kill('SIGKILL'); } catch (e) {}
         };
+
         req.on('close', killFfmpeg);
         res.on('close', killFfmpeg);
         ffmpegProc.stdout.on('error', killFfmpeg);
@@ -1078,6 +1084,25 @@ function startLocalServer() {
           console.error('[Node Transcode] ffmpeg process error:', procErr);
           killFfmpeg();
         });
+
+        // ffmpeg also has to die when nobody is reading but the socket is
+        // still open, which is exactly what a paused or backgrounded <video>
+        // looks like. Measured: a paused 1080p playback held an ffmpeg process
+        // at 0% CPU for over ten minutes, still carrying ~200 MB and 44
+        // threads, because the response never closed.
+        //
+        // This is an inactivity timer, not a pause handler, on purpose. Pausing
+        // legitimately leaves the connection open, and /transcode has no Range
+        // support -- so killing on pause would throw away the buffer and make
+        // resume re-transcode from that point. Waiting for the pipe to go quiet
+        // only fires when the client has genuinely stopped consuming.
+        const IDLE_KILL_MS = 45000;
+        let idleTimer = setTimeout(killFfmpeg, IDLE_KILL_MS);
+        const touchIdleTimer = () => {
+          if (idleTimer) clearTimeout(idleTimer);
+          if (!killed) idleTimer = setTimeout(killFfmpeg, IDLE_KILL_MS);
+        };
+        ffmpegProc.stdout.on('data', touchIdleTimer);
       };
 
       getProbeInfo(filePath).then((info) => {
@@ -1087,6 +1112,7 @@ function startLocalServer() {
         let audioCodec = '';
         let pixelFormat = '';
         let hasAudio = false;
+        let sourceBitrate = 0;
 
         if (info) {
           width = info.width;
@@ -1095,6 +1121,7 @@ function startLocalServer() {
           audioCodec = info.audioCodec;
           pixelFormat = info.pixelFormat;
           hasAudio = info.hasAudio;
+          sourceBitrate = info.bitrate || 0;
         }
 
         if (!videoCodec || !audioCodec) {
@@ -1108,12 +1135,12 @@ function startLocalServer() {
             if (!width && parsed.width) width = parsed.width;
             if (!height && parsed.height) height = parsed.height;
             if (parsed.hasAudio) hasAudio = true;
-            executeTranscode(videoCodec, audioCodec, pixelFormat, width, height, hasAudio);
+            executeTranscode(videoCodec, audioCodec, pixelFormat, width, height, hasAudio, sourceBitrate);
           });
           return;
         }
 
-        executeTranscode(videoCodec, audioCodec, pixelFormat, width, height, hasAudio);
+        executeTranscode(videoCodec, audioCodec, pixelFormat, width, height, hasAudio, sourceBitrate);
       });
     } else if (req.url.startsWith('/thumbnail') && req.method === 'GET') {
       const urlObj = new URL(req.url, 'http://127.0.0.1:52321');
@@ -1815,15 +1842,21 @@ ipcMain.handle('check-media-info', async (event, filePath) => {
 
       const { execFile } = require('child_process');
 
-      const ext = path.extname(filePath).toLowerCase();
-      const isNativeContainer = ext === '.mp4' || ext === '.webm';
-      let nativeVideoCodecs = ['h264', 'avc1'];
-      let nativeAudioCodecs = ['aac', 'mp3'];
-      if (ext === '.webm') {
-        nativeVideoCodecs = ['vp8', 'vp9', 'av1'];
-        nativeAudioCodecs = ['opus', 'vorbis'];
-      }
-      const nativePixFormats = ['yuv420p', 'yuvj420p'];
+      // The direct-play rule lives in playback-support.cjs so this handler and
+      // the /transcode server cannot drift apart.
+      //
+      // This used to carry its own copy, and a different one: h264/avc1 for
+      // mp4, vp8/vp9/av1 for webm. That marked a VP9-in-MP4 file as needing
+      // transcoding, which sent the player down the /transcode path, which
+      // re-encoded the whole film. The browser plays VP9 in MP4 natively --
+      // there was never a reason to re-encode it.
+      const containerIsPlayable = (p) => {
+        const e = path.extname(p).toLowerCase();
+        // A container Chromium reliably demuxes. Anything else (mkv, avi, flv,
+        // ts) may still play, but not reliably enough to promise, so it goes
+        // through /transcode -- which now stream-copies when the codecs allow.
+        return e === '.mp4' || e === '.m4v' || e === '.webm';
+      };
 
       const runFfmpegFallback = (info = {}) => {
         execFile(ffmpegPath, ['-i', targetPath], { timeout: 8000 }, (ffErr, ffStdout, ffStderr) => {
@@ -1872,20 +1905,15 @@ ipcMain.handle('check-media-info', async (event, filePath) => {
             if (duration <= 1 && parsed.duration > 1) duration = parsed.duration;
           }
 
-          let needsTranscode = !isNativeContainer;
-          if (videoCodec) {
-            const isNativeVideo = nativeVideoCodecs.includes(videoCodec);
-            const isNativePix = nativePixFormats.includes(pixelFormat);
-            if (!isNativeVideo || !isNativePix) {
-              needsTranscode = true;
-            }
-          }
-          if (audioCodec && !needsTranscode) {
-            const isNativeAudio = nativeAudioCodecs.includes(audioCodec);
-            if (!isNativeAudio) {
-              needsTranscode = true;
-            }
-          }
+          const needsTranscode = !containerIsPlayable(targetPath) || !canStreamCopy({
+            videoCodec,
+            audioCodec,
+            pixelFormat,
+            width,
+            height,
+            quality: 'original',
+            audioOnly: !videoCodec && !audioCodec
+          });
 
           resolve({
             success: true,
@@ -1927,20 +1955,16 @@ ipcMain.handle('check-media-info', async (event, filePath) => {
             return runFfmpegFallback(info);
           }
           
-          let needsTranscode = !isNativeContainer;
-          if (videoStream && !needsTranscode) {
-            const isNativeVideo = nativeVideoCodecs.includes(videoCodec);
-            const isNativePix = nativePixFormats.includes(pixelFormat);
-            if (!isNativeVideo || !isNativePix) {
-              needsTranscode = true;
-            }
-          }
-          if (audioStream && !needsTranscode) {
-            const isNativeAudio = nativeAudioCodecs.includes(audioCodec);
-            if (!isNativeAudio) {
-              needsTranscode = true;
-            }
-          }
+          // Same rule as the fallback above and the /transcode server.
+          const needsTranscode = !containerIsPlayable(targetPath) || !canStreamCopy({
+            videoCodec,
+            audioCodec,
+            pixelFormat,
+            width,
+            height,
+            quality: 'original',
+            audioOnly: false
+          });
 
           resolve({
             success: true,

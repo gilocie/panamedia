@@ -7,6 +7,7 @@
 #endif
 
 #include "../include/http_server.hpp"
+#include "../include/playback_support.hpp"
 #include <iostream>
 #include <string>
 #include <sstream>
@@ -702,35 +703,21 @@ namespace Panamedia {
         }
 
         SafeProbeResult probe = probeWithFFmpeg(decodedPath);
-        bool isNativeContainer = (ext == ".mp4" || ext == ".webm");
-        bool needsTranscode = !isNativeContainer;
 
-        if (!needsTranscode && !probe.videoCodec.empty()) {
-            std::vector<std::string> nativeVideoCodecs = { "h264", "avc1" };
-            std::vector<std::string> nativePixFormats = { "yuv420p", "yuvj420p" };
-            if (ext == ".webm") {
-                nativeVideoCodecs.push_back("vp8");
-                nativeVideoCodecs.push_back("vp9");
-                nativeVideoCodecs.push_back("av1");
-            }
-            bool isNativeVideo = std::find(nativeVideoCodecs.begin(), nativeVideoCodecs.end(), probe.videoCodec) != nativeVideoCodecs.end();
-            bool isNativePix = std::find(nativePixFormats.begin(), nativePixFormats.end(), probe.pixelFormat) != nativePixFormats.end();
-            if (!isNativeVideo || !isNativePix) {
-                needsTranscode = true;
-            }
-        }
+        // Shared rule, so /probe and the transcode path cannot disagree about
+        // what the browser can play. This used to accept only h264/avc1 in MP4,
+        // which reported a VP9-in-MP4 file as needing transcoding and sent the
+        // player into a full libx264 re-encode of the whole thing.
+        PlaybackSupport::MediaInfo info;
+        info.videoCodec = probe.videoCodec;
+        info.audioCodec = probe.audioCodec;
+        info.pixelFormat = probe.pixelFormat;
+        info.width = probe.width;
+        info.height = probe.height;
+        bool needsTranscode = PlaybackSupport::needsTranscode(decodedPath, info);
 
-        if (!needsTranscode && !probe.audioCodec.empty()) {
-            std::vector<std::string> nativeAudioCodecs = { "aac", "mp3" };
-            if (ext == ".webm") {
-                nativeAudioCodecs.push_back("opus");
-                nativeAudioCodecs.push_back("vorbis");
-            }
-            bool isNativeAudio = std::find(nativeAudioCodecs.begin(), nativeAudioCodecs.end(), probe.audioCodec) != nativeAudioCodecs.end();
-            if (!isNativeAudio) {
-                needsTranscode = true;
-            }
-        }
+        // Audio is already covered by PlaybackSupport::needsTranscode above,
+        // so it is not re-checked here.
 
         std::stringstream json;
         json << "{"

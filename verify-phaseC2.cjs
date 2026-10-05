@@ -9,10 +9,11 @@
  */
 const { spawn } = require('child_process');
 const path = require('path');
+const { resolveEnginePath } = require('./verify-engine.cjs');
 const fs = require('fs');
 const os = require('os');
 
-const EXE = path.join(__dirname, 'src-cpp', 'build', 'bin', 'Release', 'panamedia-core.exe');
+const EXE = resolveEnginePath();
 const coreClient = require('./electron/core-client.cjs');
 const hw = require('./panamedia-downloader/conversion-engine/hardwareEngine.cjs');
 

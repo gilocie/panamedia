@@ -3,6 +3,7 @@
 // Extracts the REAL Node functions from electron.cjs so we test shipped code.
 const fs = require('fs');
 const path = require('path');
+const { resolveEnginePath } = require('./verify-engine.cjs');
 const os = require('os');
 const { spawn } = require('child_process');
 
@@ -44,7 +45,7 @@ const { scanDirRecursive, normalizeDupName } = nodeFactory(fs, path);
 
 // ── Run the C++ engine ────────────────────────────────────────────────────
 function cppLibrarySync(folders, timeoutMs = 120000) {
-  const exe = path.join(repoRoot, 'src-cpp', 'build', 'bin', 'Release', 'panamedia-core.exe');
+  const exe = resolveEnginePath();
   return new Promise((resolve, reject) => {
     const proc = spawn(exe, [], { stdio: ['pipe', 'pipe', 'pipe'] });
     let buf = '';

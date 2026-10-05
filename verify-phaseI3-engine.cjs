@@ -10,8 +10,9 @@
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { resolveEnginePath } = require('./verify-engine.cjs');
 
-const ENGINE = path.join(__dirname, 'src-cpp', 'build', 'bin', 'Release', 'panamedia-core.exe');
+const ENGINE = resolveEnginePath();
 const SAMPLE = path.join(process.env.USERPROFILE, 'Videos', 'Screen Recordings',
   'Screen Recording 2025-11-24 205601.mp4');
 const WORK = path.join(process.env.TEMP || process.env.TMP, 'panamedia-i3');

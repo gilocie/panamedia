@@ -3,6 +3,7 @@
 // Warm  = cache intact (repeat sync, the common case when reopening the library).
 const fs = require('fs');
 const path = require('path');
+const { resolveEnginePath } = require('./verify-engine.cjs');
 const { spawn } = require('child_process');
 
 const src = fs.readFileSync(path.join(__dirname, 'electron.cjs'), 'utf8');
@@ -31,7 +32,7 @@ const WARMUP = 3;
 const ROUNDS = 3;
 
 function engine(threads) {
-  const exe = path.join(__dirname, 'src-cpp', 'build', 'bin', 'Release', 'panamedia-core.exe');
+  const exe = resolveEnginePath();
   const env = { ...process.env };
   if (threads) env.PANAMEDIA_SCAN_THREADS = String(threads);
   const proc = spawn(exe, [], { stdio: ['pipe', 'pipe', 'pipe'], env });
