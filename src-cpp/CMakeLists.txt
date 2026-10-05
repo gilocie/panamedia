@@ -17,6 +17,9 @@ FetchContent_MakeAvailable(json)
 file(GLOB SOURCES "src/*.cpp")
 
 add_executable(panamedia-core ${SOURCES})
+# ws2_32: Winsock, for the HTTP bridge.
+# advapi32 was linked for the shutdown privilege. That code is gone and must not
+# come back -- see ConversionSupport::systemPowerAction.
 target_link_libraries(panamedia-core PRIVATE nlohmann_json::nlohmann_json ws2_32)
 
 set_target_properties(panamedia-core PROPERTIES

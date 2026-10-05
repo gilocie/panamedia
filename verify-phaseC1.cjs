@@ -264,12 +264,38 @@ function check(name, ok, detail) {
       }
       check(`  newest-first order preserved`, ordered);
 
-      // spot-check raw values on the first entry
+      // Spot-check raw values on the newest entry.
+      //
+      // os.tmpdir() is in this list, and the downloader writes multi-megabyte
+      // logs there while a download runs. Reading a file's size and mtime twice
+      // milliseconds apart is a genuine race against an external writer, not an
+      // engine bug -- so re-read once, and only assert when both the engine's
+      // numbers and stat() agree on a file that did not move underneath us.
       if (cpp.length && node.length) {
-        const c = cpp[0];
-        check(`  sizeBytes ${c.name}`, c.sizeBytes === fs.statSync(c.path).size);
-        check(`  mtimeMs ${c.name}`, Math.abs(c.mtimeMs - fs.statSync(c.path).mtimeMs) < 2);
-        check(`  ext ${c.name}`, c.ext === path.extname(c.name).toLowerCase().replace('.', ''), `cpp=${c.ext}`);
+        const agree = (entry) => {
+          let st;
+          try {
+            st = fs.statSync(entry.path);
+          } catch {
+            return false;
+          }
+          return entry.sizeBytes === st.size && Math.abs(entry.mtimeMs - st.mtimeMs) < 2;
+        };
+
+        let entry = cpp[0];
+        let stable = agree(entry);
+        if (!stable) {
+          console.log(`        (${entry.name} is being written to, re-listing)`);
+          const retry = unwrap(await engine.request('output_files', { dirPath: dir }));
+          if (retry.length) {
+            entry = retry[0];
+            stable = agree(entry);
+          }
+        }
+        check(`  sizeBytes ${entry.name}`, stable);
+        check(`  mtimeMs ${entry.name}`, stable);
+        check(`  ext ${entry.name}`, entry.ext === path.extname(entry.name).toLowerCase().replace('.', ''),
+          `cpp=${entry.ext}`);
       }
       console.log(`        cpp ${ms(cppMs)}  node ${ms(nodeMs)}`);
     }

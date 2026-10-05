@@ -46,6 +46,37 @@ namespace Panamedia {
         // -> {"duration":123.456}
         static std::string probeDuration(const std::string& filePath);
 
+        // Full source inspection in one ffprobe pass: streams, chapters and
+        // container tags. The multi-audio-track picker and the metadata tool
+        // both need this, and probing the same file twice for two halves of
+        // one answer is what made the UI feel slow.
+        //
+        // audioTracks is indexed by order of appearance among audio streams,
+        // which is the same numbering ffmpeg's `-map 0:a:N` uses.
+        //
+        // -> { ok, duration, sizeBytes, formatName,
+        //      video: { codec,width,height,fps,duration,bitrate },
+        //      audioTracks: [{ index, codec, language, title, channels,
+        //                       sampleRate, bitrate }],
+        //      chapters: [{ start, end, title }],
+        //      tags: { title, artist, album, date, ... } }
+        static std::string probeMedia(const std::string& filePath);
+
+        // Post-conversion system actions. Only one is supported: safely eject a
+        // removable drive.
+        //
+        // request: { action: 'eject', driveLetter: 'E', dryRun?: bool }
+        // -> { ok, action, detail }
+        //
+        // Shutdown / restart / sleep / logoff are refused unconditionally. This
+        // function used to enable SE_SHUTDOWN_NAME and call
+        // InitiateSystemShutdownExW. That put a machine-level, unundoable,
+        // unreachable-from-the-UI action behind a plain JSON request whose
+        // dryRun guard did not cover it. It is gone and the link against
+        // advapi32 went with it, so nothing in this process can enable the
+        // shutdown privilege or schedule a power state change.
+        static std::string systemPowerAction(const std::string& requestJson);
+
         // Non-recursive listing of a converter output directory, newest first.
         // Returns raw values only (sizeBytes, mtimeMs); the UI layer is
         // responsible for turning those into "12.3 MB" / locale date strings.

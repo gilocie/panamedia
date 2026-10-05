@@ -2,14 +2,96 @@ const { app } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
-const { spawn, execSync } = require('child_process');
+const { spawn, spawnSync, execSync } = require('child_process');
 
 const userDataPath = (app && typeof app.getPath === 'function') ? app.getPath('userData') : path.join(process.env.APPDATA || '', 'panamedia');
 const binDir = path.join(userDataPath, 'bin');
+// Only the compiled media tools are health-checked. Running yt-dlp for a
+// version costs a Python interpreter startup, which is not worth paying on
+// every launch when nothing downstream depends on the answer.
+const HEALTH_CHECKED = new Set(['ffmpeg', 'ffprobe']);
+const HEALTH_CACHE_FILE = 'binary-health.json';
+
+let healthCache = null;
+function loadHealthCache() {
+  if (healthCache) return healthCache;
+  try {
+    healthCache = JSON.parse(fs.readFileSync(path.join(binDir, HEALTH_CACHE_FILE), 'utf8'));
+    if (!healthCache || typeof healthCache !== 'object') healthCache = {};
+  } catch (e) {
+    healthCache = {};
+  }
+  return healthCache;
+}
+
+function saveHealthCache() {
+  try {
+    // Keep the cache small: drop entries for files that no longer exist.
+    const live = {};
+    for (const key of Object.keys(healthCache)) {
+      const file = key.split('|')[0];
+      if (fs.existsSync(file)) live[key] = healthCache[key];
+    }
+    fs.writeFileSync(path.join(binDir, HEALTH_CACHE_FILE), JSON.stringify(live));
+  } catch (e) {
+    // A cache we cannot persist is still usable in-memory for this session.
+  }
+}
+
+/**
+ * A binary that exists is not a binary that runs. An interrupted download
+ * leaves a full-sized file that dies with an access violation on the first
+ * call, and existence checks happily return it forever -- which is how a
+ * corrupt ffprobe ends up silently reporting every file as having no
+ * duration, no codec and no dimensions.
+ */
+function probeBinary(fullPath) {
+  const name = path.basename(fullPath).replace(/\.exe$/i, '');
+  let st;
+  try { st = fs.statSync(fullPath); } catch (e) { return false; }
+
+  const cache = loadHealthCache();
+  const key = `${fullPath}|${st.size}|${Math.round(st.mtimeMs)}`;
+  if (cache[key] !== undefined) return cache[key];
+
+  let ok = false;
+  try {
+    const r = spawnSync(fullPath, ['-version'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 10000,
+      windowsHide: true
+    });
+    // spawnSync surfaces a hard crash as signal SIGSEGV / a negative status.
+    ok = !r.error && r.status === 0 && /\bversion\b/i.test(String(r.stdout || ''));
+  } catch (e) {
+    ok = false;
+  }
+  cache[key] = ok;
+  saveHealthCache();
+
+  if (!ok) {
+    // Move the broken file aside so later launches do not keep picking it,
+    // and so the file survives for diagnosis.
+    try {
+      const quarantine = `${fullPath}.corrupt-${Date.now()}`;
+      fs.renameSync(fullPath, quarantine);
+      console.warn(`[binaries] ${name} at ${fullPath} does not run; moved to ${path.basename(quarantine)}`);
+    } catch (e) {
+      console.warn(`[binaries] ${name} at ${fullPath} does not run and could not be moved aside: ${e.message}`);
+    }
+  }
+  return ok;
+}
+
 function resolveBinary(name) {
   const exe = process.platform === 'win32' ? `${name}.exe` : name;
   const directPath = path.join(binDir, exe);
-  if (fs.existsSync(directPath)) return directPath;
+  const healthCheck = HEALTH_CHECKED.has(name);
+  if (healthCheck && !probeBinary(directPath)) {
+    // fall through to the other locations
+  } else if (fs.existsSync(directPath)) {
+    return directPath;
+  }
 
   const appData = process.env.APPDATA || '';
   const candidates = [
@@ -22,7 +104,9 @@ function resolveBinary(name) {
     path.join(__dirname, 'bin', exe)
   ];
   for (const c of candidates) {
-    if (c && fs.existsSync(c)) return c;
+    if (!c || !fs.existsSync(c)) continue;
+    if (healthCheck && !probeBinary(c)) continue;
+    return c;
   }
   return directPath;
 }
@@ -30,6 +114,16 @@ function resolveBinary(name) {
 const ffmpegPath = resolveBinary('ffmpeg');
 const ffprobePath = resolveBinary('ffprobe');
 const ytdlpPath = resolveBinary('yt-dlp');
+
+/** Diagnostics for the log: which copy each tool actually came from. */
+function describeResolvedBinaries() {
+  return {
+    ffmpeg: ffmpegPath,
+    ffprobe: ffprobePath,
+    ytdlp: ytdlpPath,
+    health: loadHealthCache()
+  };
+}
 
 const progressRegex = /\[download\]\s+(\d+\.\d+)%\s+of\s+(~\s*)?([0-9.]+[a-zA-Z\/]+)\s+at\s+([0-9.]+[a-zA-Z\/s]+)\s+ETA\s+([0-9:]+)/;
 
@@ -816,5 +910,6 @@ module.exports = {
   ffmpegPath,
   ffprobePath,
   resolveBinary,
+  describeResolvedBinaries,
   cleanYoutubeUrl
 };

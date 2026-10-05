@@ -2,7 +2,7 @@
 #define ENGINE_HPP
 
 #include "ipc_bridge.hpp"
-#include "decoder.hpp"
+
 #include <memory>
 #include <atomic>
 
@@ -21,7 +21,6 @@ namespace Panamedia {
         void handleRequest(const IPCRequest& request);
 
         std::unique_ptr<IPCBridge> m_ipcBridge;
-        std::unique_ptr<Decoder> m_decoder;
         std::atomic<bool> m_running;
     };
 

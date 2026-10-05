@@ -22,7 +22,10 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-#include <shlobj.h>   // SHGetKnownFolderPath / FOLDERID_Documents
+#include <shlobj.h>    // SHGetKnownFolderPath / FOLDERID_Documents
+#include <winioctl.h>  // IOCTL_STORAGE_EJECT_MEDIA / IOCTL_STORAGE_MEDIA_REMOVAL
+#include <cwchar>      // wcslen
+#include <cstring>     // _strnicmp / strlen
 #define popen _popen
 #define pclose _pclose
 #endif
@@ -438,6 +441,398 @@ namespace Panamedia {
         r["exitCode"] = rc;
         r["backend"] = BinaryResolver::ffprobe();
         return r.dump();
+    }
+
+    // ── full source inspection ────────────────────────────────────────────────
+
+    // ffprobe prints stream "tags" as a JSON object whose keys are lowercased,
+    // but "language" is spelled "Language" in some containers and folded
+    // inconsistently, so the lookup is case-insensitive.
+    static std::string tagValue(const json& tags, const char* key) {
+        if (!tags.is_object()) return "";
+        for (auto it = tags.begin(); it != tags.end(); ++it) {
+            if (it.key().size() == std::strlen(key) &&
+                _strnicmp(it.key().c_str(), key, std::strlen(key)) == 0) {
+                if (it.value().is_string()) return it.value().get<std::string>();
+            }
+        }
+        return "";
+    }
+
+    // "30000/1001" and "29.97" both mean ~30 frames per second. ffprobe reports
+    // a rational string, so it cannot simply be read as a double.
+    static double parseRational(const std::string& s) {
+        if (s.empty()) return 0.0;
+        size_t slash = s.find('/');
+        try {
+            if (slash == std::string::npos) return std::stod(s);
+            double num = std::stod(s.substr(0, slash));
+            double den = std::stod(s.substr(slash + 1));
+            if (den == 0.0) return 0.0;
+            return num / den;
+        } catch (...) {
+            return 0.0;
+        }
+    }
+
+    static double parseNumber(const json& obj, const char* key) {
+        if (!obj.is_object()) return 0.0;
+        auto it = obj.find(key);
+        if (it == obj.end()) return 0.0;
+        if (it->is_number()) return it->get<double>();
+        if (it->is_string()) return parseRational(it->get<std::string>());
+        return 0.0;
+    }
+
+    std::string ConversionSupport::probeMedia(const std::string& filePath) {
+        json out;
+        std::error_code ec;
+
+        if (filePath.empty() || !fs::exists(fs::u8path(filePath), ec)) {
+            out["ok"] = false;
+            out["error"] = "file not found";
+            out["duration"] = 0.0;
+            out["sizeBytes"] = 0;
+            out["video"] = nullptr;
+            out["audioTracks"] = json::array();
+            out["chapters"] = json::array();
+            out["tags"] = json::object();
+            return out.dump();
+        }
+
+        // One pass for everything. The audio-track picker and the metadata tool
+        // used to each spawn their own ffprobe for the same file.
+        std::string quoted = "\"" + filePath + "\"";
+        int rc = 0;
+        std::string raw = captureCommand(
+            BinaryResolver::ffprobe(),
+            "-v error -print_format json -show_format -show_streams -show_chapters " + quoted,
+            &rc);
+
+        json doc = json::object();
+        if (rc == 0 && !raw.empty()) {
+            try {
+                doc = json::parse(raw);
+            } catch (...) {
+                doc = json::object();
+            }
+        }
+
+        const json& format = doc.contains("format") && doc["format"].is_object() ? doc["format"] : json::object();
+        double duration = parseNumber(format, "duration");
+        if (duration < 0 || std::isnan(duration)) duration = 0.0;
+
+        uint64_t sizeBytes = 0;
+        try {
+            sizeBytes = static_cast<uint64_t>(fs::file_size(fs::u8path(filePath), ec));
+            if (ec) sizeBytes = 0;
+        } catch (...) {
+            sizeBytes = 0;
+        }
+
+        // Audio tracks, numbered the way `-map 0:a:N` numbers them: by order
+        // of appearance among audio streams, counting from zero.
+        json audio = json::array();
+        if (doc.contains("streams") && doc["streams"].is_array()) {
+            int audioIndex = 0;
+            for (const auto& s : doc["streams"]) {
+                if (!s.is_object()) continue;
+                std::string type = s.value("codec_type", std::string());
+                if (type != "audio") continue;
+
+                json t;
+                t["index"] = audioIndex++;
+                t["codec"] = s.value("codec_name", std::string());
+                t["language"] = tagValue(s.contains("tags") ? s["tags"] : json::object(), "language");
+                t["title"] = tagValue(s.contains("tags") ? s["tags"] : json::object(), "title");
+                t["channels"] = static_cast<int>(s.value("channels", 0));
+                t["sampleRate"] = static_cast<int>(parseNumber(s, "sample_rate"));
+                t["bitrate"] = static_cast<int>(parseNumber(s, "bit_rate"));
+                // A track with no language tag is usually the only one, so a
+                // sensible default label saves the UI inventing a name.
+                if (t["language"].get<std::string>().empty()) t["language"] = "und";
+                audio.push_back(t);
+            }
+        }
+
+        json chapters = json::array();
+        if (doc.contains("chapters") && doc["chapters"].is_array()) {
+            for (const auto& c : doc["chapters"]) {
+                if (!c.is_object()) continue;
+                json e;
+                // Chapters report absolute start/end; start_time is relative to
+                // the stream start and is what a trim UI actually wants.
+                e["start"] = parseNumber(c, "start_time");
+                e["end"] = parseNumber(c, "end_time");
+                e["title"] = tagValue(c.contains("tags") ? c["tags"] : json::object(), "title");
+                if (e["start"].get<double>() < 0) e["start"] = 0.0;
+                chapters.push_back(e);
+            }
+        }
+
+        json tags = json::object();
+        if (format.contains("tags") && format["tags"].is_object()) {
+            for (const char* key : {"title", "artist", "album", "album_artist",
+                                    "date", "genre", "comment", "encoder",
+                                    "track", "disc"}) {
+                std::string v = tagValue(format["tags"], key);
+                if (!v.empty()) tags[key] = v;
+            }
+        }
+
+        // First video stream only, matching what the converter actually keeps
+        // (`-map 0:v:0`). Reporting a second stream's dimensions would make the
+        // crop tool scale the wrong picture.
+        json video = nullptr;
+        if (doc.contains("streams") && doc["streams"].is_array()) {
+            for (const auto& s : doc["streams"]) {
+                if (!s.is_object()) continue;
+                if (s.value("codec_type", std::string()) != "video") continue;
+                json v;
+                v["codec"] = s.value("codec_name", std::string());
+                v["width"] = s.value("width", 0);
+                v["height"] = s.value("height", 0);
+                v["fps"] = parseRational(s.value("avg_frame_rate", std::string("0/0")));
+                if (v["fps"].get<double>() <= 0.0) {
+                    v["fps"] = parseRational(s.value("r_frame_rate", std::string("0/0")));
+                }
+                v["duration"] = parseNumber(s, "duration");
+                v["bitrate"] = static_cast<int>(parseNumber(s, "bit_rate"));
+                v["pixFmt"] = s.value("pix_fmt", std::string());
+                if (v["duration"].get<double>() <= 0.0) v["duration"] = duration;
+                video = v;
+                break;
+            }
+        }
+
+        out["ok"] = (rc == 0 && doc.is_object() && !doc.empty());
+        out["duration"] = duration;
+        out["sizeBytes"] = sizeBytes;
+        out["formatName"] = format.value("format_name", std::string());
+        out["bitrate"] = static_cast<int>(parseNumber(format, "bit_rate"));
+        out["video"] = video;
+        out["audioTracks"] = audio;
+        out["chapters"] = chapters;
+        out["tags"] = tags;
+        out["exitCode"] = rc;
+        out["backend"] = BinaryResolver::ffprobe();
+        if (!out["ok"].get<bool>()) out["error"] = "ffprobe returned no data";
+        return out.dump();
+    }
+
+    // ── post-conversion system actions ────────────────────────────────────────
+
+    // "E:" -> the \\?\Volume{GUID}\ that backs it.
+    //
+    // CM_Request_Device_Eject wants a DEVINST, not a drive letter, so the
+    // lookup has to cross two indirections: the letter names a mount point,
+    // the mount point belongs to a volume, and the volume has a device
+    // instance. Walking it with FindFirstVolume avoids assuming a
+    // HarddiskVolumeN number, which is renumbered as drives come and go.
+    static bool volumePathForDriveLetter(const std::wstring& letter,
+                                         std::wstring* outVolumePath) {
+        WCHAR volumeBuf[512];
+        HANDLE search = FindFirstVolumeW(volumeBuf, (DWORD)(sizeof(volumeBuf) / sizeof(volumeBuf[0])));
+        if (search == INVALID_HANDLE_VALUE) return false;
+
+        bool found = false;
+        do {
+            WCHAR names[1024];
+            DWORD namesLen = 0;
+            if (!GetVolumePathNamesForVolumeNameW(volumeBuf, names,
+                                                 (DWORD)(sizeof(names) / sizeof(names[0])),
+                                                 &namesLen)) {
+                continue;
+            }
+
+            // names is a multi-string of "E:\\\0F:\\\0\0"
+            const WCHAR* p = names;
+            while (*p && !found) {
+                if (_wcsicmp(p, letter.c_str()) == 0) {
+                    *outVolumePath = volumeBuf;
+                    found = true;
+                }
+                p += wcslen(p) + 1;
+            }
+        } while (!found && FindNextVolumeW(search, volumeBuf,
+                                          (DWORD)(sizeof(volumeBuf) / sizeof(volumeBuf[0]))));
+
+        FindVolumeClose(search);
+        return found;
+    }
+
+    std::string ConversionSupport::systemPowerAction(const std::string& requestJson) {
+        json out;
+        json req;
+        try {
+            req = requestJson.empty() ? json::object() : json::parse(requestJson);
+        } catch (...) {
+            req = json::object();
+        }
+        if (!req.is_object()) req = json::object();
+
+        std::string action = req.value("action", std::string());
+        std::transform(action.begin(), action.end(), action.begin(),
+                       [](unsigned char c) { return (char)std::tolower(c); });
+
+        out["action"] = action;
+        out["ok"] = false;
+#ifndef _WIN32
+        out["error"] = "system actions are only implemented on Windows";
+        return out.dump();
+#else
+        if (action == "eject") {
+            std::string letter = req.value("driveLetter", std::string());
+            // Accept "E", "E:" and "E:\\" -- callers are not careful about this.
+            //
+            // Anything longer than a bare root is rejected rather than
+            // truncated. A caller that passes "C:\\Windows" has a bug, and
+            // quietly acting on C: anyway would eject or shut down a drive
+            // nobody asked about.
+            std::string trimmed = letter;
+            while (!trimmed.empty() && (trimmed.back() == ' ' || trimmed.back() == '\t')) {
+                trimmed.pop_back();
+            }
+            std::string root;
+            bool bad = false;
+            if (trimmed.size() == 1 && std::isalpha(static_cast<unsigned char>(trimmed[0]))) {
+                root = trimmed + ":\\";
+            } else if (trimmed.size() == 2 && trimmed[1] == ':' &&
+                       std::isalpha(static_cast<unsigned char>(trimmed[0]))) {
+                root = trimmed + "\\";
+            } else if (trimmed.size() == 3 && trimmed[1] == ':' &&
+                       (trimmed[2] == '\\' || trimmed[2] == '/') &&
+                       std::isalpha(static_cast<unsigned char>(trimmed[0]))) {
+                root = trimmed.substr(0, 2) + "\\";
+            } else {
+                bad = true;
+            }
+            if (bad || root.size() != 3 || root[1] != ':') {
+                out["error"] = "driveLetter must be a single drive letter, "
+                               "e.g. \"E\", \"E:\" or \"E:\\\\\"";
+                return out.dump();
+            }
+            root[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(root[0])));
+
+            out["driveLetter"] = root;
+            std::wstring wideRoot = utf8ToWide(root);
+
+            std::wstring volumePath;
+            if (!volumePathForDriveLetter(wideRoot, &volumePath)) {
+                out["error"] = "no volume is mounted at " + root;
+                return out.dump();
+            }
+            out["volumePath"] = wideToUtf8(volumePath);
+
+            // GetDriveType is what decides whether ejecting is even a sensible
+            // offer. It answers about the requested letter itself, so there is
+            // no inference involved: E: is removable or it is not.
+            UINT driveType = GetDriveTypeW(wideRoot.c_str());
+            static const char* kDriveTypeNames[] = {
+                "unknown", "invalid", "removable", "fixed", "remote", "cdrom", "ramdisk"
+            };
+            out["driveType"] = kDriveTypeNames[driveType <= DRIVE_RAMDISK ? driveType : 0];
+            out["removable"] = (driveType == DRIVE_REMOVABLE || driveType == DRIVE_CDROM);
+
+            if (driveType == DRIVE_NO_ROOT_DIR) {
+                out["error"] = root + " is not ready: it is not mounted";
+                return out.dump();
+            }
+            if (!out["removable"].get<bool>()) {
+                out["error"] = root + " is a " + out["driveType"].get<std::string>() +
+                               " drive and cannot be ejected";
+                return out.dump();
+            }
+
+            // Lets the UI ask "could I eject this?" without pulling anything.
+            if (req.value("dryRun", false)) {
+                out["ok"] = true;
+                out["detail"] = "ready to eject";
+                return out.dump();
+            }
+
+            // The eject is sent to the volume's own device handle rather than
+            // to a device tree node.
+            //
+            // CM_Request_Device_Eject is the richer API -- it flushes and
+            // brings up its own "please wait" UI -- but it wants a DEVINST, and
+            // going from a drive letter to that DEVINST means enumerating
+            // device interfaces. With two USB drives attached, a step that
+            // silently mis-resolves would pull the wrong one, so this does not
+            // guess: it asks the volume that was actually named.
+            //
+            // A handle to \\.\E: is by definition the requested drive, and a
+            // driver that refuses simply returns ERROR_NOT_SUPPORTED, which is
+            // surfaced rather than papered over.
+            std::wstring volumeDevice = L"\\\\.\\" + wideRoot.substr(0, 2);
+            HANDLE hVolume = CreateFileW(volumeDevice.c_str(), GENERIC_READ,
+                                         FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                         nullptr, OPEN_EXISTING, 0, nullptr);
+            if (hVolume == INVALID_HANDLE_VALUE) {
+                out["error"] = "the drive could not be opened for ejection (win32 " +
+                               std::to_string(GetLastError()) + ")";
+                out["win32Error"] = static_cast<int>(GetLastError());
+                return out.dump();
+            }
+
+            // Eject the medium itself; if the driver has no eject code, ask
+            // whether the medium is removable first. Either answer is about
+            // this volume, never about a guess.
+            DWORD returned = 0;
+            BOOL ejected = DeviceIoControl(hVolume, IOCTL_STORAGE_EJECT_MEDIA,
+                                           nullptr, 0, nullptr, 0, &returned, nullptr);
+            if (!ejected) {
+                DWORD firstError = GetLastError();
+                ejected = DeviceIoControl(hVolume, IOCTL_STORAGE_MEDIA_REMOVAL,
+                                          nullptr, 0, nullptr, 0, &returned, nullptr);
+                if (!ejected) {
+                    DWORD secondError = GetLastError();
+                    CloseHandle(hVolume);
+                    // ERROR_NOT_SUPPORTED means the storage driver will not do
+                    // this for us. Reporting it plainly is the honest answer:
+                    // the user needs the system eject dialog.
+                    out["error"] = "this drive's driver does not support ejecting "
+                                   "(win32 " + std::to_string(secondError) +
+                                   "). Use 'Safely Remove Hardware' from the system tray.";
+                    out["win32Error"] = static_cast<int>(secondError);
+                    out["firstWin32Error"] = static_cast<int>(firstError);
+                    return out.dump();
+                }
+            }
+            CloseHandle(hVolume);
+
+            out["ok"] = true;
+            out["detail"] = "ejected";
+            return out.dump();
+        }
+
+        // Shutdown, restart, sleep and logoff are refused here, permanently, for now.
+        //
+        // This code once enabled SE_SHUTDOWN_NAME and called
+        // InitiateSystemShutdownExW. That is a machine-level action with no
+        // undo, reachable over the engine's JSON transport, and its dryRun
+        // guard only covered eject -- so a single test payload could power the
+        // machine off with an OS countdown the user never asked for and might
+        // never see coming.
+        //
+        // A media converter has no business powering off someone's machine on
+        // its own initiative. If this is ever wanted it should be an explicit
+        // user action behind a visible, cancellable confirmation -- never a
+        // post-conversion side effect, and never reachable from a bare JSON
+        // request. Until that exists, the answer is a hard no.
+        if (action == "shutdown" || action == "restart" || action == "poweroff" ||
+            action == "reboot" || action == "sleep" || action == "hibernate" ||
+            action == "suspend" || action == "logoff" || action == "lock") {
+            out["error"] = "power actions are not supported: Panamedia will not "
+                           "shut down, restart, sleep or log off the computer. "
+                           "Use the system's own controls.";
+            out["supportedActions"] = json::array({ "eject" });
+            return out.dump();
+        }
+
+        out["error"] = "action must be 'eject'";
+        return out.dump();
+#endif
     }
 
     // ── output directory listing ─────────────────────────────────────────────

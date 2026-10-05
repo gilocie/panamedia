@@ -1991,29 +1991,12 @@ ipcMain.handle('check-media-info', async (event, filePath) => {
   });
 });
 
-ipcMain.handle('core-player-open', async (event, filePath) => {
-  return sendCoreRequest('player_open', { filePath });
-});
-
-ipcMain.handle('core-player-play', async () => {
-  return sendCoreRequest('player_play');
-});
-
-ipcMain.handle('core-player-pause', async () => {
-  return sendCoreRequest('player_pause');
-});
-
-ipcMain.handle('core-player-seek', async (event, seconds) => {
-  return sendCoreRequest('player_seek', { seconds });
-});
-
-ipcMain.handle('core-player-speed', async (event, speed) => {
-  return sendCoreRequest('player_speed', { speed });
-});
-
-ipcMain.handle('core-player-close', async () => {
-  return sendCoreRequest('player_close');
-});
+// The core engine used to expose a `player_*` action set backed by a C++
+// decoder. That decoder was a stub: openFile() accepted any path and
+// reported 1920x1080 with a zero duration. Playback runs on Chromium's own
+// decoder, so nothing ever called these handlers. They are removed rather
+// than left reachable, because a handler that answers confidently with
+// invented dimensions is worse than no handler at all.
 
 
 ipcMain.handle('open-file', (event, { saveDir, filename }) => {

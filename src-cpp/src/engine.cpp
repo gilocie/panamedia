@@ -15,7 +15,6 @@ namespace Panamedia {
     static std::unique_ptr<HTTPServer> s_httpServer;
 
     MediaEngine::MediaEngine() : m_running(false) {
-        m_decoder = std::make_unique<Decoder>();
         m_ipcBridge = std::make_unique<IPCBridge>([this](const IPCRequest& req) {
             this->handleRequest(req);
         });
@@ -120,6 +119,19 @@ namespace Panamedia {
                 }
                 IPCBridge::sendResponse(request.id, "success",
                     ConversionSupport::probeDuration(payload["filePath"].get<std::string>()));
+            }
+            else if (request.action == "probe_media") {
+                if (!payload.contains("filePath") || !payload["filePath"].is_string()) {
+                    IPCBridge::sendResponse(request.id, "error",
+                        "{\"message\":\"Missing filePath parameter\"}");
+                    return;
+                }
+                IPCBridge::sendResponse(request.id, "success",
+                    ConversionSupport::probeMedia(payload["filePath"].get<std::string>()));
+            }
+            else if (request.action == "system_power_action") {
+                IPCBridge::sendResponse(request.id, "success",
+                    ConversionSupport::systemPowerAction(payload.dump()));
             }
             else if (request.action == "output_files") {
                 std::string dir = payload.contains("dirPath") && payload["dirPath"].is_string()
@@ -322,53 +334,6 @@ namespace Panamedia {
                 } else {
                     IPCBridge::sendResponse(request.id, "success", "{\"status\":\"not_running\"}");
                 }
-            }
-            else if (request.action == "player_open") {
-                if (!payload.contains("filePath") || !payload["filePath"].is_string()) {
-                    IPCBridge::sendResponse(request.id, "error", "{\"message\":\"Missing filePath parameter\"}");
-                    return;
-                }
-                std::string filePath = payload["filePath"].get<std::string>();
-                if (m_decoder->openFile(filePath)) {
-                    json res;
-                    res["duration"] = m_decoder->getDuration();
-                    res["width"] = m_decoder->getWidth();
-                    res["height"] = m_decoder->getHeight();
-                    res["shmem_key"] = "Local\\panamedia_frame_buffer";
-                    IPCBridge::sendResponse(request.id, "success", res.dump());
-                } else {
-                    IPCBridge::sendResponse(request.id, "error", "{\"message\":\"Failed to open file in decoder\"}");
-                }
-            }
-            else if (request.action == "player_play") {
-                m_decoder->play();
-                IPCBridge::sendResponse(request.id, "success", "{\"status\":\"playing\"}");
-            }
-            else if (request.action == "player_pause") {
-                m_decoder->pause();
-                IPCBridge::sendResponse(request.id, "success", "{\"status\":\"paused\"}");
-            }
-            else if (request.action == "player_seek") {
-                if (!payload.contains("seconds") || !payload["seconds"].is_number()) {
-                    IPCBridge::sendResponse(request.id, "error", "{\"message\":\"Missing or invalid seconds parameter\"}");
-                    return;
-                }
-                double seconds = payload["seconds"].get<double>();
-                m_decoder->seek(seconds);
-                IPCBridge::sendResponse(request.id, "success", "{\"status\":\"seeking\"}");
-            }
-            else if (request.action == "player_speed") {
-                if (!payload.contains("speed") || !payload["speed"].is_number()) {
-                    IPCBridge::sendResponse(request.id, "error", "{\"message\":\"Missing or invalid speed parameter\"}");
-                    return;
-                }
-                double speed = payload["speed"].get<double>();
-                m_decoder->setSpeed(speed);
-                IPCBridge::sendResponse(request.id, "success", "{\"status\":\"speed_updated\"}");
-            }
-            else if (request.action == "player_close") {
-                m_decoder->close();
-                IPCBridge::sendResponse(request.id, "success", "{\"status\":\"closed\"}");
             }
             else {
                 IPCBridge::sendResponse(request.id, "error", "{\"message\":\"Unknown action: " + request.action + "\"}");
