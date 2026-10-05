@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Play, Pause, Music, Volume2, Volume1, VolumeX,
+  Play, Pause, PlayCircle, Volume2, Volume1, VolumeX,
   SkipBack, SkipForward, Sparkles 
 } from 'lucide-react';
+import playerBg from '../../assets/playerbg.jpg';
 import { electron } from '../panamedia/types';
 import { formatSeconds, isVideoFile } from './types';
 
@@ -18,26 +19,33 @@ interface AppPlayerState {
 
 interface PreviewMonitorProps {
   currentFile: string;
+  thumbnailPath?: string;
+  playbackRequest?: { id: number; path: string; action: 'play' | 'pause' };
   streamingPort?: number;
   appPlayerState: AppPlayerState | null;
   onPrevFile: () => void;
   onNextFile: () => void;
+  onPlaybackStateChange?: (path: string, playing: boolean) => void;
   isMinimized?: boolean;
 }
 
 export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
   currentFile,
+  thumbnailPath,
+  playbackRequest,
   streamingPort = 52321,
   appPlayerState,
   onPrevFile,
   onNextFile,
+  onPlaybackStateChange,
   isMinimized
 }) => {
-  const currentBaseName = currentFile.split(/[\\/]/).pop()?.replace(/\.[^/.]+$/, '') || 'Media';
   const isVideo = isVideoFile(currentFile);
+  const hasCurrentFile = Boolean(currentFile);
 
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const mediaRef = useRef<HTMLMediaElement | null>(null);
   const [activePort, setActivePort] = useState<number>(streamingPort || 52321);
+  const [audioThumbnailFailed, setAudioThumbnailFailed] = useState(false);
 
   useEffect(() => {
     if (electron) {
@@ -50,6 +58,7 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
   const [isPlaying, setIsPlaying] = useState<boolean>(false); // PAUSED BY DEFAULT
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
+  const lastPlayRequestRef = useRef(0);
 
   // Volume state brought from original player
   const [volume, setVolume] = useState<number>(() => {
@@ -69,6 +78,11 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
   const [showVolumeSlider, setShowVolumeSlider] = useState<boolean>(false);
   const hasInitializedTime = useRef<boolean>(false);
   const volumeContainerRef = useRef<HTMLDivElement | null>(null);
+  const audioThumbnailUrl = `http://localhost:${activePort}/thumbnail?path=${encodeURIComponent(thumbnailPath || currentFile)}`;
+
+  useEffect(() => {
+    setAudioThumbnailFailed(false);
+  }, [currentFile, thumbnailPath, activePort]);
 
   // Close volume popover when clicking outside
   useEffect(() => {
@@ -90,8 +104,8 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
     if (appPlayerState?.volume !== undefined && typeof appPlayerState.volume === 'number') {
       const normVol = appPlayerState.volume > 1 ? appPlayerState.volume / 100 : appPlayerState.volume;
       setVolume(normVol);
-      if (videoRef.current) {
-        videoRef.current.volume = normVol;
+      if (mediaRef.current) {
+        mediaRef.current.volume = normVol;
       }
     }
   }, [appPlayerState?.volume]);
@@ -103,11 +117,11 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
     setDuration(0);
     setIsPlaying(false);
 
-    if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.currentTime = 0;
-      videoRef.current.volume = volume;
-      videoRef.current.muted = isMuted;
+    if (mediaRef.current) {
+      mediaRef.current.pause();
+      mediaRef.current.currentTime = 0;
+      mediaRef.current.volume = volume;
+      mediaRef.current.muted = isMuted;
     }
 
     // Always ensure background player is paused when converter is active
@@ -116,27 +130,45 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
     }
   }, [currentFile]);
 
+  useEffect(() => {
+    if (!playbackRequest || playbackRequest.id === lastPlayRequestRef.current || playbackRequest.path !== currentFile) return;
+    lastPlayRequestRef.current = playbackRequest.id;
+    const media = mediaRef.current;
+    if (!media) return;
+    if (playbackRequest.action === 'pause') {
+      media.pause();
+      setIsPlaying(false);
+      return;
+    }
+    if (electron) electron.ipcRenderer.send('player-remote-command', 'pause');
+    media.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+  }, [currentFile, playbackRequest]);
+
+  useEffect(() => {
+    onPlaybackStateChange?.(currentFile, isPlaying);
+  }, [currentFile, isPlaying, onPlaybackStateChange]);
+
   // Keep video element volume in sync
   useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.volume = volume;
-      videoRef.current.muted = isMuted;
+    if (mediaRef.current) {
+      mediaRef.current.volume = volume;
+      mediaRef.current.muted = isMuted;
     }
   }, [volume, isMuted]);
 
   // Handle minimization: if preview video was playing, pause it and instruct the main player to continue playing media
   useEffect(() => {
     if (isMinimized) {
-      const video = videoRef.current;
+      const video = mediaRef.current;
       const wasVideoPlaying = isPlaying || (video && !video.paused);
       if (video && !video.paused) {
         video.pause();
       }
       setIsPlaying(false);
 
-      if (wasVideoPlaying && electron) {
+      if (wasVideoPlaying && electron && appPlayerState?.filePath === currentFile) {
         // If previewer was playing the same file as the player, seek main player to exact position
-        if (appPlayerState && appPlayerState.filePath === currentFile && video && video.currentTime > 0) {
+        if (video && video.currentTime > 0) {
           electron.ipcRenderer.send('player-remote-command', 'seek-to', video.currentTime);
         }
         electron.ipcRenderer.send('player-remote-command', 'play');
@@ -146,7 +178,7 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
 
   // Sync initial playback position once when metadata loads or appPlayerState is available
   const handleLoadedMetadata = () => {
-    const video = videoRef.current;
+    const video = mediaRef.current;
     if (!video) return;
     setDuration(video.duration || 0);
     video.volume = volume;
@@ -161,14 +193,14 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
   };
 
   const handleTimeUpdate = () => {
-    if (videoRef.current) {
-      setCurrentTime(videoRef.current.currentTime);
+    if (mediaRef.current) {
+      setCurrentTime(mediaRef.current.currentTime);
     }
   };
 
   // Play / Pause toggle
   const togglePlay = () => {
-    const video = videoRef.current;
+    const video = mediaRef.current;
     if (!video) return;
 
     if (video.paused) {
@@ -186,7 +218,7 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
 
   // Scrubber click seek
   const handleScrubberClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const video = videoRef.current;
+    const video = mediaRef.current;
     const effectiveDuration = duration || appPlayerState?.duration || 0;
     if (!effectiveDuration) return;
 
@@ -203,7 +235,7 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
   // Mute toggle
   const toggleMute = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    const video = videoRef.current;
+    const video = mediaRef.current;
     if (!video) return;
 
     if (isMuted) {
@@ -229,7 +261,7 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
 
   // Direct Volume Change
   const handleVolumeChange = (newValPercent: number) => {
-    const video = videoRef.current;
+    const video = mediaRef.current;
     const newVol = Math.max(0, Math.min(1, newValPercent / 100));
     setVolume(newVol);
     const muted = newVol === 0;
@@ -292,7 +324,10 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
       <div style={{
         width: '100%',
         height: '142px',
-        background: '#07080f',
+        backgroundImage: `linear-gradient(rgba(9, 9, 14, 0.72), rgba(9, 9, 14, 0.72)), url(${playerBg})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
         borderRadius: '8px 8px 0 0',
         border: '1px solid rgba(255, 255, 255, 0.12)',
         borderBottom: 'none',
@@ -302,9 +337,22 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
         alignItems: 'center',
         justifyContent: 'center'
       }}>
-        {isVideo ? (
+        {!hasCurrentFile ? (
+          <div style={{
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundImage: `linear-gradient(rgba(7, 7, 10, 0.48), rgba(7, 7, 10, 0.48)), url(${playerBg})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center'
+          }}>
+            <PlayCircle size={38} style={{ color: 'rgba(255,255,255,0.72)', filter: 'drop-shadow(0 2px 12px rgba(0,0,0,0.8))' }} />
+          </div>
+        ) : isVideo ? (
           <video
-            ref={videoRef}
+            ref={(element) => { mediaRef.current = element; }}
             src={`http://localhost:${activePort}/stream?path=${encodeURIComponent(currentFile)}`}
             style={{
               width: '100%',
@@ -320,17 +368,10 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
             muted={isMuted}
           />
         ) : (
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px',
-            color: '#fff'
-          }}>
+          <div style={{ position: 'absolute', inset: 0 }}>
             <audio
-              ref={videoRef as any}
-              src={`http://localhost:${streamingPort}/stream?path=${encodeURIComponent(currentFile)}`}
+              ref={(element) => { mediaRef.current = element; }}
+              src={`http://localhost:${activePort}/stream?path=${encodeURIComponent(currentFile)}`}
               preload="metadata"
               onLoadedMetadata={handleLoadedMetadata}
               onTimeUpdate={handleTimeUpdate}
@@ -340,21 +381,60 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
               muted={isMuted}
             />
             <div style={{
-              width: '42px',
-              height: '42px',
-              borderRadius: '50%',
-              background: 'radial-gradient(circle, #3b0764 0%, #09090b 100%)',
-              border: '2px solid rgba(236, 72, 153, 0.5)',
+              width: '100%',
+              height: '100%',
+              position: 'absolute',
+              inset: 0,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 0 16px rgba(236, 72, 153, 0.3)',
-              animation: isPlaying ? 'spin 4s linear infinite' : 'none'
+              overflow: 'hidden',
+              background: 'linear-gradient(135deg, #1e1b4b 0%, #311042 100%)'
             }}>
-              <Music size={18} style={{ color: '#f472b6' }} />
-            </div>
-            <div style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: 600, maxWidth: '85%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {currentBaseName}
+              <img
+                src={audioThumbnailFailed ? playerBg : audioThumbnailUrl}
+                alt=""
+                onError={() => setAudioThumbnailFailed(true)}
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  filter: 'brightness(0.42) saturate(1.1)'
+                }}
+              />
+              <div
+                className={isPlaying ? 'spinning' : 'spinning spinning-paused'}
+                style={{
+                  position: 'relative',
+                  width: '88px',
+                  height: '88px',
+                  borderRadius: '50%',
+                  border: '3px solid rgba(255,255,255,0.12)',
+                  background: audioThumbnailFailed
+                    ? `url("/player.ico") center/cover no-repeat`
+                    : `url("${audioThumbnailUrl}") center/cover no-repeat`,
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.7), 0 0 16px rgba(168, 85, 247, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 2
+                }}
+              >
+                {!audioThumbnailFailed && (
+                  <div style={{
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '50%',
+                    background: 'rgba(9, 9, 14, 0.92)',
+                    border: '2px solid rgba(255,255,255,0.12)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }} />
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -374,18 +454,6 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
       }}>
         {/* Title & Duration Readout in One Line */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-          <span style={{
-            fontSize: '11px',
-            fontWeight: 700,
-            color: '#fff',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            flex: 1
-          }} title={currentBaseName}>
-            {currentBaseName}
-          </span>
-
           <span style={{ fontSize: '9.5px', color: 'rgba(255, 255, 255, 0.45)', fontFamily: 'monospace', flexShrink: 0 }}>
             {`${formatSeconds(displayTime)} / ${displayDuration > 0 ? formatSeconds(displayDuration) : '--:--'}`}
           </span>

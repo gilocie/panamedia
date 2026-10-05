@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Film, Music, Play, CheckCircle2, Send, FolderEdit, FolderOpen, Trash2 } from 'lucide-react';
+import { Film, Music, Play, Pause, Send, FolderEdit, FolderOpen, Trash2 } from 'lucide-react';
 import { electron } from '../panamedia/types';
 
 interface OutputItem {
@@ -19,7 +19,10 @@ interface OutputHistoryListProps {
   streamingPort?: number;
   onChangeOutputPath?: () => void;
   onDirectSend?: (files: string[]) => void;
-  onPlayMedia?: (path: string) => void;
+  onPlayMedia?: (item: OutputItem) => void;
+  onSelectMedia?: (item: OutputItem) => void;
+  selectedPath?: string | null;
+  playingPath?: string | null;
   onItemsDeleted?: (paths: string[]) => void;
 }
 
@@ -31,12 +34,16 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
   onChangeOutputPath,
   onDirectSend,
   onPlayMedia,
+  onSelectMedia,
+  selectedPath,
+  playingPath,
   onItemsDeleted
 }) => {
   const isVideo = type === 'video';
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const [thumbnailErrors, setThumbnailErrors] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const currentPaths = new Set(items.map((item) => item.path));
@@ -285,17 +292,37 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
           </div>
         ) : (
           items.map((item, idx) => (
+            (() => {
+              const isPlaying = playingPath === item.path;
+              const isSelected = selectedPath === item.path;
+              return (
             <div
               key={`${item.path}-${idx}`}
+              aria-current={isSelected ? 'true' : undefined}
+              tabIndex={0}
+              onClick={() => onSelectMedia?.(item)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onSelectMedia?.(item);
+                }
+              }}
               style={{
-                background: 'rgba(255, 255, 255, 0.03)',
-                border: '1px solid rgba(255, 255, 255, 0.07)',
+                background: isSelected || isPlaying
+                  ? 'linear-gradient(110deg, rgba(99, 102, 241, 0.16), rgba(236, 72, 153, 0.09))'
+                  : 'rgba(255, 255, 255, 0.03)',
+                border: isSelected || isPlaying ? '1px solid rgba(129, 140, 248, 0.55)' : '1px solid rgba(255, 255, 255, 0.07)',
+                boxShadow: isPlaying
+                  ? '0 0 0 1px rgba(236, 72, 153, 0.3), 0 0 18px rgba(99, 102, 241, 0.16)'
+                  : isSelected ? '0 0 12px rgba(99, 102, 241, 0.14)' : 'none',
                 borderRadius: '10px',
                 padding: '10px 14px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                gap: '12px'
+                gap: '12px',
+                cursor: onSelectMedia ? 'pointer' : 'default',
+                transition: 'background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease'
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
@@ -305,13 +332,16 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
                   disabled={isDeleting}
                   onChange={() => toggleSelected(item.path)}
                   aria-label={`Select ${item.name}`}
+                  onClick={(event) => event.stopPropagation()}
                   style={{ flexShrink: 0, accentColor: isVideo ? '#818cf8' : '#ec4899' }}
                 />
                 <div style={{
-                  width: '32px',
-                  height: '32px',
+                  width: '44px',
+                  height: '44px',
                   borderRadius: '7px',
-                  background: isVideo ? 'rgba(99, 102, 241, 0.2)' : 'rgba(236, 72, 153, 0.2)',
+                  backgroundImage: `linear-gradient(rgba(7, 7, 10, 0.35), rgba(7, 7, 10, 0.35)), url(/player.ico)`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
                   border: isVideo ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid rgba(236, 72, 153, 0.4)',
                   display: 'flex',
                   alignItems: 'center',
@@ -320,20 +350,34 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
                   position: 'relative',
                   flexShrink: 0
                 }}>
-                  <CheckCircle2 size={16} />
-                  {!isVideo && item.thumbnailPath && (
+                  {thumbnailErrors.has(item.path) ? (
                     <img
-                      src={`http://localhost:${streamingPort}/thumbnail?path=${encodeURIComponent(item.thumbnailPath)}`}
+                      src="/player.ico"
                       alt=""
-                      loading="lazy"
-                      onError={(event) => { event.currentTarget.style.display = 'none'; }}
                       style={{
                         position: 'absolute',
                         inset: 0,
                         width: '100%',
                         height: '100%',
                         borderRadius: '6px',
-                        objectFit: 'cover'
+                        objectFit: 'cover',
+                        zIndex: 1
+                      }}
+                    />
+                  ) : (
+                    <img
+                      src={`http://localhost:${streamingPort}/thumbnail?path=${encodeURIComponent(item.thumbnailPath || item.path)}`}
+                      alt=""
+                      loading="lazy"
+                      onError={() => setThumbnailErrors((prev) => new Set(prev).add(item.path))}
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        width: '100%',
+                        height: '100%',
+                        borderRadius: '6px',
+                        objectFit: 'cover',
+                        zIndex: 1
                       }}
                     />
                   )}
@@ -398,29 +442,37 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
                 {onPlayMedia && (
                   <button
                     type="button"
-                    onClick={() => onPlayMedia(item.path)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onPlayMedia(item);
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: '4px',
                       padding: '5px 10px',
                       borderRadius: '6px',
-                      background: 'rgba(99, 102, 241, 0.2)',
-                      border: '1px solid rgba(99, 102, 241, 0.4)',
-                      color: '#c7d2fe',
+                      background: isPlaying ? 'rgba(6, 182, 212, 0.2)' : 'rgba(99, 102, 241, 0.2)',
+                      border: isPlaying ? '1px solid rgba(6, 182, 212, 0.5)' : '1px solid rgba(99, 102, 241, 0.4)',
+                      color: isPlaying ? '#a5f3fc' : '#c7d2fe',
                       fontSize: '11px',
                       fontWeight: 600,
                       cursor: 'pointer'
                     }}
-                    title="Play in Panamedia Player"
+                    title={isPlaying ? 'Pause preview' : 'Play in preview monitor'}
                   >
-                    <Play size={12} fill="#c7d2fe" /> Play
+                    {isPlaying
+                      ? <><Pause size={12} fill="#a5f3fc" /> Pause</>
+                      : <><Play size={12} fill="#c7d2fe" /> Play</>}
                   </button>
                 )}
 
                 <button
                   type="button"
-                  onClick={() => handleOpenLocation(item.path)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleOpenLocation(item.path);
+                  }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -440,6 +492,8 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
                 </button>
               </div>
             </div>
+              );
+            })()
           ))
         )}
       </div>

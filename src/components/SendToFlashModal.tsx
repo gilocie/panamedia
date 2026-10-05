@@ -77,7 +77,14 @@ export function SendToFlashModal({
   const [activeSection, setActiveSection] = useState<
     'main' | 'prepare' | 'drives' | 'sendtray_progress' | 'sendtray_destination'
   >(() => (openedFromPlayer ? 'prepare' : 'main'));
-  const [converterTab, setConverterTab] = useState<'convert' | 'video_output' | 'audio_output'>('convert');
+  const [converterTab, setConverterTab] = useState<'convert' | 'video_output' | 'audio_output'>(() => {
+    const savedTab = localStorage.getItem('panamedia_converter_active_tab');
+    return savedTab === 'video_output' || savedTab === 'audio_output' ? savedTab : 'convert';
+  });
+  const handleConverterTabChange = (tab: 'convert' | 'video_output' | 'audio_output') => {
+    setConverterTab(tab);
+    localStorage.setItem('panamedia_converter_active_tab', tab);
+  };
   const [pendingAction, setPendingAction] = useState<'drive' | 'sendtray' | 'convert'>('convert');
   const [destinationFolders, setDestinationFolders] = useState<SendtrayFolder[]>(() => getSendtrayFolders());
   const [isCreatingDestFolder, setIsCreatingDestFolder] = useState(false);
@@ -1172,7 +1179,7 @@ export function SendToFlashModal({
           onQueueFilesRemoved={handleQueueFilesRemoved}
           onTogglePauseSingleFile={handleTogglePauseSingleFile}
           activeMainTab={converterTab}
-          onActiveMainTabChange={setConverterTab}
+          onActiveMainTabChange={handleConverterTabChange}
           onProceed={handleProceedFromPreparation}
           onDirectSend={(target) => {
             if (Array.isArray(target) && target.length > 0) {

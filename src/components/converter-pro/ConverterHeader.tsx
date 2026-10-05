@@ -6,6 +6,7 @@ import {
 
 interface ConverterHeaderProps {
   queueCount: number;
+  showDone: boolean;
   isExpanded: boolean;
   useHwAccel?: boolean;
   onToggleExpand: () => void;
@@ -16,6 +17,7 @@ interface ConverterHeaderProps {
 
 export const ConverterHeader: React.FC<ConverterHeaderProps> = ({
   queueCount,
+  showDone,
   isExpanded,
   useHwAccel = true,
   onToggleExpand,
@@ -36,29 +38,31 @@ export const ConverterHeader: React.FC<ConverterHeaderProps> = ({
     }}>
       {/* Left: Done & Title */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <button
-          type="button"
-          onClick={onBack}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '6px 14px',
-            borderRadius: '8px',
-            background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(99, 102, 241, 0.25))',
-            border: '1px solid rgba(6, 182, 212, 0.45)',
-            color: '#fff',
-            fontSize: '12px',
-            fontWeight: 700,
-            cursor: 'pointer',
-            boxShadow: '0 2px 8px rgba(6, 182, 212, 0.2)',
-            transition: 'all 0.15s ease'
-          }}
-          title="Done - Save to Player Header Card and Return to Player"
-        >
-          <Check size={14} style={{ color: '#67e8f9' }} />
-          <span>Done</span>
-        </button>
+        {showDone && (
+          <button
+            type="button"
+            onClick={onBack}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              borderRadius: '8px',
+              background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(99, 102, 241, 0.25))',
+              border: '1px solid rgba(6, 182, 212, 0.45)',
+              color: '#fff',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: '0 2px 8px rgba(6, 182, 212, 0.2)',
+              transition: 'all 0.15s ease'
+            }}
+            title="Close Converter Pro"
+          >
+            <Check size={14} style={{ color: '#67e8f9' }} />
+            <span>Done</span>
+          </button>
+        )}
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{

@@ -47,7 +47,6 @@ import {
 export { isVideoFile, formatSeconds, type SendConvertOptions };
 
 export function SendConvertPreparationModal({
-  fileName,
   targetAction = 'convert',
   isBatch: _isBatch = false,
   batchCount: _batchCount = 1,
@@ -102,9 +101,18 @@ export function SendConvertPreparationModal({
   const [onBattery, setOnBattery] = useState<boolean>(false);
 
   // Window states: Expand/Maximize to fit device screen, Minimize to background
-  const [isExpanded, setIsExpanded] = useState<boolean>(false);
+  const [isExpanded, setIsExpanded] = useState<boolean>(() =>
+    localStorage.getItem('panamedia_converter_expanded') === 'true'
+  );
   const [isMinimized, setIsMinimized] = useState<boolean>(false);
 
+  const handleToggleExpand = () => {
+    setIsExpanded((expanded) => {
+      const next = !expanded;
+      localStorage.setItem('panamedia_converter_expanded', String(next));
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (onMinimizeChange) {
@@ -143,6 +151,7 @@ export function SendConvertPreparationModal({
   const [convertedVideos, setConvertedVideos] = useState<Array<{
     name: string;
     path: string;
+    thumbnailPath?: string;
     size?: string;
     format: string;
     resolutionOrBitrate?: string;
@@ -152,6 +161,7 @@ export function SendConvertPreparationModal({
   const [convertedAudios, setConvertedAudios] = useState<Array<{
     name: string;
     path: string;
+    thumbnailPath?: string;
     size?: string;
     format: string;
     resolutionOrBitrate?: string;
@@ -205,6 +215,13 @@ export function SendConvertPreparationModal({
 
   // Preview & Queue Navigation
   const [selectedFileIdx, setSelectedFileIdx] = useState<number>(0);
+  const [outputPreview, setOutputPreview] = useState<{ path: string; thumbnailPath?: string } | null>(null);
+  const [outputPlaybackRequest, setOutputPlaybackRequest] = useState<{
+    id: number;
+    path: string;
+    action: 'play' | 'pause';
+  }>({ id: 0, path: '', action: 'pause' });
+  const [playingOutputPath, setPlayingOutputPath] = useState<string | null>(null);
 
   // Corner player state synced from Electron main player
   const [appPlayerState, setAppPlayerState] = useState<{
@@ -247,7 +264,7 @@ export function SendConvertPreparationModal({
   useEffect(() => {
     if (!electron) return;
     if (isMinimized) {
-      const activeFile = (activeConvertingFile || localQueue[selectedFileIdx] || fileName || '').split(/[\\/]/).pop() || '';
+      const activeFile = (activeConvertingFile || localQueue[selectedFileIdx] || '').split(/[\\/]/).pop() || '';
       const displayProgress = Math.round(conversionProgress <= 1 && conversionProgress > 0 ? conversionProgress * 100 : conversionProgress);
       electron.ipcRenderer.send('converter-minimize-state', {
         minimized: true,
@@ -264,7 +281,7 @@ export function SendConvertPreparationModal({
         mediaTypes: mediaTypes
       });
     }
-  }, [isMinimized, isConverting, isPaused, conversionProgress, activeConvertingFile, localQueue, selectedFileIdx, fileName, useHwAccel, mediaTypes]);
+  }, [isMinimized, isConverting, isPaused, conversionProgress, activeConvertingFile, localQueue, selectedFileIdx, useHwAccel, mediaTypes]);
 
   // Listen for restore requests from Player Header progress card
   useEffect(() => {
@@ -282,7 +299,7 @@ export function SendConvertPreparationModal({
   const handleMinimizeModal = () => {
     setIsMinimized(true);
     if (onMinimizeChange) onMinimizeChange(true);
-    const activeFile = (activeConvertingFile || localQueue[selectedFileIdx] || fileName || '').split(/[\\/]/).pop() || '';
+    const activeFile = (activeConvertingFile || localQueue[selectedFileIdx] || '').split(/[\\/]/).pop() || '';
     const displayProgress = Math.round(conversionProgress <= 1 && conversionProgress > 0 ? conversionProgress * 100 : conversionProgress);
     if (electron) {
       electron.ipcRenderer.send('converter-minimize-state', {
@@ -301,51 +318,6 @@ export function SendConvertPreparationModal({
       });
       electron.ipcRenderer.send('player-remote-command', 'play');
     }
-  };
-
-  const handleDone = () => {
-    // The queue is NOT written here. converterQueue already persisted it at the
-    // moment of the change, and by the time this runs the local copy may be
-    // stale -- dismissing the modal could therefore put back an entry the user
-    // had just deleted, or resurrect the whole queue after "remove all".
-    localStorage.setItem('converter_media_types', JSON.stringify(mediaTypes));
-    
-    // If conversion is actively running, never unmount or kill the conversion process!
-    if (isConverting) {
-      handleMinimizeModal();
-      return;
-    }
-
-    const activeFile = (localQueue[selectedFileIdx] || fileName).split(/[\\/]/).pop() || '';
-    if (electron) {
-      electron.ipcRenderer.send('converter-minimize-state', {
-        minimized: true,
-        converting: false,
-        isPaused: false,
-        progress: 0,
-        queueCount: localQueue.length,
-        currentFile: activeFile,
-        statusText: localQueue.length > 1 ? `${localQueue.length} files queued` : 'Ready to Convert',
-        useHwAccel: useHwAccel,
-        queue: localQueue,
-        mediaTypes: mediaTypes,
-        options: {
-          videoFormat: selectedVideoFmt,
-          videoQuality: videoQuality,
-          audioFormat: selectedAudioFmt,
-          audioBitrate: audioBitrate,
-          useHwAccel: useHwAccel,
-          destination: exportDestination,
-          driveLetter: selectedDriveLetter,
-          customFolder: customExportFolder,
-          videoOutputDir: videoOutputPath,
-          audioOutputDir: audioOutputPath
-        }
-      });
-      electron.ipcRenderer.send('player-remote-command', 'play');
-    }
-    if (onClose) onClose();
-    else if (onBack) onBack();
   };
 
   // Engine Settings - persisted across reboots & power loss
@@ -527,6 +499,19 @@ export function SendConvertPreparationModal({
     refreshOutputFiles();
   }, [refreshOutputFiles, activeMainTab]);
 
+  useEffect(() => {
+    if (activeMainTab === 'convert') {
+      setOutputPreview(null);
+      return;
+    }
+    const outputs = activeMainTab === 'video_output' ? convertedVideos : convertedAudios;
+    setOutputPreview((current) =>
+      current && outputs.some((item) => item.path === current.path)
+        ? current
+        : outputs[0] ? { path: outputs[0].path, thumbnailPath: outputs[0].thumbnailPath } : null
+    );
+  }, [activeMainTab, convertedVideos, convertedAudios]);
+
   const handleChangeVideoOutputPath = async () => {
     if (!electron) return;
     try {
@@ -555,7 +540,43 @@ export function SendConvertPreparationModal({
     }
   };
 
-  const currentFile = localQueue[selectedFileIdx] || fileName;
+  const activeOutputPreview = activeMainTab === 'convert' ? null : outputPreview;
+  const currentFile = activeOutputPreview?.path
+    || localQueue[selectedFileIdx]
+    || (isConverting ? activeConvertingFile : '')
+    || '';
+  const handlePlayOutput = (item: { path: string; thumbnailPath?: string }) => {
+    const shouldPause = playingOutputPath === item.path;
+    setOutputPreview(item);
+    setOutputPlaybackRequest((request) => ({
+      id: request.id + 1,
+      path: item.path,
+      action: shouldPause ? 'pause' : 'play'
+    }));
+  };
+  const handleSelectOutput = (item: { path: string; thumbnailPath?: string }) => {
+    const shouldContinuePlayback = playingOutputPath !== null;
+    setOutputPreview(item);
+    if (shouldContinuePlayback) {
+      setOutputPlaybackRequest((request) => ({
+        id: request.id + 1,
+        path: item.path,
+        action: 'play'
+      }));
+    }
+  };
+  const handlePreviewStep = (direction: -1 | 1) => {
+    const outputs = activeMainTab === 'video_output'
+      ? convertedVideos
+      : activeMainTab === 'audio_output' ? convertedAudios : null;
+    if (!outputs) {
+      setSelectedFileIdx((index) => Math.max(0, Math.min(localQueue.length - 1, index + direction)));
+      return;
+    }
+    const currentIndex = outputs.findIndex((item) => item.path === currentFile);
+    const next = outputs[Math.max(0, Math.min(outputs.length - 1, currentIndex + direction))];
+    if (next) handleSelectOutput({ path: next.path, thumbnailPath: next.thumbnailPath });
+  };
 
   // Toggle media type on a card (Video <-> Audio) with immediate localStorage persistence
   const toggleMediaType = (fPath: string) => {
@@ -886,12 +907,13 @@ export function SendConvertPreparationModal({
       {/* ─── 1. TOP TITLEBAR (Converter Header with Window Controls) ─── */}
       <ConverterHeader
         queueCount={localQueue.length}
+        showDone={activeMainTab === 'convert' && localQueue.length > 0}
         isExpanded={isExpanded}
         useHwAccel={useHwAccel}
-        onToggleExpand={() => setIsExpanded(prev => !prev)}
+        onToggleExpand={handleToggleExpand}
         onMinimize={handleMinimizeModal}
-        onBack={handleDone}
-        onClose={isConverting ? handleMinimizeModal : (onClose || handleDone)}
+        onBack={isConverting ? handleMinimizeModal : (onClose || onBack || (() => {}))}
+        onClose={isConverting ? handleMinimizeModal : (onClose || onBack || (() => {}))}
       />
 
       {/* Phase G: speak up before starting rather than failing during.
@@ -1003,6 +1025,10 @@ export function SendConvertPreparationModal({
               streamingPort={streamingPort}
               onChangeOutputPath={handleChangeVideoOutputPath}
               onDirectSend={handleDirectSend}
+              onPlayMedia={handlePlayOutput}
+              onSelectMedia={handleSelectOutput}
+              selectedPath={outputPreview?.path}
+              playingPath={playingOutputPath}
               onItemsDeleted={handleOutputFilesDeleted}
             />
           ) : (
@@ -1013,6 +1039,10 @@ export function SendConvertPreparationModal({
               streamingPort={streamingPort}
               onChangeOutputPath={handleChangeAudioOutputPath}
               onDirectSend={handleDirectSend}
+              onPlayMedia={handlePlayOutput}
+              onSelectMedia={handleSelectOutput}
+              selectedPath={outputPreview?.path}
+              playingPath={playingOutputPath}
               onItemsDeleted={handleOutputFilesDeleted}
             />
           )}
@@ -1031,13 +1061,21 @@ export function SendConvertPreparationModal({
           {/* Preview Monitor */}
           <PreviewMonitor
             currentFile={currentFile}
+            thumbnailPath={activeOutputPreview?.path === currentFile ? activeOutputPreview.thumbnailPath : undefined}
+            playbackRequest={outputPlaybackRequest}
             streamingPort={streamingPort}
             appPlayerState={appPlayerState}
+            onPlaybackStateChange={(path, playing) => {
+              setPlayingOutputPath((current) => {
+                if (playing) return path;
+                return current === path ? null : current;
+              });
+            }}
             onPrevFile={() => {
-              setSelectedFileIdx(prev => Math.max(0, prev - 1));
+              handlePreviewStep(-1);
             }}
             onNextFile={() => {
-              setSelectedFileIdx(prev => Math.min(localQueue.length - 1, prev + 1));
+              handlePreviewStep(1);
             }}
             isMinimized={isMinimized}
           />
