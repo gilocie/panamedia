@@ -14,20 +14,15 @@ const path = require('path');
 const os = require('os');
 const { ipcMain, app } = require('electron');
 
-/** Documents\Panamedia, the root of every folder this app owns. */
-function getPanamediaRoot() {
+/** Physical location backing the Sendtray destination. */
+function getSendtrayRootDir() {
   let base;
   try {
     base = app.getPath('documents');
   } catch (e) {
     base = path.join(os.homedir(), 'Documents');
   }
-  return path.join(base, 'Panamedia');
-}
-
-/** Physical location backing the Sendtray destination. */
-function getSendtrayRootDir() {
-  return path.join(getPanamediaRoot(), 'Sendtray');
+  return path.join(base, 'Panamedia', 'Sendtray');
 }
 
 /** Picks a non-colliding name so an existing export is never overwritten. */
@@ -80,30 +75,6 @@ function register() {
     }
   });
 
-  /**
-   * Resolves the directory a conversion of the given kind should be written to,
-   * creating it if needed.
-   *
-   * The UI stores the user's chosen location per kind in localStorage, which the
-   * main process cannot read. It is therefore passed in on every call, and this
-   * falls back to the default under Documents\Panamedia when it is absent.
-   */
-  ipcMain.handle('resolve-output-dir', async (_event, payload = {}) => {
-    const { kind, dirPath } = payload || {};
-    try {
-      const base = getPanamediaRoot();
-      const fallback = kind === 'audio'
-        ? path.join(base, 'Audio Output')
-        : path.join(base, 'Video Output');
-      const target = (dirPath && typeof dirPath === 'string') ? dirPath : fallback;
-      await fs.promises.mkdir(target, { recursive: true });
-      return { success: true, dir: target };
-    } catch (err) {
-      console.error('[resolve-output-dir] error:', err);
-      return { success: false, error: err.message };
-    }
-  });
-
   ipcMain.handle('get-sendtray-dir', async () => {
     try {
       await fs.promises.mkdir(getSendtrayRootDir(), { recursive: true });
@@ -114,4 +85,4 @@ function register() {
   });
 }
 
-module.exports = { register, getSendtrayRootDir, getPanamediaRoot };
+module.exports = { register, getSendtrayRootDir };
