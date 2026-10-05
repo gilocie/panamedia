@@ -11,6 +11,7 @@ import {
   addToQueue,
   removeFromQueue,
   clearQueue,
+  isInQueue,
   mapWithConcurrency,
   conversionConcurrency
 } from './panamedia/converterQueue';
@@ -60,13 +61,21 @@ export function SendToFlashModal({
   const [copyProgress, setCopyProgress] = useState(0);
   const [currentFileIndex, setCurrentFileIndex] = useState(0);
   const [errorMsg, setErrorMsg] = useState('');
-  const isDirectConverter = Boolean((window as any).__openConverterProDirect);
-  const [activeSection, setActiveSection] = useState<'main' | 'prepare' | 'drives' | 'sendtray_progress' | 'sendtray_destination'>(() => {
-    if ((window as any).__openConverterProDirect) {
-      return 'prepare';
-    }
-    return 'main';
-  });
+  // Opening the converter from the player header lands on the preparation screen
+  // directly, skipping the send/copy menu. That intent used to travel as a
+  // window flag set by the header button, but the flag was also the thing that
+  // added the playing file to the queue -- so "open the converter" and "add my
+  // current media" were welded into one action. They are separate now: the
+  // header asks for the preparation screen, and the queue is left alone.
+  //
+  // The flag is read once, here, at mount, and consumed immediately.
+  const openedFromPlayer = Boolean((window as any).__openConverterProOpen);
+  if ((window as any).__openConverterProOpen) {
+    (window as any).__openConverterProOpen = false;
+  }
+  const [activeSection, setActiveSection] = useState<
+    'main' | 'prepare' | 'drives' | 'sendtray_progress' | 'sendtray_destination'
+  >(() => (openedFromPlayer ? 'prepare' : 'main'));
   const [pendingAction, setPendingAction] = useState<'drive' | 'sendtray' | 'convert'>('convert');
   const [destinationFolders, setDestinationFolders] = useState<SendtrayFolder[]>(() => getSendtrayFolders());
   const [isCreatingDestFolder, setIsCreatingDestFolder] = useState(false);
@@ -78,31 +87,24 @@ export function SendToFlashModal({
     keepOriginal: true
   });
 
-  // Queue state lives in converterQueue (backed by `player_sendTray`, the same
-  // store the player's sendTrayItems uses). This used to seed itself from
-  // `filePath`, which made the media currently playing an implicit queue member
-  // and therefore impossible to remove.
+  // Queue state lives in converterQueue (backed by `player_sendTray`). Nothing
+  // seeds it from `filePath`: the media currently playing is not a queue member,
+  // which is what previously made it impossible to remove.
   const [queuedFiles, setQueuedFiles] = useState<string[]>(() => getQueue());
   useEffect(() => subscribeQueue(setQueuedFiles), []);
 
-  // Opening the converter from the player header icon means "convert what I'm
-  // watching". That intent arrives as __openConverterProDirect, so the current
-  // file is added explicitly, once, de-duplicated. It used to be an
-  // unconditional fallback to `filePath`, which made the playing file a
-  // permanent queue member that could never be removed.
-  const directAddDone = useRef(false);
-  useEffect(() => {
-    if (directAddDone.current) return;
-    if (!(window as any).__openConverterProDirect) return;
-    if (!filePath || filePath === 'media') return;
-    directAddDone.current = true;
-    (window as any).__openConverterProDirect = false;
-    const { added } = addToQueue([filePath]);
-    if (added.length > 0) {
-      console.log('[Converter] added currently playing media to queue');
-      if (setSendTrayItems) setSendTrayItems(getQueue());
-    }
-  }, [filePath]);
+  // The converter icon in the player header OPENS the converter. It does not add
+  // anything to the queue.
+  //
+  // Adding the playing file here was an interpretation of what the button
+  // meant, and it was the wrong one: a button labelled "converter" reads as
+  // "show me the converter", and quietly changing the queue as a side effect
+  // meant the queue was never what the user last left it as. It also made the
+  // current media undeletable, since it was re-added on the next open.
+  //
+  // To convert what is playing, add it explicitly from the queue. `filePath`
+  // is no longer read here at all, so nothing about the player can reach the
+  // queue without an explicit add.
   const [isMinimized, setIsMinimized] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const isPausedRef = useRef(false);
@@ -122,20 +124,25 @@ export function SendToFlashModal({
   const [isConvertingBatch, setIsConvertingBatch] = useState(false);
 
   useEffect(() => {
-    if ((window as any).__openConverterProDirect) {
+    // The IPC route into the preparation screen (tray button, restore-from-taskbar).
+    // This only navigates; it never adds to the queue.
+    if ((window as any).__openConverterProOpen) {
       setActiveSection('prepare');
     }
   }, []);
 
-  useEffect(() => {
-    if (filePath && filePath !== 'media') {
-      setQueuedFiles(prev => {
-        const next = Array.from(new Set([...prev, filePath]));
-        localStorage.setItem('converter_queue', JSON.stringify(next));
-        return next;
-      });
-    }
-  }, [filePath]);
+  // The media currently playing is NOT a queue member.
+  //
+  // This effect used to add `filePath` on every change, writing straight to
+  // localStorage and bypassing converterQueue entirely. Two things went wrong:
+  // it added the playing file even when the converter was opened from the tray
+  // rather than from the player, and because it re-ran on every filePath
+  // change it resurrected the entry immediately after the user removed it --
+  // which is why the currently watching media could not be cleared.
+  //
+  // Opening from the player header says "convert what I'm watching", and that
+  // is handled explicitly and once by the directAddDone effect above. Opening
+  // any other way means the user wants the queue they already have.
 
   useEffect(() => {
     if (!electron) return;
@@ -143,6 +150,8 @@ export function SendToFlashModal({
     // carried into the cleanup closure below, so `electron` would still be
     // `ElectronBridge | null` there.
     const bridge = electron;
+    // Navigation only. Neither of these adds anything to the queue: the
+    // header button and the tray button both mean "show me the converter".
     const handleRestore = () => {
       setActiveSection('prepare');
       setIsMinimized(false);
@@ -213,25 +222,21 @@ export function SendToFlashModal({
   };
 
   const handleRemoveFromQueue = (indexToRemove: number, targetPath?: string) => {
-    if (targetPath && targetPath.startsWith('__SYNC_ALL__:')) {
-      try {
-        const fullQueue = JSON.parse(targetPath.replace('__SYNC_ALL__:', ''));
-        if (Array.isArray(fullQueue)) {
-          setQueuedFiles(fullQueue);
-          if (setSendTrayItems) setSendTrayItems(fullQueue);
-          localStorage.setItem('converter_queue', JSON.stringify(fullQueue));
-          return;
-        }
-      } catch (e) {}
-    }
-
+    // There used to be a branch here for a `__SYNC_ALL__:<json>` sentinel that
+    // overwrote the whole queue and wrote it straight to localStorage. Nothing
+    // in the codebase ever produced that sentinel, so it was a second writer
+    // that only existed to disagree with converterQueue. Removed.
     const doomed = targetPath
       ? [targetPath]
       : queuedFiles.filter((_, idx) => idx === indexToRemove);
-    removeFromQueue(doomed);
+    const next = removeFromQueue(doomed);
 
+    // Mirror the queue that actually survived, rather than blanking the
+    // sidebar. Setting it to [] here left the player's own list disagreeing
+    // with storage, and its next update restored entries the user had just
+    // deleted.
     if (setSendTrayItems) {
-      setSendTrayItems([]);
+      setSendTrayItems(next);
     }
   };
 
@@ -790,15 +795,12 @@ export function SendToFlashModal({
     }
   } : null;
 
+  // Read through converterQueue rather than raw localStorage: this used to check
+// the legacy `converter_queue` key with `Array.includes`, which both missed
+// entries once the paths differed only in slashes/case, and reported membership
+// for files nothing had ever added to the queue.
   const isAlreadyInConverterQueue = Boolean(
-    filePath && filePath !== 'media' && (() => {
-      try {
-        const q = JSON.parse(localStorage.getItem('converter_queue') || '[]');
-        return Array.isArray(q) && q.includes(filePath);
-      } catch (e) {
-        return false;
-      }
-    })()
+    filePath && filePath !== 'media' && isInQueue(filePath)
   );
 
   const convertOption = {
@@ -836,7 +838,7 @@ export function SendToFlashModal({
       setActiveSection('prepare');
     } else {
       setIsMinimized(false);
-      (window as any).__openConverterProDirect = false;
+      (window as any).__openConverterProOpen = false;
       onClose();
     }
   }, [isFromConverter, onClose]);
@@ -998,8 +1000,10 @@ export function SendToFlashModal({
           onMinimizeChange={setIsMinimized}
           onBack={() => {
             setIsMinimized(false);
-            if (isDirectConverter) {
-              (window as any).__openConverterProDirect = false;
+            // Arrived here from the player header, so back means close rather
+            // than drop back to the send/copy menu.
+            if (openedFromPlayer) {
+              (window as any).__openConverterProOpen = false;
               onClose();
             } else {
               setActiveSection('main');
@@ -1007,7 +1011,7 @@ export function SendToFlashModal({
           }}
           onClose={() => {
             setIsMinimized(false);
-            (window as any).__openConverterProDirect = false;
+            (window as any).__openConverterProOpen = false;
             onClose();
           }}
         />

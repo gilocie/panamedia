@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Sparkles, Loader2, CheckCircle2, AlertCircle, CopyPlus } from 'lucide-react';
 import { electron } from './types';
+import { getQueue, subscribeQueue } from './converterQueue';
 
 interface PlayerTitleBarProps {
   currentTitle: string;
@@ -20,19 +21,27 @@ export function PlayerTitleBar({ currentTitle, onHelpClick, onOpenConverter }: P
     statusText?: string;
     useHwAccel?: boolean;
   } | null>(() => {
-    try {
-      const q = JSON.parse(localStorage.getItem('converter_queue') || '[]');
-      if (Array.isArray(q) && q.length > 0) {
-        return {
-          minimized: true,
-          queueCount: q.length,
-          currentFile: (q[0] || '').split(/[/\\]/).pop() || '',
-          statusText: q.length > 1 ? `${q.length} files queued` : 'Ready to Convert',
-        };
-      }
-    } catch (e) {}
+    // Read through converterQueue, not the legacy `converter_queue` key. The
+    // two keys are kept in step by the module, but only for entries that exist;
+    // once the queue was cleared the key is removed entirely, and a stale copy
+    // in this component is what made the title bar show a queue that no longer
+    // existed.
+    const q = getQueue();
+    if (q.length > 0) {
+      return {
+        minimized: true,
+        queueCount: q.length,
+        currentFile: (q[0] || '').split(/[/\\]/).pop() || '',
+        statusText: q.length > 1 ? `${q.length} files queued` : 'Ready to Convert',
+      };
+    }
     return null;
   });
+
+  // Track the live queue so the badge disappears the moment the user clears it,
+  // rather than only on the next mount.
+  const [queueCount, setQueueCount] = useState<number>(() => getQueue().length);
+  useEffect(() => subscribeQueue((items) => setQueueCount(items.length)), []);
 
   useEffect(() => {
     if (!electron) return;
@@ -52,13 +61,10 @@ export function PlayerTitleBar({ currentTitle, onHelpClick, onOpenConverter }: P
     if (electron) electron.ipcRenderer.send('converter-open-request');
   };
 
-  let persistentQueueCount = 0;
-  try {
-    const q = JSON.parse(localStorage.getItem('converter_queue') || '[]');
-    if (Array.isArray(q)) persistentQueueCount = q.length;
-  } catch (e) {}
-
-  const activeQueueCount = converterState?.queueCount ?? persistentQueueCount;
+  // converterQueue is the authority. `converterState.queueCount` is only a
+  // snapshot the modal last published over IPC, so preferring it left the badge
+  // showing a count for a queue the user had already emptied.
+  const activeQueueCount = queueCount;
   const hasActiveQueue = Boolean(
     (converterState && (converterState.converting || (converterState.progress && converterState.progress > 0))) ||
     activeQueueCount > 0

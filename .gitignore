@@ -26,6 +26,18 @@ dist-installer/
 installer-ui/*.exe
 *.exe
 
+# FFmpeg runtime DLLs.
+#
+# The engine links the FFmpeg *shared* libraries, so avcodec/avformat/... DLLs must
+# sit next to panamedia-core.exe at run time. They are third-party binaries
+# fetched per machine, not source, and they are large -- so they are copied in
+# after the build and never committed. Only the .exe is tracked.
+src-cpp/build/
+ffmpeg-dev/
+
+# CMake scratch trees other than the default `build` one.
+src-cpp/build-*/
+
 # Local environment and machine-specific files
 *.local
 .env

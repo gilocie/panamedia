@@ -10,7 +10,6 @@ import { electron } from './panamedia/types';
 import {
   getQueue,
   subscribeQueue,
-  addToQueue,
   removeFromQueue,
   clearQueue,
   normalizeQueuePath
@@ -151,13 +150,16 @@ export function SendConvertPreparationModal({
     date: string;
   }>>([]);
 
-  // Additions now flow through converterQueue only. This effect used to merge the
-  // `queuedFiles` prop back in and re-persist the result, which resurrected
-  // anything the user had just removed.
-  useEffect(() => {
-    if (!queuedFiles || queuedFiles.length === 0) return;
-    addToQueue(queuedFiles);
-  }, [queuedFiles]);
+  // The `queuedFiles` prop is deliberately NOT merged back into the queue here.
+  //
+  // This effect used to do exactly that, and it is why "remove all" appeared
+  // not to work: the parent still held the pre-removal list for a render, this
+  // effect wrote it straight back to storage, and the freshly cleared queue was
+  // repopulated behind the user's back. The same happened one card at a time.
+  //
+  // converterQueue is now the only writer. If something genuinely needs adding,
+  // it calls addToQueue itself -- which is what the Add button and the player
+  // header do.
 
   // Format Presets - persisted across sessions & reboots
   const [selectedVideoFmt, setSelectedVideoFmt] = useState<string>(() => {
@@ -294,7 +296,10 @@ export function SendConvertPreparationModal({
   };
 
   const handleDone = () => {
-    localStorage.setItem('converter_queue', JSON.stringify(localQueue));
+    // The queue is NOT written here. converterQueue already persisted it at the
+    // moment of the change, and by the time this runs the local copy may be
+    // stale -- dismissing the modal could therefore put back an entry the user
+    // had just deleted, or resurrect the whole queue after "remove all".
     localStorage.setItem('converter_media_types', JSON.stringify(mediaTypes));
     
     // If conversion is actively running, never unmount or kill the conversion process!
