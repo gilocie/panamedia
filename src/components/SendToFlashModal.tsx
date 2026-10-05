@@ -88,6 +88,61 @@ export function SendToFlashModal({
     keepOriginal: true
   });
 
+  /**
+   * The settings the preparation screen last applied.
+   *
+   * A per-card convert used to invent its own settings -- hard-coded mp4/1080p
+   * or mp3/320k, and it read the card's type from an `isVideoFile` guess rather
+   * than the toggle the user had actually flipped. The result was that the same
+   * file could convert one way from its card and another way from the footer,
+   * with nothing on screen saying which. These refs let the card use the real
+   * choices without re-reading storage on every click.
+   */
+  const perFileOptionsRef = useRef<NonNullable<SendConvertOptions['perFileOptions']>>({});
+  const pendingOptionsRef = useRef<Partial<SendConvertOptions> | null>(null);
+
+  /**
+   * The folders the Output tabs list: Documents\Panamedia\Video Output and
+   * Audio Output.
+   *
+   * Fetched once here so a per-card convert can write straight to the folder the
+   * user is looking at, rather than beside the source file where nothing would
+   * find it. The preparation screen owns the same two paths and lets the user
+   * change them, so localStorage is consulted on every read and these are only
+   * the fallback for a first run before the folders have been created.
+   */
+  const videoOutputDirRef = useRef<string>('');
+  const audioOutputDirRef = useRef<string>('');
+
+  /**
+   * Directory a finished conversion of the given kind should be written to.
+   *
+   * The user's chosen location lives in localStorage, which the main process
+   * cannot read, so it is passed across; the main process creates the folder if
+   * needed. Returns '' on failure, in which case callers leave `targetDir`
+   * undefined and the engine falls back to writing beside the source.
+   */
+  const resolveOutputDir = async (kind: 'video' | 'audio'): Promise<string> => {
+    const key = kind === 'audio' ? 'panamedia_audio_output_dir' : 'panamedia_video_output_dir';
+    const dirPath = localStorage.getItem(key)
+      || (kind === 'audio' ? audioOutputDirRef.current : videoOutputDirRef.current);
+    if (!electron) return dirPath || '';
+    try {
+      const r = await electron.ipcRenderer.invoke('resolve-output-dir', { kind, dirPath });
+      return r && r.success && r.dir ? r.dir : '';
+    } catch (e) {
+      return '';
+    }
+  };
+
+  useEffect(() => {
+    if (!electron) return;
+    electron.ipcRenderer.invoke('get-converter-output-paths').then((paths: any) => {
+      if (paths?.videoOutputDir) videoOutputDirRef.current = paths.videoOutputDir;
+      if (paths?.audioOutputDir) audioOutputDirRef.current = paths.audioOutputDir;
+    }).catch(() => {});
+  }, []);
+
   // Queue state lives in converterQueue, under its own `converter_queue` key.
   // It is deliberately separate from the sendtray's `player_sendTray`: files
   // staged for sending are not work waiting to be converted, and sharing the key
@@ -477,6 +532,11 @@ export function SendToFlashModal({
 
   const handleProceedFromPreparation = async (options: SendConvertOptions) => {
     setSendConvertOptions(options);
+    // Kept so a later per-card convert uses the same settings the user just
+    // chose, instead of the hard-coded ones it used before.
+    pendingOptionsRef.current = options as Partial<SendConvertOptions>;
+    perFileOptionsRef.current = options.perFileOptions || {};
+
     const dest = options.exportDestination || (pendingAction === 'drive' ? 'drive' : 'sendtray');
 
     if (dest === 'drive' && !options.exportDriveLetter) {
@@ -585,14 +645,25 @@ export function SendToFlashModal({
             }));
             removeFromQueue([target]);
           } else {
-            // Export to Sendtray or custom folder. Passing the destination
-            // lets the engine write straight there instead of writing
-            // beside the source and moving the file afterwards.
-            const targetDir = dest === 'folder' ? options.exportCustomPath : undefined;
+            // This branch is the not-a-drive case, so the target directory is
+            // always resolved and passed through: the engine then writes
+            // straight to the destination instead of writing beside the source
+            // and relocating afterwards.
+            let targetDir: string | undefined;
+            if (dest === 'folder') {
+              targetDir = options.exportCustomPath;
+            } else {
+              // Default: the folder matching what this file became. Passing
+              // 'folder' rather than 'sendtray' is what makes the engine honour
+              // the directory; the sendtray is a staging list, not a location.
+              const kind = classifyOutput(itemOpt.mode, target, target);
+              targetDir = (await resolveOutputDir(kind)) || undefined;
+            }
+
             const res = await bridge.ipcRenderer.invoke('convert-media-file', {
               filePath: target,
               targetDir,
-              destination: dest === 'folder' ? 'folder' : 'sendtray',
+              destination: 'folder',
               options: {
                 mode: itemOpt.mode,
                 format: itemOpt.format,
@@ -612,12 +683,16 @@ export function SendToFlashModal({
                 ? res.outputs
                 : [res.outputPath];
               let finalPath = res.outputPath;
-              if (!res.outputs) {
+              if (!res.outputs && !targetDir) {
+                // Only when no directory was given could the engine have written
+                // beside the source. With a targetDir it already wrote to the
+                // destination, and moving it again would push it somewhere the
+                // user did not ask for.
                 try {
                   const moved = await bridge.ipcRenderer.invoke('move-converted-output', {
                     sourcePath: res.outputPath,
-                    destination: dest,
-                    destPath: options.exportCustomPath
+                    destination: 'folder',
+                    destPath: targetDir
                   });
                   if (moved && moved.success && moved.path) {
                     finalPath = moved.path;
@@ -630,14 +705,15 @@ export function SendToFlashModal({
               }
 
               if (dest === 'sendtray') {
+                // Staging for a later copy-out. The file itself already lives in
+                // its output folder; this only records that the user asked for
+                // it to be sent, and does not move it.
                 outputs.forEach(seg => handleMoveFileToSendtray(seg, options.targetFolderId));
               }
 
-              // Record the finished files against the side they belong to.
-              // The output tabs read a directory scan, and the sendtray -- the
-              // default destination -- is not that directory, so without this a
-              // completed conversion was simply never visible anywhere.
-              //
+              // Record the finished files against the side they belong to, so a
+              // conversion that landed in a folder the scan cannot reach is
+              // still listed.
               // Classified by the mode used for *this* file, not by the source
               // extension: extracting audio from an .mp4 is the common case, and
               // it produced an audio file that the video tab then claimed.
@@ -746,38 +822,82 @@ export function SendToFlashModal({
 
   const handleConvertSingleFile = async (targetFile: string) => {
     if (!electron || !targetFile) return;
-    setIsConvertingBatch(true);
-    setCopyStatus('copying');
+
+    // Reads the card's own state instead of assuming a video, and takes the
+    // format and quality the user picked in the dock rather than hard-coding
+    // mp4/1080p/mp3/320k. The hard-coded values are why a per-card convert could
+    // produce something different from what the rest of the screen said.
+    const itemOpt = perFileOptionsRef.current[targetFile] || {};
+    const savedType = (() => {
+      try {
+        return JSON.parse(localStorage.getItem('converter_media_types') || '{}')[targetFile];
+      } catch (e) {
+        return undefined;
+      }
+    })();
+    const mType = savedType || (isVideoFile(targetFile) ? 'video' : 'audio');
+    const isAudio = mType === 'audio';
+
+    const settings = pendingOptionsRef.current || {};
+    const format = itemOpt.format || settings.format
+      || (isAudio ? 'mp3' : 'mp4');
+    const quality = itemOpt.bitrate || settings.bitrate
+      || (isAudio ? '320k' : '1080p');
+
+    // Where the result belongs, so it lands in the folder the Output tabs
+    // actually list rather than beside the source file.
+    const targetDir = await resolveOutputDir(isAudio ? 'audio' : 'video') || undefined;
+
     setFileConversionMap(prev => ({
       ...prev,
       [targetFile]: { status: 'converting', progress: 0.05 }
     }));
     try {
-      const isVid = isVideoFile(targetFile);
-      let mType = 'video';
-      try {
-        const saved = JSON.parse(localStorage.getItem('converter_media_types') || '{}');
-        mType = saved[targetFile] || (isVid ? 'video' : 'audio');
-      } catch (e) {
-        mType = isVid ? 'video' : 'audio';
-      }
       const res = await electron.ipcRenderer.invoke('convert-media-file', {
         filePath: targetFile,
+        targetDir,
+        destination: 'folder',
         options: {
-          mode: mType === 'video' ? 'convert_video' : 'extract_audio',
-          format: mType === 'video' ? 'mp4' : 'mp3',
-          bitrate: mType === 'video' ? '1080p' : '320k'
+          mode: isAudio ? 'extract_audio' : 'convert_video',
+          format,
+          bitrate: quality,
+          audioBitrate: settings.audioBitrate,
+          highQuality: settings.highQuality,
+          tools: itemOpt.tools
         }
       });
-      if (res.success) {
+
+      if (res.success && res.outputPath) {
+        // Split writes a numbered series that already sits in the destination,
+        // so each segment is registered and nothing needs moving. A single
+        // output is relocated out of the source folder.
+        const outputs = res.outputs && res.outputs.length ? res.outputs : [res.outputPath];
+        let finalPath = res.outputPath;
+        if (!res.outputs && !targetDir) {
+          const moved = await electron.ipcRenderer.invoke('move-converted-output', {
+            sourcePath: res.outputPath,
+            destination: 'folder',
+            destPath: targetDir
+          }).catch(() => null);
+          if (moved && moved.success && moved.path) finalPath = moved.path;
+        }
+
+        registerOutputs(outputs, isAudio ? 'audio' : 'video');
+
         setFileConversionMap(prev => ({
           ...prev,
-          [targetFile]: { status: 'completed', progress: 1.0, outputPath: res.outputPath }
+          [targetFile]: {
+            status: 'completed', progress: 1.0, outputPath: finalPath,
+            segments: res.segments
+          }
         }));
+
+        // Same contract as the batch path: a finished job leaves the queue.
+        removeFromQueue([targetFile]);
       } else {
         setFileConversionMap(prev => ({
           ...prev,
-          [targetFile]: { status: 'failed', progress: 0, error: res.error }
+          [targetFile]: { status: 'failed', progress: 0, error: res.error || 'Conversion failed' }
         }));
       }
     } catch (err: any) {
@@ -785,8 +905,6 @@ export function SendToFlashModal({
         ...prev,
         [targetFile]: { status: 'failed', progress: 0, error: err?.message || 'Error' }
       }));
-    } finally {
-      setIsConvertingBatch(false);
     }
   };
 
