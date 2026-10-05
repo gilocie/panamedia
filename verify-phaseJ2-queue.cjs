@@ -41,6 +41,12 @@ const read = (rel) => {
 };
 
 let pass = 0, fail = 0;
+// Comments often name a setter in order to explain why it is NOT called, so
+// checks that assert "does not call X" have to look at code only.
+const stripComments = (s) => String(s)
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+
 const check = (name, ok, detail) => {
   if (ok) { pass++; console.log('  PASS  ' + name); }
   else { fail++; console.log('  FAIL  ' + name + (detail ? '  -> ' + detail : '')); }
@@ -167,9 +173,9 @@ check('Convert filters out the placeholder and empty paths',
   /filter\(\s*\(f\)\s*=>\s*f\s*&&\s*f\s*!==\s*'media'\s*\)/.test(hcBody));
 check('Convert bails out when there is nothing to queue',
   /usable\.length\s*===\s*0\s*\)\s*return/.test(hcBody));
-check('Convert mirrors the grown queue to the player sidebar',
-  /setSendTrayItems\(\s*getQueue\(\)\s*\)/.test(hcBody),
-  'the player keeps its own copy and would otherwise show a stale count');
+check('Convert does NOT push the queue into the player sendtray',
+  !/setSendTrayItems/.test(stripComments(hcBody)),
+  'the queue and the sendtray are separate lists; mirroring made converted media reappear in both');
 check('Convert still opens the preparation screen',
   /setActiveSection\(\s*`prepare`\s*\)/.test(hcBody) || /setActiveSection\(\s*'prepare'\s*\)/.test(hcBody));
 check('Convert sets the pending action',
@@ -185,9 +191,9 @@ const enqueue = /const\s+enqueue\s*=\s*\(paths:\s*string\[\]\)\s*=>\s*\{([\s\S]*
 check('the Add handler was found', !!enqueue);
 check('Add ignores an empty selection',
   /if\s*\(!paths\.length\)\s*return/.test(enqueue ? enqueue[1] : ''));
-check('Add mirrors only the newly added entries to the sidebar',
-  /setSendTrayItems\(\s*added\s*\)/.test(enqueue ? enqueue[1] : ''),
-  'the player list is the full queue; mirroring a partial list loses entries');
+check('Add does NOT push into the player sendtray',
+  !/setSendTrayItems/.test(stripComments(enqueue ? enqueue[1] : '')),
+  'queued-for-conversion is not staged-for-sending; mirroring made files appear in both');
 check('Add does not write localStorage directly',
   !/localStorage/.test(enqueue ? enqueue[1] : ''));
 
@@ -204,7 +210,39 @@ writers.forEach(([name, n]) => {
 });
 
 check('converterQueue is where the key is written',
-  /localStorage\.setItem\(STORAGE_KEY/.test(queue));
+  /localStorage\.setItem\(\s*STORAGE_KEY/.test(queue));
+
+// ── the queue must not be the sendtray ─────────────────────────────────────
+// These two were one storage key. Sharing it meant the converter displayed
+// whatever was staged for sending, and a conversion destined for the sendtray
+// put its own output straight back into the queue it had just left.
+section('converter queue is separate from the sendtray');
+check('the queue key is NOT the sendtray key',
+  !/STORAGE_KEY\s*=\s*['"`]player_sendTray['"`]/.test(queue),
+  'sharing player_sendTray merged two different lists into one');
+check('the queue persists under its own key',
+  /STORAGE_KEY\s*=\s*['"`]converter_queue['"`]/.test(queue));
+check('the module never writes the sendtray key',
+  !/setItem\(\s*['"`]player_sendTray['"`]/.test(queue) &&
+  !/removeItem\(\s*['"`]player_sendTray['"`]/.test(queue));
+// Cross-file: only the player may persist the sendtray. Anything else writing it
+// would re-merge the two lists.
+const sendTrayKeyWriters = [];
+(function walk(dir) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) { walk(p); continue; }
+    if (!/\.(ts|tsx|cjs|js)$/.test(e.name)) continue;
+    const src = fs.readFileSync(p, 'utf8');
+    if (/setItem\(\s*[`'"]player_sendTray[`'"]/.test(src)) {
+      sendTrayKeyWriters.push(path.relative(ROOT, p));
+    }
+  }
+})(path.join(ROOT, 'src'));
+
+check('only the player persists the sendtray key',
+  sendTrayKeyWriters.every(f => /panamediaPlayer\.tsx$/.test(f)),
+  'written by: ' + (sendTrayKeyWriters.join(', ') || 'nothing'));
 
 // ── no resurrect-the-prop effects ─────────────────────────────────────────
 section('no effect writes a stale copy of the list back');
@@ -219,8 +257,8 @@ check('SendToFlashModal does not re-add filePath',
 section('clearing reaches storage');
 check('clearQueue writes an empty list',
   /function clearQueue[\s\S]{0,200}?writeStorage\(\s*\[\s*\]\s*\)/.test(queue));
-check('clearQueue removes the legacy key too',
-  /removeItem\(\s*['"]converter_queue['"]/.test(queue));
+check('clearQueue removes the key rather than leaving an empty array',
+  /removeItem\(\s*STORAGE_KEY\s*\)/.test(queue));
 
 // The removals must return the surviving list so callers can mirror it,
 // rather than blanking their own copy.

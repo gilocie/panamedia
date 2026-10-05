@@ -88,9 +88,13 @@ export function SendToFlashModal({
     keepOriginal: true
   });
 
-  // Queue state lives in converterQueue (backed by `player_sendTray`). Nothing
-  // seeds it from `filePath`: the media currently playing is not a queue member,
-  // which is what previously made it impossible to remove.
+  // Queue state lives in converterQueue, under its own `converter_queue` key.
+  // It is deliberately separate from the sendtray's `player_sendTray`: files
+  // staged for sending are not work waiting to be converted, and sharing the key
+  // made each list show the other's contents.
+  //
+  // Nothing seeds it from `filePath` either: the media currently playing is not a
+  // queue member, which is what previously made it impossible to remove.
   const [queuedFiles, setQueuedFiles] = useState<string[]>(() => getQueue());
   useEffect(() => subscribeQueue(setQueuedFiles), []);
 
@@ -184,6 +188,12 @@ export function SendToFlashModal({
   useEffect(() => {
     // The IPC route into the preparation screen (tray button, restore-from-taskbar).
     // This only navigates; it never adds to the queue.
+    //
+    // `directSendFiles` was the other route by which sendtray contents reached
+    // the converter: it overrode the real queue for as long as the sendtray was
+    // non-empty, so opening the converter showed staged-for-sending files as if
+    // they were work waiting to be converted. Removed -- if the user wants a
+    // sendtray file converted, the Convert tile adds it explicitly.
     if ((window as any).__openConverterProOpen) {
       setActiveSection('prepare');
     }
@@ -260,7 +270,9 @@ export function SendToFlashModal({
       if (duplicates.length > 0) {
         console.log(`[Converter] already queued, skipped: ${duplicates.length} file(s)`);
       }
-      if (setSendTrayItems) setSendTrayItems(added);
+      // Deliberately does not touch `setSendTrayItems`. Queued-for-conversion
+      // and staged-for-sending are different intentions, and pushing converter
+      // additions into the sendtray made them show up in both lists at once.
       if (added.length > 0) setErrorMsg('');
     };
 
@@ -317,6 +329,9 @@ export function SendToFlashModal({
     }
   };
 
+  // Set only by the Output tabs' Direct Send button, i.e. the user explicitly
+  // asking to send specific already-converted files. It never picks up sendtray
+  // contents on its own.
   const [directSendFiles, setDirectSendFiles] = useState<string[] | null>(null);
   const [isFromConverter, setIsFromConverter] = useState(false);
 
@@ -916,10 +931,6 @@ export function SendToFlashModal({
     if (usable.length === 0) return;
 
     const { added, duplicates } = addToQueue(usable);
-    if (added.length > 0) {
-      // The queue grew, so any copy of it held elsewhere is now stale.
-      if (setSendTrayItems) setSendTrayItems(getQueue());
-    }
     if (added.length === 0 && duplicates.length > 0) {
       console.log('[Converter] already in queue, opening it');
     }

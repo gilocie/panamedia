@@ -1,5 +1,5 @@
 /**
- * Single source of truth for the converter / sendtray queue.
+ * Single source of truth for the converter queue.
  *
  * Previously three components each kept their own copy of the same list:
  *   - panamediaPlayer `sendTrayItems`  (persisted to `player_sendTray`)
@@ -14,9 +14,20 @@
  * This module owns the list. Every entry point goes through add/remove/clear,
  * entries are de-duplicated by normalised path, and subscribers are notified so
  * no component needs a private copy.
+ *
+ * ── Why this is not the sendtray ────────────────────────────────────────
+ * It used to persist to `player_sendTray`, the sendtray's own key, which made
+ * two different lists into one. The sendtray is a holding pen for files about
+ * to be written to a drive; this is work waiting to be re-encoded. Sharing the
+ * key meant the converter displayed whatever happened to be in the sendtray,
+ * and worse, a conversion whose destination was the sendtray put its own
+ * finished output straight back into the queue it had just come out of -- so
+ * the output reappeared as work still to do.
+ *
+ * `player_sendTray` stays the sendtray's, untouched here. Only explicit user
+ * actions add to this list.
  */
-
-const STORAGE_KEY = 'player_sendTray';
+const STORAGE_KEY = 'converter_queue';
 
 /** Canonical form used for identity comparisons: slashes unified, case-folded. */
 export function normalizeQueuePath(p: string): string {
@@ -33,14 +44,8 @@ function readStorage(): string[] {
 
 function writeStorage(items: string[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-  } catch (e) {}
-  // Keep the legacy key in step so older code paths cannot resurrect entries.
-  try {
-    localStorage.setItem('converter_queue', JSON.stringify(items));
-  } catch (e) {}
-  try {
-    if (items.length === 0) localStorage.removeItem('converter_queue');
+    if (items.length === 0) localStorage.removeItem(STORAGE_KEY);
+    else localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
   } catch (e) {}
 }
 
