@@ -386,7 +386,8 @@ npm run dist
 
 ## License
 
-Proprietary software developed by Panamedia. All rights reserved.
+Proprietary software developed by Go Save Site. All rights reserved.
+
 
 
 
