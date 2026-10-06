@@ -127,7 +127,7 @@ function isAdOrGifThumbnail(thumb) {
 // Throttled broadcast — prevents IPC flooding during rapid progress updates
 let broadcastTimer = null;
 let broadcastPending = false;
-const completionToastSent = new WeakSet();
+const completionToastSentKeys = new Set(); // dedup: 'filename|completedAt'
 
 function broadcast() {
   const main = getMainWindow();
@@ -138,8 +138,12 @@ function broadcast() {
 
 function notifyDownloadCompleted(task) {
   const main = getMainWindow();
-  if (!main || main.isDestroyed() || completionToastSent.has(task)) return;
-  completionToastSent.add(task);
+  if (!main || main.isDestroyed()) return;
+  // Deduplicate: same file completing within 10 seconds should only show one toast
+  const key = `${task.filename}|${task.completedAt || 0}`;
+  if (completionToastSentKeys.has(key)) return;
+  completionToastSentKeys.add(key);
+  setTimeout(() => completionToastSentKeys.delete(key), 10000);
   main.webContents.send('download-completed-toast', task.filename);
 }
 
@@ -396,8 +400,7 @@ function startDownload(taskId) {
         } catch (e) { }
       }
 
-      saveState();
-      broadcast();
+      saveState(); // saveState already calls broadcast()
 
       notifyDownloadCompleted(task);
     }).catch((err) => {
