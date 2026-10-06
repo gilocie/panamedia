@@ -42,7 +42,6 @@ const formatTrimTime = (value: number) => {
 };
 
 const ACCENT = '#38bdf8';
-const HOT = '#ec4899';
 
 /* Reference: convertor_pro_features_ui/cut_trim_studio/code.html
    Left = live monitor + transport dock, then a full-width timeline stage.
