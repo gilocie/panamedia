@@ -89,51 +89,33 @@ export function useUpdater(): UpdaterState {
       const startTime = Date.now();
       let foundVersion = APP_VERSION;
       let dlUrl = 'https://panamedia.lovable.app/api/public/download/windows';
-      let foundUpdate = false;
       let notes = '';
 
-      // Primary: Panamedia API
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 8000);
+      let apiRes: Response;
       try {
-        const ctrl = new AbortController();
-        const tid = setTimeout(() => ctrl.abort(), 8000);
-        const apiRes = await fetch('https://panamedia.lovable.app/api/public/latest/windows', { signal: ctrl.signal });
+        apiRes = await fetch('https://panamedia.lovable.app/api/public/latest/windows', { signal: ctrl.signal });
+      } finally {
         clearTimeout(tid);
-        if (apiRes.ok) {
-          const apiData = await apiRes.json();
-          if (apiData) {
-            const parsed = (apiData.version || '').replace(/^[vV]/, '').trim();
-            if (parsed) foundVersion = parsed;
-            dlUrl = apiData.download_url || apiData.url || dlUrl;
-            if (apiData.release_notes || apiData.notes) notes = apiData.release_notes || apiData.notes;
-            if (apiData.available === true || compareVersions(foundVersion, APP_VERSION) > 0) foundUpdate = true;
-          }
-        }
-      } catch { /* Panamedia API unavailable */ }
-
-      // Fallback: GitHub Releases
-      if (!foundUpdate) {
-        try {
-          const ctrl = new AbortController();
-          const tid = setTimeout(() => ctrl.abort(), 8000);
-          const ghRes = await fetch('https://api.github.com/repos/gilocie/panamedia/releases/latest', {
-            headers: { Accept: 'application/vnd.github.v3+json' },
-            signal: ctrl.signal
-          });
-          clearTimeout(tid);
-          if (ghRes.ok) {
-            const ghData = await ghRes.json();
-            if (ghData && (ghData.tag_name || ghData.name)) {
-              const parsed = (ghData.tag_name || ghData.name || '').replace(/^[vV]/, '').trim();
-              if (parsed) {
-                foundVersion = parsed;
-                dlUrl = ghData.html_url || dlUrl;
-                if (ghData.body) notes = ghData.body;
-                if (compareVersions(parsed, APP_VERSION) > 0) foundUpdate = true;
-              }
-            }
-          }
-        } catch { /* GitHub API unavailable */ }
       }
+      if (!apiRes.ok) {
+        throw new Error(`Panamedia update server returned status ${apiRes.status}.`);
+      }
+
+      const apiData = await apiRes.json();
+      const parsedVersion = (apiData?.version || '').replace(/^[vV]/, '').trim();
+      if (!parsedVersion) {
+        throw new Error('Panamedia update server returned an invalid release version.');
+      }
+      if (compareVersions(parsedVersion, APP_VERSION) < 0) {
+        throw new Error(
+          `Panamedia update server reports version ${parsedVersion}, older than this app (${APP_VERSION}).`
+        );
+      }
+      foundVersion = parsedVersion;
+      dlUrl = apiData.download_url || apiData.url || dlUrl;
+      notes = apiData.release_notes || apiData.notes || '';
 
       // Ensure minimum visible "checking" time
       const elapsed = Date.now() - startTime;
@@ -152,7 +134,8 @@ export function useUpdater(): UpdaterState {
       }
     } catch (err) {
       console.warn('Release check error:', err);
-      setReleaseCheckStatus(isManual ? 'no-internet' : 'idle');
+      setUpdateError(err instanceof Error ? err.message : 'Unable to check for updates from the Panamedia website.');
+      setReleaseCheckStatus('error');
       setShowReleaseDialog(isManual);
     }
   }, []);
@@ -200,7 +183,6 @@ export function useUpdater(): UpdaterState {
     setUpdateError('');
     try {
       const result = await electron.ipcRenderer.invoke('download-app-update', {
-        downloadUrl: releaseDownloadUrl || 'https://panamedia.lovable.app/api/public/download/windows',
         fileName: 'PanamediaSetup.exe'
       });
       if (result.success && result.installerPath) {
@@ -215,13 +197,13 @@ export function useUpdater(): UpdaterState {
       setUpdateError(err.message || 'Download failed.');
       setReleaseCheckStatus('error');
     }
-  }, [releaseDownloadUrl]);
+  }, []);
 
   const installUpdate = useCallback(async () => {
     if (!electron || !updateInstallerPath) return;
     setReleaseCheckStatus('installing');
     try {
-      await electron.ipcRenderer.invoke('install-app-update', { installerPath: updateInstallerPath });
+      await electron.ipcRenderer.invoke('install-app-update');
     } catch (err: any) {
       setUpdateError(err.message || 'Failed to launch installer.');
       setReleaseCheckStatus('error');

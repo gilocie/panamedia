@@ -28,12 +28,16 @@ export function useMiniPlayer() {
     const video = miniVideoRef.current;
     if (!video || !miniPlayerState || !miniPlayerState.minimized) return;
     if (miniPlayerState.playing) {
-      video.play().catch(() => {});
+      if (video.paused) {
+        video.play().catch(() => {});
+      }
     } else {
-      video.pause();
+      if (!video.paused) {
+        video.pause();
+      }
     }
-    if (Math.abs(video.currentTime - miniPlayerState.currentTime) > 1.2) {
-      video.currentTime = miniPlayerState.currentTime;
+    if (Number.isFinite(miniPlayerState.currentTime) && Math.abs(video.currentTime - miniPlayerState.currentTime) > 2.0) {
+      try { video.currentTime = miniPlayerState.currentTime; } catch (e) {}
     }
   }, [miniPlayerState?.playing, miniPlayerState?.currentTime, miniPlayerState?.minimized]);
 

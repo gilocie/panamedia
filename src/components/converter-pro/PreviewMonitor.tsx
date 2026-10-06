@@ -33,7 +33,7 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
   currentFile,
   thumbnailPath,
   playbackRequest,
-  streamingPort = 52321,
+  streamingPort = 52322,
   appPlayerState,
   onPrevFile,
   onNextFile,
@@ -44,7 +44,7 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
   const hasCurrentFile = Boolean(currentFile);
 
   const mediaRef = useRef<HTMLMediaElement | null>(null);
-  const [activePort, setActivePort] = useState<number>(streamingPort || 52321);
+  const [activePort, setActivePort] = useState<number>(streamingPort || 52322);
   const [audioThumbnailFailed, setAudioThumbnailFailed] = useState(false);
 
   useEffect(() => {
@@ -78,7 +78,7 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
   const [showVolumeSlider, setShowVolumeSlider] = useState<boolean>(false);
   const hasInitializedTime = useRef<boolean>(false);
   const volumeContainerRef = useRef<HTMLDivElement | null>(null);
-  const audioThumbnailUrl = `http://localhost:${activePort}/thumbnail?path=${encodeURIComponent(thumbnailPath || currentFile)}`;
+  const audioThumbnailUrl = `http://127.0.0.1:${activePort}/thumbnail?path=${encodeURIComponent(thumbnailPath || currentFile)}`;
 
   useEffect(() => {
     setAudioThumbnailFailed(false);
@@ -353,7 +353,7 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
         ) : isVideo ? (
           <video
             ref={(element) => { mediaRef.current = element; }}
-            src={`http://localhost:${activePort}/stream?path=${encodeURIComponent(currentFile)}`}
+            src={`http://127.0.0.1:${activePort}/stream?path=${encodeURIComponent(currentFile)}`}
             style={{
               width: '100%',
               height: '100%',
@@ -371,7 +371,7 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
           <div style={{ position: 'absolute', inset: 0 }}>
             <audio
               ref={(element) => { mediaRef.current = element; }}
-              src={`http://localhost:${activePort}/stream?path=${encodeURIComponent(currentFile)}`}
+              src={`http://127.0.0.1:${activePort}/stream?path=${encodeURIComponent(currentFile)}`}
               preload="metadata"
               onLoadedMetadata={handleLoadedMetadata}
               onTimeUpdate={handleTimeUpdate}

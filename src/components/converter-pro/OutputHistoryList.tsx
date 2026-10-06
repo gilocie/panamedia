@@ -30,7 +30,7 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
   type,
   items,
   outputPath,
-  streamingPort = 52321,
+  streamingPort = 52322,
   onChangeOutputPath,
   onDirectSend,
   onPlayMedia,
@@ -366,7 +366,7 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
                     />
                   ) : (
                     <img
-                      src={`http://localhost:${streamingPort}/thumbnail?path=${encodeURIComponent(item.thumbnailPath || item.path)}`}
+                      src={`http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(item.thumbnailPath || item.path)}`}
                       alt=""
                       loading="lazy"
                       onError={() => setThumbnailErrors((prev) => new Set(prev).add(item.path))}

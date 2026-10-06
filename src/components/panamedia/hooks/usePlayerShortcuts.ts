@@ -28,6 +28,7 @@ interface UsePlayerShortcutsProps {
   invertScroll?: boolean;
   isMediaLocked?: boolean;
   wakeControls?: () => void;
+  restorePlayback: (time: number, shouldResume: boolean, mediaData?: { filePath?: string; filename?: string }) => void;
 }
 
 interface ShortcutsCallbackState {
@@ -54,6 +55,7 @@ interface ShortcutsCallbackState {
   currentPath: string;
   isMediaLocked?: boolean;
   wakeControls?: () => void;
+  restorePlayback: (time: number, shouldResume: boolean, mediaData?: { filePath?: string; filename?: string }) => void;
 }
 
 export function usePlayerShortcuts({
@@ -83,6 +85,7 @@ export function usePlayerShortcuts({
   invertScroll,
   isMediaLocked = false,
   wakeControls,
+  restorePlayback,
 }: UsePlayerShortcutsProps) {
   const activeSeekTargetRef = useRef<number | null>(null);
   const seekAccumulatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -112,7 +115,8 @@ export function usePlayerShortcuts({
     flashDriveTarget,
     currentPath,
     isMediaLocked,
-    wakeControls
+    wakeControls,
+    restorePlayback
   });
 
   useEffect(() => {
@@ -139,27 +143,47 @@ export function usePlayerShortcuts({
       flashDriveTarget,
       currentPath,
       isMediaLocked,
-      wakeControls
+      wakeControls,
+      restorePlayback
     };
   });
 
   useEffect(() => {
     if (!electron) return;
 
-    const handleRemoteCommand = (_event: any, command: string, arg?: any) => {
+    const handleRemoteCommand = (_event: any, command: string, arg?: any, shouldResumePlayback = true) => {
       if (callbackRef.current.isMediaLocked) return;
       const { togglePlay, handlePrev, handleNext, toggleMute, seekTo, currentTime } = callbackRef.current;
       const video = videoRef.current;
       if (command === 'toggle-play') {
         togglePlay();
       } else if (command === 'pause') {
-        if (video && !video.paused) {
-          togglePlay();
+        if (video) {
+          video.pause();
         }
       } else if (command === 'play') {
-        if (video && video.paused) {
-          togglePlay();
+        if (video) {
+          video.play().catch(() => {});
         }
+      } else if (command === 'restore') {
+        let resumeAt = currentTime;
+        let resumeFlag = shouldResumePlayback;
+        let mediaData: { filePath?: string; filename?: string } | undefined = undefined;
+
+        if (typeof arg === 'number' && Number.isFinite(arg)) {
+          resumeAt = arg;
+        } else if (arg && typeof arg === 'object') {
+          if (typeof arg.currentTime === 'number' && Number.isFinite(arg.currentTime)) {
+            resumeAt = arg.currentTime;
+          }
+          if (typeof arg.shouldResume === 'boolean') {
+            resumeFlag = arg.shouldResume;
+          }
+          if (arg.filePath) {
+            mediaData = { filePath: arg.filePath, filename: arg.filename };
+          }
+        }
+        callbackRef.current.restorePlayback(resumeAt, resumeFlag, mediaData);
       } else if (command === 'prev') {
         handlePrev();
       } else if (command === 'next') {

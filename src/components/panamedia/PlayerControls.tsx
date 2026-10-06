@@ -186,20 +186,9 @@ export function PlayerControls({
             setDynamicThumbnailUrl(img.src);
           };
           img.onerror = () => {
-            if (streamingPort !== 52321) {
-              const fallbackImg = new Image();
-              fallbackImg.onload = () => {
-                if (!active) return;
-                previewCacheRef.current.set(cacheKey, fallbackImg.src);
-                setDynamicThumbnailUrl(fallbackImg.src);
-              };
-              fallbackImg.onerror = () => { active = false; };
-              fallbackImg.src = `http://localhost:52321/preview?path=${encodeURIComponent(currentPath)}&time=${rounded}`;
-            } else {
-              active = false;
-            }
+            active = false;
           };
-          img.src = `http://localhost:${streamingPort}/preview?path=${encodeURIComponent(currentPath)}&time=${rounded}`;
+          img.src = `http://127.0.0.1:${streamingPort}/preview?path=${encodeURIComponent(currentPath)}&time=${rounded}`;
         }, 80);
       }
     }
@@ -339,7 +328,7 @@ export function PlayerControls({
                         background: 'radial-gradient(ellipse at center, rgba(30, 30, 45, 0.9) 0%, rgba(10, 10, 16, 0.95) 100%)'
                       }} />
                       <img
-                        src={thumbnailToShow || `http://localhost:${streamingPort}/thumbnail?path=${encodeURIComponent(currentPath)}`}
+                        src={thumbnailToShow || `http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(currentPath)}`}
                         style={{
                           width: '100%',
                           height: '100%',

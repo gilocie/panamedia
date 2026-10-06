@@ -22,6 +22,7 @@ import { formatBytes } from './types';
 interface PlaylistPanelProps {
   currentPlaylist: any[];
   currentPath: string;
+  streamingPort?: number;
   playerSearch: string;
   playerViewMode: 'files' | 'folders';
   playerExpandedFolders: Record<string, boolean>;
@@ -53,6 +54,7 @@ function PlaylistItemThumbnail({
   imgErrors,
   setImgErrors,
   size,
+  streamingPort,
 }: {
   item: any;
   itemExt?: string;
@@ -61,8 +63,9 @@ function PlaylistItemThumbnail({
   imgErrors: Record<string, boolean>;
   setImgErrors: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   size: number;
+  streamingPort: number;
 }) {
-  const localThumb = `http://localhost:52321/thumbnail?path=${encodeURIComponent(item.path)}`;
+  const localThumb = `http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(item.path)}`;
   const displayThumb = itemThumb || localThumb;
   const hasError = imgErrors[item.path];
   const [loaded, setLoaded] = React.useState(false);
@@ -98,6 +101,7 @@ function PlaylistItemThumbnail({
 export function PlaylistPanel({
   currentPlaylist,
   currentPath,
+  streamingPort = 52322,
   playerSearch,
   playerViewMode,
   playerExpandedFolders,
@@ -1002,6 +1006,7 @@ export function PlaylistPanel({
                             }}>
                               <PlaylistItemThumbnail
                                 item={item}
+                                streamingPort={streamingPort}
                                 itemExt={itemExt}
                                 isAudioItem={isAudioItem}
                                 itemThumb={itemThumb}
@@ -1158,7 +1163,7 @@ export function PlaylistPanel({
                             onMouseLeave={(e) => { if (!isCurrent) e.currentTarget.style.background = 'transparent'; }}
                           >
                             <div style={{ width: '32px', height: '32px', borderRadius: '4px', overflow: 'hidden', flexShrink: 0, background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              <PlaylistItemThumbnail item={item} itemExt={itemExt} isAudioItem={isAudio} itemThumb={itemThumb} imgErrors={imgErrors} setImgErrors={setImgErrors} size={14} />
+                              <PlaylistItemThumbnail item={item} streamingPort={streamingPort} itemExt={itemExt} isAudioItem={isAudio} itemThumb={itemThumb} imgErrors={imgErrors} setImgErrors={setImgErrors} size={14} />
                             </div>
                             <div style={{ overflow: 'hidden', flex: 1, minWidth: 0 }}>
                               <div style={{ fontSize: '11px', color: isCurrent ? 'var(--primary)' : '#fff', fontWeight: isCurrent ? '600' : 'normal', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.name}>
@@ -1242,7 +1247,7 @@ export function PlaylistPanel({
               onMouseLeave={(e) => { if (!isCurrent) e.currentTarget.style.background = 'transparent'; }}
             >
               <div style={{ width: '36px', height: '36px', borderRadius: '4px', overflow: 'hidden', flexShrink: 0, background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <PlaylistItemThumbnail item={item} itemExt={itemExt} isAudioItem={isAudioItem} itemThumb={itemThumb} imgErrors={imgErrors} setImgErrors={setImgErrors} size={14} />
+                <PlaylistItemThumbnail item={item} streamingPort={streamingPort} itemExt={itemExt} isAudioItem={isAudioItem} itemThumb={itemThumb} imgErrors={imgErrors} setImgErrors={setImgErrors} size={14} />
               </div>
               <div style={{ overflow: 'hidden', flex: 1, minWidth: 0 }}>
                 <div style={{

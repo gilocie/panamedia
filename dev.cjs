@@ -12,7 +12,7 @@ function checkViteReady() {
     timeout: 1000
   }, (res) => {
     console.log('Vite server is ready! Launching Electron...');
-    const electron = spawn('npx', ['electron', '.', '--disable-gpu', '--disable-gpu-sandbox', '--no-sandbox'], { stdio: 'inherit', shell: true });
+    const electron = spawn('npx', ['electron', '.'], { stdio: 'inherit', shell: true });
     
     electron.on('close', () => {
       console.log('Electron closed. Stopping Vite...');

@@ -127,12 +127,20 @@ function isAdOrGifThumbnail(thumb) {
 // Throttled broadcast — prevents IPC flooding during rapid progress updates
 let broadcastTimer = null;
 let broadcastPending = false;
+const completionToastSent = new WeakSet();
 
 function broadcast() {
   const main = getMainWindow();
   const player = getPlayerWindow();
   if (main && !main.isDestroyed()) main.webContents.send('downloads-updated', downloadsList);
   if (player && !player.isDestroyed()) player.webContents.send('downloads-updated', downloadsList);
+}
+
+function notifyDownloadCompleted(task) {
+  const main = getMainWindow();
+  if (!main || main.isDestroyed() || completionToastSent.has(task)) return;
+  completionToastSent.add(task);
+  main.webContents.send('download-completed-toast', task.filename);
 }
 
 function broadcastThrottled() {
@@ -391,8 +399,7 @@ function startDownload(taskId) {
       saveState();
       broadcast();
 
-      const main = getMainWindow();
-      if (main) main.webContents.send('download-completed-toast', task.filename);
+      notifyDownloadCompleted(task);
     }).catch((err) => {
       traffic.end(taskId);
       delete activeDownloads[taskId];
@@ -441,8 +448,7 @@ function startDownload(taskId) {
     task.displayEta = null;
     saveState();
     
-    const main = getMainWindow();
-    if (main) main.webContents.send('download-completed-toast', task.filename);
+    notifyDownloadCompleted(task);
   });
 
   downloader.on('error', (errStr) => {

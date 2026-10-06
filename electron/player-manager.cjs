@@ -87,8 +87,9 @@ function openPlayerWindow(filePath, filename, options = {}) {
     frame: false,
     icon: playerIconImg.isEmpty() ? playerIcon : playerIconImg,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
       backgroundThrottling: false,
       preload: path.join(__dirname, '..', 'preload.cjs')
     }
@@ -116,7 +117,24 @@ function openPlayerWindow(filePath, filename, options = {}) {
   } catch (e) {}
 
   playerWin.webContents.on('will-navigate', (event, url) => {
-    if (url.startsWith('file://') && !url.includes('index.html')) {
+    try {
+      const candidate = new URL(url);
+      const appUrl = new URL(getAppUrlFn());
+      const trusted = isDevMode
+        ? candidate.protocol === 'http:' && candidate.origin === appUrl.origin
+        : candidate.protocol === 'file:' &&
+          (decodeURIComponent(candidate.pathname).toLowerCase().replace(/\\/g, '/').endsWith('/dist/index.html') ||
+           decodeURIComponent(candidate.pathname).toLowerCase().replace(/\\/g, '/') === decodeURIComponent(appUrl.pathname).toLowerCase().replace(/\\/g, '/'));
+      if (!trusted) event.preventDefault();
+    } catch {
+      event.preventDefault();
+    }
+  });
+
+  // Toggle DevTools manually with F12 or Ctrl+Shift+I for player window
+  playerWin.webContents.on('before-input-event', (event, input) => {
+    if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+      playerWin.webContents.toggleDevTools();
       event.preventDefault();
     }
   });
@@ -189,6 +207,11 @@ function openPlayerWindow(filePath, filename, options = {}) {
       if (mainWindowRef && !mainWindowRef.isDestroyed() && mainWindowRef.isVisible()) {
         mainWindowRef.webContents.send('player-state-changed', st);
       }
+      setTimeout(() => {
+        if (!playerWin.isDestroyed()) {
+          playerWin.webContents.send('player-remote-command', 'restore', st.currentTime, st.playing);
+        }
+      }, 50);
     }
   });
 
@@ -206,6 +229,9 @@ function showAndFloatPlayerWindow() {
     wasPlayerMinimizedBeforeParentClosed = false;
     if (win.isMinimized()) win.restore();
     win.show();
+    // Force Chromium to repaint immediately so the video frame shows up
+    // without the background image flashing through first.
+    try { win.webContents.invalidate(); } catch (e) {}
     win.setAlwaysOnTop(true);
     win.focus();
     setTimeout(() => {
@@ -335,7 +361,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('player-restore', () => {
+  ipcMain.handle('player-restore', (_event, miniCurrentTime) => {
     const targetWin = getLastFocusedPlayerWindow();
     if (targetWin && !targetWin.isDestroyed()) {
       wasPlayerMinimizedBeforeParentClosed = false;
@@ -344,9 +370,27 @@ function setupIpcHandlers() {
       }
       targetWin.show();
       targetWin.focus();
+
       const st = playerStates.get(targetWin.id) || { filePath: '', filename: 'Media Player', playing: true, currentTime: 0, duration: 0 };
       st.minimized = false;
+      if (typeof miniCurrentTime === 'number' && Number.isFinite(miniCurrentTime) && miniCurrentTime >= 0) {
+        st.currentTime = miniCurrentTime;
+      }
+      st.playing = true;
       playerStates.set(targetWin.id, st);
+
+      setTimeout(() => {
+        if (!targetWin.isDestroyed()) {
+          targetWin.webContents.send('player-remote-command', 'restore', {
+            currentTime: st.currentTime,
+            filePath: st.filePath,
+            filename: st.filename,
+            shouldResume: true
+          });
+          targetWin.webContents.send('player-remote-command', 'restore', st.currentTime, true);
+        }
+      }, 50);
+
       if (mainWindowRef && !mainWindowRef.isDestroyed() && mainWindowRef.isVisible()) {
         mainWindowRef.webContents.send('player-state-changed', st);
       }

@@ -55,7 +55,7 @@ export function SendConvertPreparationModal({
   onRemoveFile,
   onClearQueue,
   drives = [],
-  streamingPort = 52321,
+  streamingPort = 52322,
   onProceed,
   onDirectSend,
   onMinimizeChange,

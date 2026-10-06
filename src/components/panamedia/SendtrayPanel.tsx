@@ -35,7 +35,7 @@ export function SendtrayPanel({
   onPlayMedia,
   currentPath = '',
   isPlaying = false,
-  streamingPort = 52321,
+  streamingPort = 52322,
 }: SendtrayPanelProps) {
   const [folders, setFolders] = useState<SendtrayFolder[]>(() => getSendtrayFolders());
   const [assignments, setAssignments] = useState<Record<string, string>>(() => getSendtrayAssignments());
@@ -248,7 +248,7 @@ export function SendtrayPanel({
           {/* Custom thumbnail or player.ico as background cover */}
           {!imgErrors[filePath] ? (
             <img
-              src={`http://localhost:${streamingPort}/thumbnail?path=${encodeURIComponent(filePath)}`}
+              src={`http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(filePath)}`}
               alt=""
               onError={() => setImgErrors(prev => ({ ...prev, [filePath]: true }))}
               style={{

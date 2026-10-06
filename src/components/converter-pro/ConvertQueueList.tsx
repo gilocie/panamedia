@@ -34,7 +34,7 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
   selectedIndices,
   selectedFileIdx,
   mediaTypes,
-  streamingPort = 52321,
+  streamingPort = 52322,
   activeVideoPreset,
   activeAudioPreset,
   videoQuality,
@@ -270,7 +270,7 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
                       /* Server-rendered poster frame. A <video> element here would spin up a
                          full demuxer + decoder + range request per queue row on mount. */
                       <img
-                        src={`http://localhost:${streamingPort}/thumbnail?path=${encodeURIComponent(fPath)}`}
+                        src={`http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(fPath)}`}
                         alt=""
                         width={64}
                         height={42}

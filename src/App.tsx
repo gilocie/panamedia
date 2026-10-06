@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, lazy, Suspense, useMemo } from 'react';
+import { useEffect, useState, useRef, useCallback, lazy, Suspense, useMemo, Component, type ReactNode } from 'react';
 import {
   Download, Pause, Play, Trash2, Plus, Settings, Folder,
   ExternalLink, Globe, CheckCircle2,
@@ -617,16 +617,123 @@ function extractWebviewStreamScript() {
   }
 }
 
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  componentName?: string;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class PlayerErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: any) {
+    console.error(`[${this.props.componentName || 'Component'}] Error:`, error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          height: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: '#09090e',
+          color: '#fff',
+          fontFamily: "'Outfit', 'Inter', sans-serif",
+          padding: '24px',
+          textAlign: 'center'
+        }}>
+          <div style={{
+            background: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: '16px',
+            padding: '28px 36px',
+            maxWidth: '500px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '16px'
+          }}>
+            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#f87171' }}>
+              Media Player Encountered an Issue
+            </div>
+            <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.7)', lineHeight: '1.5' }}>
+              {this.state.error?.message || 'An unexpected rendering error occurred.'}
+            </div>
+            <button
+              onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
+              style={{
+                background: 'var(--primary, #6366f1)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '8px 20px',
+                fontWeight: '600',
+                cursor: 'pointer'
+              }}
+            >
+              Reload Player
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
-  const searchParams = new URLSearchParams(window.location.search);
-  const mode = searchParams.get('mode');
-  const pathParam = searchParams.get('path') || '';
-  const titleParam = searchParams.get('title') || '';
+  const { mode, pathParam, titleParam } = (() => {
+    let search = window.location.search;
+    if (!search && window.location.hash.includes('?')) {
+      search = '?' + window.location.hash.split('?')[1];
+    }
+    const params = new URLSearchParams(search);
+    let m = params.get('mode');
+    let p = params.get('path') || '';
+    let t = params.get('title') || '';
+
+    // If query string was not separated by ? in file URL, inspect href
+    if (!m && window.location.href.includes('mode=player')) {
+      try {
+        const rawHref = window.location.href.replace(/\\/g, '/');
+        const qIndex = rawHref.indexOf('?');
+        if (qIndex !== -1) {
+          const fallbackParams = new URLSearchParams(rawHref.slice(qIndex));
+          m = fallbackParams.get('mode') || 'player';
+          p = fallbackParams.get('path') || p;
+          t = fallbackParams.get('title') || t;
+        } else {
+          m = 'player';
+        }
+      } catch (e) {
+        m = 'player';
+      }
+    }
+    return { mode: m, pathParam: p, titleParam: t };
+  })();
 
   const { netSpeed, streamingPort } = useNetworkStatus();
 
   if (mode === 'player') {
-    return <PanamediaPlayer filePath={pathParam} title={titleParam} />;
+    return (
+      <PlayerErrorBoundary componentName="PanamediaPlayer">
+        <PanamediaPlayer filePath={pathParam} title={titleParam} />
+      </PlayerErrorBoundary>
+    );
   }
 
   const [activeTab, setActiveTab] = useState<'downloads' | 'queues' | 'settings' | 'integration' | 'browser'>('downloads');
@@ -923,11 +1030,20 @@ export default function App() {
   // Mini-player state (when player window is minimized to sidebar)
   // ─── Mini Player ─────────────────────────────────────────────────
   const {
-    miniPlayerState,
+    miniPlayerState, setMiniPlayerState,
     miniPlayerHovered, setMiniPlayerHovered,
     miniThumbError, setMiniThumbError,
     miniVideoRef,
   } = useMiniPlayer();
+
+  const handleRestorePlayerFromMini = useCallback((e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const curTime = miniVideoRef.current ? miniVideoRef.current.currentTime : undefined;
+    if (miniVideoRef.current) {
+      try { miniVideoRef.current.pause(); } catch (err) {}
+    }
+    electron?.ipcRenderer.invoke('player-restore', curTime);
+  }, [miniVideoRef]);
 
   // ─── Real-time network speed (provided by useNetworkStatus above) ─
 
@@ -1832,7 +1948,7 @@ export default function App() {
             >
               {/* Media Preview Container (Clickable to Restore) */}
               <div
-                onClick={() => electron?.ipcRenderer.invoke('player-restore')}
+                onClick={handleRestorePlayerFromMini}
                 style={{
                   position: 'relative',
                   width: '100%',
@@ -1855,7 +1971,7 @@ export default function App() {
                   );
                   const miniThumb = miniMatchedTask?.thumbnail ||
                     (miniPlayerState.filePath
-                      ? `http://localhost:${streamingPort}/thumbnail?path=${encodeURIComponent(miniPlayerState.filePath)}`
+                      ? `http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(miniPlayerState.filePath)}`
                       : null);
 
                   const displayMiniThumb = (!miniThumbError && miniThumb) ? miniThumb : playerBg;
@@ -1934,7 +2050,7 @@ export default function App() {
                     return (
                       <video
                         ref={miniVideoRef}
-                        src={`http://localhost:${streamingPort}/stream?path=${encodeURIComponent(miniPlayerState.filePath)}`}
+                        src={`http://127.0.0.1:${streamingPort}/stream?path=${encodeURIComponent(miniPlayerState.filePath)}`}
                         muted
                         style={{
                           width: '100%',
@@ -1996,7 +2112,18 @@ export default function App() {
                     <SkipBack size={10} />
                   </button>
                   <button
-                    onClick={(e) => { e.stopPropagation(); electron?.ipcRenderer.send('player-remote-command', 'toggle-play'); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const nextPlaying = !miniPlayerState.playing;
+                      if (nextPlaying) {
+                        miniVideoRef.current?.play().catch(() => {});
+                        electron?.ipcRenderer.send('player-remote-command', 'play');
+                      } else {
+                        miniVideoRef.current?.pause();
+                        electron?.ipcRenderer.send('player-remote-command', 'pause');
+                      }
+                      setMiniPlayerState(prev => prev ? { ...prev, playing: nextPlaying } : null);
+                    }}
                     style={{ background: 'var(--primary)', border: 'none', borderRadius: '4px', height: '22px', minWidth: 0, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#fff', padding: 0 }}
                     title={miniPlayerState.playing ? 'Pause' : 'Play'}
                   >
@@ -2017,7 +2144,7 @@ export default function App() {
                     {miniPlayerState.volume === 0 ? <VolumeX size={10} style={{ color: 'var(--danger)' }} /> : <Volume2 size={10} />}
                   </button>
                   <button
-                    onClick={(e) => { e.stopPropagation(); electron?.ipcRenderer.invoke('player-restore'); }}
+                    onClick={handleRestorePlayerFromMini}
                     style={{ background: 'rgba(99, 102, 241, 0.25)', border: '1px solid rgba(99, 102, 241, 0.4)', borderRadius: '4px', height: '22px', minWidth: 0, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#a5b4fc', padding: 0 }}
                     title="Restore Full Player"
                   >
@@ -2499,7 +2626,7 @@ export default function App() {
                           }}
                         >
                           <img
-                            src={`http://localhost:${streamingPort}/thumbnail?path=${encodeURIComponent(selectedTask.saveDir + '\\' + selectedTask.filename)}`}
+                            src={`http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(selectedTask.saveDir + '\\' + selectedTask.filename)}`}
                             style={{
                               position: 'absolute',
                               inset: 0,
@@ -2955,7 +3082,7 @@ export default function App() {
                                                     }}
                                                   >
                                                     {(() => {
-                                                      const localThumb = `http://localhost:${streamingPort}/thumbnail?path=${encodeURIComponent(file.path)}`;
+                                                      const localThumb = `http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(file.path)}`;
                                                       const displayThumb = thumbUrl || (['.mp4', '.mkv', '.webm', '.avi', '.mov', '.ts', '.m4v', '.flv', '.mpg', '.3gp', '.wmv'].includes(file.ext.toLowerCase()) ? localThumb : null);
                                                       const hasError = imgErrors[file.path];
 
@@ -3077,7 +3204,7 @@ export default function App() {
                                                     }}
                                                   >
                                                   {(() => {
-                                                    const localThumb = `http://localhost:${streamingPort}/thumbnail?path=${encodeURIComponent(file.path)}`;
+                                                    const localThumb = `http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(file.path)}`;
                                                     const displayThumb = thumbUrl || ((file.category === 'videos' || file.category === 'audios') ? localThumb : null);
                                                     const hasError = imgErrors[file.path];
 
@@ -3225,7 +3352,7 @@ export default function App() {
                                           l.includes('ad_') || l.includes('ad-') || l.includes('banner') || l.includes('sponsor') ||
                                           l.includes('promo') || l.includes('exclusive') || l.includes('trafficjunky') || l.includes('advert');
                                       };
-                                      const localThumb = `http://localhost:${streamingPort}/thumbnail?path=${encodeURIComponent(file.path)}`;
+                                      const localThumb = `http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(file.path)}`;
                                       const cleanThumb = (thumbUrl && !isAdOrGif(thumbUrl)) ? thumbUrl : null;
                                       const displayThumb = cleanThumb || ((file.category === 'videos' || file.category === 'audios') ? localThumb : null);
                                       const hasError = imgErrors[file.path];
@@ -5969,4 +6096,3 @@ function FormatPickerContent({ info, onCancel, onDownload }: FormatPickerContent
     </div>
   );
 }
-

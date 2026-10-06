@@ -4,7 +4,7 @@ const electron = (window as any).electron || ((window as any).require ? (window 
 
 export function useNetworkStatus() {
   const [netSpeed, setNetSpeed] = useState<number>(0);
-  const [streamingPort, setStreamingPort] = useState<number>(52321);
+  const [streamingPort, setStreamingPort] = useState<number>(52322);
 
   useEffect(() => {
     if (!electron) return;
