@@ -95,7 +95,7 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
-/* Canvas & inspector zones: internal scroll ONLY — shell never scrolls */
+/* Canvas & inspector zones: fixed height — no scrolling anywhere */
 .pro-studio__canvas,
 .pro-studio__inspector {
   display: flex;
@@ -103,9 +103,7 @@
   gap: 7px;
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: none;
+  overflow: hidden;
   padding-right: 2px;
   padding-bottom: 6px;
 }
@@ -278,7 +276,6 @@
   overflow-x: auto;
   scrollbar-width: none;
   flex-shrink: 0;
-  min-height: 0;
 }
 
 .pro-tabs::-webkit-scrollbar { display: none; }

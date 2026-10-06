@@ -362,22 +362,6 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
               />
             </>
           )}
-          <button
-            type="button"
-            onClick={togglePreview}
-            aria-label={isPlaying ? 'Pause preview' : 'Preview selected range'}
-            className="pw-icon-btn pw-icon-btn--on"
-            style={{
-              position: 'absolute',
-              left: 14,
-              bottom: 14,
-              width: 44,
-              height: 44,
-              borderRadius: 999
-            }}
-          >
-            {isPlaying ? <Pause size={18} /> : <Play size={18} fill="currentColor" />}
-          </button>
           <span className="pro-canvas__chip pro-canvas__chip--br">
             {formatTrimTime(playhead)} / {formatTrimTime(usableDuration)}
           </span>
