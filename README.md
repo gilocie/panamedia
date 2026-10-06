@@ -325,6 +325,17 @@ panamedia-pro/
 
 ---
 
+## Download
+
+> **Windows 10 / 11 — Version 1.0.1**
+
+Visit the official download page to get the latest installer:
+
+**[https://panamedia.lovable.app/](https://panamedia.lovable.app/)**
+
+macOS, Linux, and mobile versions are not yet available. Please check back for future release announcements.
+
+---
 ## Platform Availability
 
 | Platform | Status |
@@ -387,6 +398,7 @@ npm run dist
 ## License
 
 Proprietary software developed by Go Save Site. All rights reserved.
+
 
 
 
