@@ -1,0 +1,1871 @@
+/* ════════════════════════════════════════════════════════════════════════
+   Converter Pro — Professional Tool Workspace
+   ────────────────────────────────────────────────────────────────────────
+   Layout reference: the per-tool mockups in convertor_pro_features_ui.
+
+   Those mockups are Tailwind prototypes. This file is the hand-written
+   equivalent of the utility classes they use, mapped onto the tokens the
+   app already ships (see src/index.css :root):
+
+     --primary  #6366f1   → pro accent / primary action
+     --primary-end #a855f7 → creative / secondary accent
+     --accent   #ec4899   → playhead / high-priority markers
+     --bg-deep  #07070a   → deepest canvas tier
+     --bg-dark  #0f0f18   → panel base
+     --font-main (Outfit) → all UI text
+     ui-monospace stack    → the "tech-data" / "tech-timecode" role the
+                             mockups assign to JetBrains Mono
+
+   No Tailwind, no webfont fetch. Everything here is plain CSS over
+   locally installed fonts.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ─── 1. Studio shell (full-bleed, replaces the old centred dialog) ─── */
+
+.converter-feature-overlay {
+  z-index: 12000 !important;
+  padding: clamp(12px, 2.4vw, 28px) !important;
+  background: rgba(4, 5, 11, 0.8) !important;
+  backdrop-filter: blur(16px) saturate(1.1) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(1.1) !important;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   STUDIO SHELL — Fixed-height, no-scroll professional workspace.
+   Everything fits within the device viewport height.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* The studio itself: fills its host, no floating card, no overflow. */
+.pro-studio {
+  --tool-accent: #818cf8;
+  --tool-accent-strong: #6366f1;
+  --tool-accent-2: #a855f7;
+  --tool-accent-hot: #ec4899;
+  --pw-lowest: #08080f;
+  --pw-low: #0e0e1a;
+  --pw-mid: #151525;
+  --pw-high: #1c1c2e;
+  --pw-hi-line: #282840;
+  --pw-line: #1e1e34;
+  --pw-text: #eef0fb;
+  --pw-text-dim: #9ea3c4;
+  --pw-text-faint: #6b6f92;
+  --pw-mono: ui-monospace, 'Cascadia Mono', 'JetBrains Mono', 'Consolas', monospace;
+
+  /* Fixed full-height layout — NO scroll on the shell */
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  display: grid;
+  /* rows: upper body · optional timeline · compact command bar */
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  gap: 0;
+  background:
+    radial-gradient(900px 380px at 20% -12%, rgba(99,102,241,0.10), transparent 60%),
+    radial-gradient(640px 300px at 90% 108%, rgba(168,85,247,0.07), transparent 58%),
+    var(--pw-lowest);
+  color: var(--pw-text);
+  font-family: var(--font-main, 'Outfit', sans-serif);
+  animation: pw-in 160ms ease-out;
+}
+
+.pro-studio * { font-family: inherit; }
+
+/* Wide (inspector-less) variant: body fills height, no timeline row */
+.pro-studio--wide {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+@keyframes pw-in {
+  from { opacity: 0; transform: scale(0.996); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ── Upper body: canvas (left 62%) + inspector (right 38%) ── */
+.pro-studio__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(290px, 1fr);
+  gap: 8px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px 10px 0;
+}
+
+.pro-studio--wide .pro-studio__body {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Canvas & inspector zones: internal scroll ONLY — shell never scrolls */
+.pro-studio__canvas,
+.pro-studio__inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  padding-right: 2px;
+  padding-bottom: 6px;
+}
+
+.pro-studio__canvas::-webkit-scrollbar,
+.pro-studio__inspector::-webkit-scrollbar { display: none; }
+
+/* Tool identity row (compact) */
+.pro-studio__toolhead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-width: 0;
+  padding-bottom: 2px;
+}
+
+.pro-studio__toolhead [data-tool-icon] {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--tool-accent) 30%, transparent);
+  border-radius: 8px;
+  color: var(--tool-accent);
+  background: color-mix(in srgb, var(--tool-accent) 11%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--tool-accent) 18%, transparent);
+}
+
+.pro-studio__toolname {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+}
+
+.pro-studio__sub {
+  overflow: hidden;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--pw-text-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pro-studio__badges { flex-wrap: wrap; }
+
+/* Full-width timeline stage, beneath both upper zones (compact height) */
+.pro-studio__timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 6px 10px 0;
+}
+
+/* Command bar — compact, always visible at bottom */
+.pro-studio__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 52px;
+  max-height: 56px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--pw-line);
+  background: linear-gradient(180deg, var(--pw-low), var(--pw-lowest));
+  flex-shrink: 0;
+}
+
+.pro-studio__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  text-align: right;
+}
+
+.pro-studio__apply {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 7px 16px;
+  border: 1px solid color-mix(in srgb, var(--tool-accent) 55%, transparent);
+  border-radius: 10px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--tool-accent-strong), var(--tool-accent));
+  box-shadow: 0 0 16px color-mix(in srgb, var(--tool-accent) 35%, transparent);
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 140ms ease, filter 140ms ease;
+  white-space: nowrap;
+}
+
+.pro-studio__apply:hover:not(:disabled) {
+  filter: brightness(1.12);
+  box-shadow: 0 0 22px color-mix(in srgb, var(--tool-accent) 52%, transparent);
+}
+
+.pro-studio__apply:disabled { opacity: 0.42; cursor: not-allowed; }
+
+/* ─── 1b. Media header bar (compact) ──────────────────────────────── */
+
+.pro-media-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  max-height: 46px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--pw-line);
+  background: linear-gradient(180deg, var(--pw-mid), var(--pw-low));
+  flex-shrink: 0;
+}
+
+.pro-media-bar__id {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.pro-media-bar__name {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: var(--pw-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pro-media-bar__facts {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 10px;
+  color: var(--pw-text-dim);
+  white-space: nowrap;
+}
+
+.pro-media-bar__dot { color: var(--pw-text-faint); }
+
+/* Host wrapper — fixed full-bleed inside the converter modal.
+   Everything below the titlebar (26px after 50% reduction) is the studio. */
+.pro-studio-host {
+  position: absolute;
+  top: 26px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--pw-lowest);
+}
+
+/* ─── 1c. Tool tab strip (compact) ─────────────────────────────────── */
+
+.pro-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  min-width: 0;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--pw-line);
+  background: var(--pw-lowest);
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+
+.pro-tabs::-webkit-scrollbar { display: none; }
+
+.pro-tab {
+  --tab-accent: var(--tool-accent);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--pw-text-dim);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 130ms ease, border-color 130ms ease, background-color 130ms ease;
+}
+
+.pro-tab svg { width: 13px; height: 13px; color: var(--pw-text-faint); transition: color 130ms ease; }
+.pro-tab:hover { color: var(--pw-text); background: rgba(255,255,255,0.025); }
+.pro-tab:hover svg { color: var(--pw-text-dim); }
+
+.pro-tab--active {
+  color: var(--pw-text);
+  border-bottom-color: var(--tab-accent);
+  background: color-mix(in srgb, var(--tab-accent) 9%, transparent);
+}
+
+.pro-tab--active svg { color: var(--tab-accent); }
+
+/* ─── 1d. Legacy dialog tokens (kept so nothing else regresses) ────── */
+
+.converter-feature-dialog {
+  --tool-accent: #818cf8;
+  --tool-accent-strong: #6366f1;
+  --tool-accent-2: #a855f7;
+  --tool-accent-hot: #ec4899;
+  --pw-lowest: #08080f;
+  --pw-low: #101019;
+  --pw-mid: #171724;
+  --pw-high: #1f1f31;
+  --pw-hi-line: #2c2c44;
+  --pw-line: #232338;
+  --pw-text: #eef0fb;
+  --pw-text-dim: #9ea3c4;
+  --pw-text-faint: #6b6f92;
+  --pw-mono: ui-monospace, 'Cascadia Mono', 'JetBrains Mono', 'Consolas', monospace;
+
+  display: flex !important;
+  flex-direction: column !important;
+  width: min(1180px, 100%) !important;
+  max-width: 97vw !important;
+  max-height: min(93vh, 900px) !important;
+  overflow: hidden !important;
+  border: 1px solid var(--pw-line) !important;
+  border-radius: 18px !important;
+  background: var(--pw-low) !important;
+  box-shadow:
+    0 34px 100px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(255, 255, 255, 0.02),
+    0 0 44px rgba(99, 102, 241, 0.09) !important;
+  color: var(--pw-text) !important;
+  font-family: var(--font-main, 'Outfit', sans-serif) !important;
+}
+
+.converter-feature-dialog--wide {
+  width: min(1340px, 100%) !important;
+  max-height: min(95vh, 960px) !important;
+}
+
+.converter-feature-dialog * {
+  font-family: inherit;
+}
+
+/* ─── 2. Header ─────────────────────────────────────────────────────── */
+
+.converter-feature-dialog > .converter-feature-header,
+.converter-feature-dialog > header.converter-feature-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 66px;
+  padding: 13px 20px !important;
+  border-bottom: 1px solid var(--pw-line) !important;
+  background: linear-gradient(180deg, var(--pw-mid), var(--pw-low)) !important;
+}
+
+.converter-feature-header [data-tool-icon] {
+  display: grid !important;
+  place-items: center;
+  width: 38px !important;
+  height: 38px !important;
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--tool-accent) 34%, transparent) !important;
+  border-radius: 11px !important;
+  color: var(--tool-accent) !important;
+  background: color-mix(in srgb, var(--tool-accent) 12%, transparent) !important;
+  box-shadow: 0 0 16px color-mix(in srgb, var(--tool-accent) 18%, transparent) !important;
+}
+
+.converter-feature-header > div {
+  min-width: 0;
+}
+
+.converter-feature-header h2,
+.converter-feature-header h3 {
+  margin: 0 !important;
+  font-size: 15.5px !important;
+  font-weight: 650 !important;
+  letter-spacing: -0.015em;
+  color: var(--pw-text) !important;
+}
+
+.converter-feature-header > button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: 1px solid var(--pw-hi-line) !important;
+  border-radius: 9px !important;
+  color: var(--pw-text-dim) !important;
+  background: var(--pw-high) !important;
+  cursor: pointer;
+}
+
+/* ─── 3. Body: 8 / 4 workspace grid ─────────────────────────────────── */
+
+.converter-feature-dialog > .converter-feature-content,
+.converter-feature-dialog > .pro-workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1.95fr) minmax(300px, 1fr);
+  gap: 12px !important;
+  padding: 14px 16px !important;
+  overflow: auto !important;
+  background:
+    radial-gradient(900px 420px at 22% -8%, rgba(99, 102, 241, 0.07), transparent 62%),
+    var(--pw-low) !important;
+}
+
+/* ─── 15b. Preview monitor (fixed compact height) ────────────────────
+   Capped so transport + panels always stay visible without scrolling. */
+
+.pro-monitor {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: 170px;
+  border: 1px solid var(--pw-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* ─── 16. Timeline stage ───────────────────────────────────────────── */
+
+/* Geometry wrapper: the ruler, both lanes and the drag overlay share one
+   box, so a pointer x maps onto a timecode without offset maths. */
+.pro-timeline__surface {
+  position: relative;
+  min-width: 0;
+  user-select: none;
+}
+
+.pro-timeline__overlay.is-dragging {
+  cursor: ew-resize;
+}
+
+/* Suppress text selection and hover effects while dragging a handle. */
+.pro-timeline__overlay.is-dragging ~ * .pro-timeline__status,
+body.is-timeline-dragging {
+  user-select: none;
+}
+
+
+/* The stage owns the vertical rhythm of the tracks so the drag overlay can
+   span them without hard-coded offsets. */
+.pro-timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px;
+  border: 1px solid var(--pw-line);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--pw-mid), var(--pw-low));
+}
+
+.pro-timeline__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pro-timeline__ruler {
+  padding: 0 54px 0 40px;
+  border-bottom: 1px solid var(--pw-line);
+  padding-bottom: 4px;
+}
+
+.pro-timeline__tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pro-tracklane {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.pro-tracklane__label {
+  font-family: var(--pw-mono);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--pw-text-faint);
+  text-align: center;
+}
+
+.pro-tracklane__body {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--pw-line);
+  border-radius: 6px;
+  background: var(--pw-lowest);
+  min-height: 56px;
+}
+
+.pro-tracklane__body--audio {
+  min-height: 56px;
+  display: flex;
+  align-items: stretch;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Filmstrip: one thumbnail per cell, sampled across the source frame. */
+.pro-filmstrip {
+  display: grid;
+  grid-template-columns: repeat(20, minmax(0, 1fr));
+  gap: 1px;
+  height: 100%;
+  min-height: 56px;
+}
+
+.pro-filmstrip__cell {
+  display: block;
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center;
+  opacity: 0.88;
+}
+
+.pro-wave {
+  width: 100%;
+  height: 22px;
+  color: var(--pw-text-faint);
+}
+
+/* Watermark footprint drawn over the filmstrip lane. */
+.pro-tracklane__wm {
+  position: absolute;
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 4px;
+  color: #fff;
+  background: rgba(4, 5, 11, 0.5);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  pointer-events: none;
+}
+
+.pro-tracklane__scrim {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(4, 5, 11, 0.78);
+  pointer-events: none;
+}
+
+.pro-tracklane__sel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--tool-accent) 12%, transparent);
+  box-shadow: inset 1px 0 0 var(--tool-accent), inset -1px 0 0 var(--tool-accent);
+}
+
+/* Drag overlay — spans ruler + both lanes so handles line up with the tracks. */
+.pro-timeline__overlay {
+  position: absolute;
+  top: 32px;
+  right: 10px;
+  bottom: 26px;
+  left: 10px;
+  pointer-events: none;
+}
+
+.pro-timeline__handle {
+  position: absolute;
+  top: -6px;
+  bottom: 0;
+  width: 15px;
+  margin-left: -7px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: auto;
+  cursor: ew-resize;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+.pro-timeline__handle i {
+  width: 3px;
+  flex: 1;
+  border-radius: 2px;
+}
+
+.pro-timeline__handle::before {
+  content: '';
+  width: 13px;
+  height: 16px;
+  border-radius: 3px;
+  margin-bottom: -1px;
+}
+
+.pro-timeline__handle--in i,
+.pro-timeline__handle--in::before { background: var(--tool-accent); }
+.pro-timeline__handle--in i { box-shadow: 0 0 10px color-mix(in srgb, var(--tool-accent) 70%, transparent); }
+
+.pro-timeline__handle--out i,
+.pro-timeline__handle--out::before { background: #d8b4fe; }
+.pro-timeline__handle--out i { box-shadow: 0 0 10px rgba(216, 180, 254, 0.6); }
+
+.pro-timeline__handle:hover::before { filter: brightness(1.25); transform: scale(1.15); }
+.pro-timeline__handle:focus-visible { outline: 2px solid var(--tool-accent); outline-offset: 2px; }
+
+/* Playhead: pink needle, as in the reference. */
+.pro-timeline__playhead {
+  position: absolute;
+  top: -8px;
+  bottom: 0;
+  width: 2px;
+  background: var(--tool-accent-hot);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--tool-accent-hot) 70%, transparent);
+  pointer-events: none;
+}
+
+.pro-timeline__playhead i {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 11px;
+  height: 11px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: var(--tool-accent-hot);
+}
+
+.pro-timeline__playhead span {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 7px;
+  border-radius: 5px;
+  color: var(--pw-text);
+  background: var(--pw-high);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+  font-family: var(--pw-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pro-timeline__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 2px;
+  color: var(--pw-text-dim);
+  font-family: var(--pw-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.05em;
+}
+
+.pro-timeline__status em {
+  font-style: normal;
+  color: var(--tool-accent);
+  font-weight: 600;
+}
+
+.pro-timeline__accel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  color: var(--pw-text-faint);
+}
+
+.pro-timeline__accel .pw-badge__dot { color: var(--tool-accent); }
+
+/* ─── 17. Studio responsive ────────────────────────────────────────── */
+
+@media (max-width: 1080px) {
+  .pro-studio__body {
+    grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr);
+  }
+  .pro-media-bar__facts { display: none; }
+}
+
+@media (max-width: 860px) {
+  .pro-studio__body {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+  .pro-studio__canvas,
+  .pro-studio__inspector { overflow-y: visible; }
+  .pro-studio { overflow-y: auto; }
+}
+
+@media (max-width: 640px) {
+  .pro-media-bar { flex-wrap: wrap; gap: 6px; }
+  .pro-studio__footer { flex-wrap: wrap; min-height: 60px; }
+  .pro-studio__meta { align-items: flex-start; text-align: left; }
+}
+
+
+.pro-workspace__canvas {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.pro-workspace__inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Legacy single/double column content areas keep working. */
+.converter-feature-content {
+  background: var(--pw-low) !important;
+}
+
+.converter-feature-content--stacked {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.converter-feature-content > div:not(.converter-tool-preview):not(.converter-trim-preview) {
+  min-width: 0;
+}
+
+/* ─── 4. Panel ──────────────────────────────────────────────────────── */
+
+.pro-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--pw-line);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--pw-mid), var(--pw-low));
+  box-shadow: 0 6px 18px -14px rgba(0, 0, 0, 0.9);
+  min-width: 0;
+}
+
+.pro-panel--canvas {
+  padding: 8px;
+}
+
+.pro-panel--flush {
+  padding: 0;
+  overflow: hidden;
+}
+
+.pro-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pro-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--pw-text);
+  min-width: 0;
+}
+
+.pro-panel__title svg {
+  width: 13px;
+  height: 13px;
+  color: var(--tool-accent);
+  flex-shrink: 0;
+}
+
+.pro-panel__sub {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--pw-text-dim);
+  margin: 0;
+}
+
+/* ─── 5. Typography roles (the mockups' tech-data / tech-timecode) ──── */
+
+.pw-mono {
+  font-family: var(--pw-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  letter-spacing: 0.02em;
+}
+
+.pw-time {
+  font-family: var(--pw-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.pw-data {
+  font-family: var(--pw-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.pw-eyebrow {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pw-text-faint);
+}
+
+.pw-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--pw-text-dim);
+}
+
+/* ─── 6. Badges & pills ─────────────────────────────────────────────── */
+
+.pw-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--tool-accent) 32%, transparent);
+  color: var(--tool-accent);
+  background: color-mix(in srgb, var(--tool-accent) 13%, transparent);
+  font-family: var(--pw-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.pw-badge--2 {
+  border-color: color-mix(in srgb, var(--tool-accent-2) 34%, transparent);
+  color: var(--tool-accent-2);
+  background: color-mix(in srgb, var(--tool-accent-2) 13%, transparent);
+}
+
+.pw-badge--hot {
+  border-color: color-mix(in srgb, var(--tool-accent-hot) 34%, transparent);
+  color: var(--tool-accent-hot);
+  background: color-mix(in srgb, var(--tool-accent-hot) 13%, transparent);
+}
+
+.pw-badge--flat {
+  border-color: var(--pw-hi-line);
+  color: var(--pw-text-dim);
+  background: var(--pw-high);
+}
+
+.pw-badge__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+  animation: pw-pulse 1.7s ease-in-out infinite;
+}
+
+@keyframes pw-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ─── 7. Buttons ────────────────────────────────────────────────────── */
+
+.converter-feature-dialog button {
+  transition: border-color 140ms ease, background-color 140ms ease,
+    color 140ms ease, transform 120ms ease, box-shadow 140ms ease;
+  font-family: inherit;
+}
+
+.converter-feature-dialog button:hover:not(:disabled) {
+  filter: none;
+  border-color: color-mix(in srgb, var(--tool-accent) 45%, transparent) !important;
+  color: var(--pw-text) !important;
+}
+
+.converter-feature-dialog button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.converter-feature-dialog button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.converter-feature-dialog button:focus-visible,
+.converter-feature-dialog input:focus-visible,
+.converter-feature-dialog select:focus-visible {
+  outline: 2px solid var(--tool-accent) !important;
+  outline-offset: 2px !important;
+}
+
+/* Generic button reset used by every new tool control. */
+.pw-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 5px 10px;
+  border: 1px solid var(--pw-hi-line);
+  border-radius: 7px;
+  color: var(--pw-text-dim);
+  background: var(--pw-high);
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pw-btn--ghost {
+  background: transparent;
+}
+
+.pw-btn--quiet {
+  border-color: transparent;
+  background: transparent;
+  min-height: 22px;
+  padding: 3px 6px;
+  font-size: 9.5px;
+}
+
+.pw-btn--primary {
+  border-color: color-mix(in srgb, var(--tool-accent) 55%, transparent);
+  color: #fff;
+  background: linear-gradient(135deg, var(--tool-accent-strong), var(--tool-accent-2));
+  box-shadow: 0 0 18px color-mix(in srgb, var(--tool-accent) 32%, transparent);
+}
+
+.pw-btn--danger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--tool-accent-hot) 55%, transparent) !important;
+  color: var(--tool-accent-hot) !important;
+}
+
+.pw-btn[aria-pressed='true'],
+.pw-btn--on {
+  border-color: color-mix(in srgb, var(--tool-accent) 62%, transparent);
+  color: var(--tool-accent);
+  background: color-mix(in srgb, var(--tool-accent) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tool-accent) 10%, transparent);
+}
+
+.pw-btn[aria-pressed='true']:hover,
+.pw-btn--on:hover {
+  color: var(--pw-text) !important;
+}
+
+/* Icon-only square. */
+.pw-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border: 1px solid var(--pw-hi-line);
+  border-radius: 7px;
+  color: var(--pw-text-dim);
+  background: var(--pw-high);
+  cursor: pointer;
+}
+
+.pw-icon-btn:hover:not(:disabled) {
+  color: var(--pw-text) !important;
+}
+
+.pw-icon-btn--on,
+.pw-icon-btn[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--tool-accent) 60%, transparent);
+  color: #fff;
+  background: linear-gradient(135deg, var(--tool-accent-strong), var(--tool-accent));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--tool-accent) 34%, transparent);
+}
+
+/* Vertical segmented control (direction pickers, mode switches). */
+.pw-seg {
+  display: grid;
+  gap: 5px;
+  padding: 4px;
+  border-radius: 11px;
+  background: var(--pw-lowest);
+}
+
+.pw-seg--row {
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+}
+
+.pw-seg__item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--pw-text-dim);
+  background: transparent;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+}
+
+.pw-seg__item:hover {
+  color: var(--pw-text);
+  background: var(--pw-high);
+}
+
+.pw-seg__item[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--tool-accent) 34%, transparent);
+  color: var(--tool-accent);
+  background: var(--pw-high);
+  box-shadow: 0 2px 10px -4px rgba(0, 0, 0, 0.7);
+}
+
+/* Selectable option card (aspect presets, engines, flip directions). */
+.pw-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--pw-line);
+  border-radius: 8px;
+  color: var(--pw-text-dim);
+  background: var(--pw-high);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.pw-option:hover {
+  border-color: color-mix(in srgb, var(--tool-accent) 40%, transparent) !important;
+  color: var(--pw-text) !important;
+}
+
+.pw-option[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--tool-accent) 62%, transparent);
+  color: var(--pw-text);
+  background: color-mix(in srgb, var(--tool-accent) 14%, var(--pw-high));
+}
+
+.pw-option[aria-pressed='true'] .pw-option__mark {
+  opacity: 1;
+}
+
+.pw-option__mark {
+  opacity: 0;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--tool-accent);
+  transition: opacity 140ms ease;
+}
+
+.pw-option__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pw-option__stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pw-option__stack small {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--pw-text-faint);
+}
+
+.pw-option__glyph {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  color: var(--pw-text-dim);
+  background: var(--pw-lowest);
+}
+
+.pw-option[aria-pressed='true'] .pw-option__glyph {
+  color: var(--tool-accent);
+  background: color-mix(in srgb, var(--tool-accent) 16%, transparent);
+}
+
+/* Grid of aspect / preset tiles. */
+.pw-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.pw-tile-grid--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pw-tile-grid--5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.pw-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 4px;
+  border: 1px solid var(--pw-line);
+  border-radius: 8px;
+  color: var(--pw-text-dim);
+  background: var(--pw-high);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  text-align: center;
+}
+
+.pw-tile:hover {
+  border-color: color-mix(in srgb, var(--tool-accent) 40%, transparent) !important;
+  color: var(--tool-accent) !important;
+}
+
+.pw-tile[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--tool-accent) 62%, transparent);
+  color: var(--tool-accent);
+  background: color-mix(in srgb, var(--tool-accent) 14%, var(--pw-high));
+}
+
+/* Icon + label tile (quick action rows). */
+.pw-tile--action {
+  gap: 4px;
+  padding: 10px 6px;
+}
+
+.pw-tile--action svg {
+  color: currentColor;
+}
+
+/* ─── 8. Fields ─────────────────────────────────────────────────────── */
+
+.pw-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pw-field__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pw-input,
+.pw-number,
+.pw-select,
+.converter-feature-dialog input[type='text'],
+.converter-feature-dialog input[type='number'],
+.converter-feature-dialog select {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid var(--pw-hi-line) !important;
+  border-radius: 7px;
+  color: var(--pw-text) !important;
+  background: var(--pw-lowest) !important;
+  color-scheme: dark;
+  font-family: var(--font-main, 'Outfit', sans-serif);
+  font-size: 11px;
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.converter-feature-dialog input[type='text']:focus,
+.converter-feature-dialog input[type='number']:focus,
+.converter-feature-dialog select:focus {
+  border-color: color-mix(in srgb, var(--tool-accent) 60%, transparent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tool-accent) 13%, transparent) !important;
+}
+
+.converter-feature-dialog input::placeholder {
+  color: var(--pw-text-faint);
+}
+
+.pw-number,
+.converter-feature-dialog input[type='number'] {
+  font-family: var(--pw-mono) !important;
+  font-variant-numeric: tabular-nums;
+  color: var(--tool-accent) !important;
+}
+
+.converter-feature-dialog select {
+  cursor: pointer;
+}
+
+/* Toggle switch (the mockups' hardware-style switch). */
+.pw-switch {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 40px;
+  height: 22px;
+  padding: 2px;
+  border: 1px solid var(--pw-hi-line);
+  border-radius: 999px;
+  background: var(--pw-lowest);
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.pw-switch[data-on='true'] {
+  border-color: color-mix(in srgb, var(--tool-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--tool-accent) 65%, transparent);
+}
+
+.pw-switch i {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--pw-text-dim);
+  transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1), background-color 160ms ease;
+}
+
+.pw-switch[data-on='true'] i {
+  transform: translateX(18px);
+  background: #fff;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--tool-accent) 70%, transparent);
+}
+
+/* Checkbox row. */
+.pw-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid var(--pw-line);
+  border-radius: 10px;
+  background: var(--pw-high);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.pw-check[data-on='true'] {
+  border-color: color-mix(in srgb, var(--tool-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--tool-accent) 11%, var(--pw-high));
+}
+
+.pw-check input {
+  width: 15px;
+  height: 15px;
+  margin: 1px 0 0;
+  flex-shrink: 0;
+  accent-color: var(--tool-accent);
+  cursor: pointer;
+}
+
+/* ─── 9. Sliders ────────────────────────────────────────────────────── */
+
+.pw-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--pw-lowest);
+  box-shadow: inset 0 0 0 1px var(--pw-line);
+  outline: none;
+  cursor: pointer;
+}
+
+.pw-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--tool-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tool-accent) 18%, transparent),
+    0 0 12px color-mix(in srgb, var(--tool-accent) 50%, transparent);
+  cursor: pointer;
+}
+
+.pw-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--tool-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tool-accent) 18%, transparent);
+  cursor: pointer;
+}
+
+.converter-feature-dialog input[type='range'] {
+  accent-color: var(--tool-accent) !important;
+  cursor: pointer;
+}
+
+/* Tick scale under a slider. */
+.pw-scale {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-family: var(--pw-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--pw-text-faint);
+}
+
+/* Stepper row (−1.0° / −0.1° / +0.1° / +1.0°). */
+.pw-steppers {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.pw-stepper {
+  padding: 6px 4px;
+  border: 1px solid var(--pw-line);
+  border-radius: 8px;
+  color: var(--pw-text);
+  background: var(--pw-high);
+  font-family: var(--pw-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pw-stepper:hover {
+  border-color: color-mix(in srgb, var(--tool-accent) 45%, transparent) !important;
+  color: var(--tool-accent) !important;
+}
+
+/* Meter / bar track. */
+.pw-meter {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--pw-lowest);
+  box-shadow: inset 0 0 0 1px var(--pw-line);
+  overflow: hidden;
+}
+
+.pw-meter__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--tool-accent-strong), var(--tool-accent));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--tool-accent) 45%, transparent);
+}
+
+.pw-meter__fill--2 {
+  background: linear-gradient(90deg, var(--tool-accent-2), #c084fc);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--tool-accent-2) 45%, transparent);
+}
+
+/* ─── 10. Preview surfaces ──────────────────────────────────────────── */
+
+.converter-tool-preview,
+.pro-canvas {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--pw-line);
+  border-radius: 12px;
+  background:
+    radial-gradient(ellipse at 50% 42%, rgba(99, 102, 241, 0.08), transparent 62%),
+    var(--pw-lowest);
+}
+
+.converter-tool-preview {
+  min-height: 210px;
+  max-height: 300px;
+}
+
+.converter-tool-preview > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: inherit;
+  max-height: inherit;
+  object-fit: contain;
+  transition: filter 120ms ease, transform 160ms ease;
+}
+
+.converter-tool-preview__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  color: var(--pw-text-faint);
+  font-size: 12px;
+}
+
+.converter-tool-preview__caption {
+  position: absolute;
+  inset: auto 10px 10px;
+  z-index: 4;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  color: var(--pw-text);
+  background: rgba(6, 7, 14, 0.78);
+  backdrop-filter: blur(10px);
+  font-family: var(--pw-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+}
+
+.converter-tool-preview__caption span:last-child {
+  overflow: hidden;
+  color: var(--pw-text-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.converter-tool-preview__crop {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(78%, 100%);
+  max-height: calc(100% - 44px);
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--tool-accent);
+  box-shadow: 0 0 0 9999px rgba(4, 5, 11, 0.55),
+    0 0 22px color-mix(in srgb, var(--tool-accent) 30%, transparent);
+}
+
+.converter-tool-preview__crop i {
+  position: absolute;
+  inset: 0 33.333%;
+  border-right: 1px solid color-mix(in srgb, var(--tool-accent) 38%, transparent);
+  border-left: 1px solid color-mix(in srgb, var(--tool-accent) 38%, transparent);
+  pointer-events: none;
+}
+
+.converter-tool-preview__crop i + i {
+  inset: 33.333% 0;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--tool-accent) 38%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--tool-accent) 38%, transparent);
+}
+
+.converter-tool-preview__watermark {
+  position: absolute;
+  z-index: 3;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 5px;
+  color: #fff;
+  background: rgba(4, 5, 11, 0.42);
+  font-size: 13px;
+  font-weight: 700;
+  text-shadow: 0 1px 4px #000;
+  pointer-events: none;
+}
+
+.converter-tool-preview__watermark--top-left { top: 12px; left: 12px; }
+.converter-tool-preview__watermark--top-right { top: 12px; right: 12px; }
+.converter-tool-preview__watermark--bottom-left { bottom: 46px; left: 12px; }
+.converter-tool-preview__watermark--bottom-right { right: 12px; bottom: 46px; }
+.converter-tool-preview__logo { letter-spacing: 0.1em; }
+
+/* Floating HUD chip over a canvas. */
+.pro-canvas__chip {
+  position: absolute;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  color: var(--pw-text-dim);
+  background: rgba(6, 7, 14, 0.82);
+  backdrop-filter: blur(10px);
+  font-family: var(--pw-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+}
+
+.pro-canvas__chip--tl { top: 10px; left: 10px; }
+.pro-canvas__chip--tr { top: 10px; right: 10px; }
+.pro-canvas__chip--bl { bottom: 10px; left: 10px; }
+.pro-canvas__chip--br { bottom: 10px; right: 10px; }
+
+/* ─── 11. Telemetry strip ───────────────────────────────────────────── */
+
+.pro-telemetry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--pw-line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, var(--pw-mid), var(--pw-low));
+  font-family: var(--pw-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--pw-text-dim);
+  min-width: 0;
+}
+
+.pro-telemetry > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pro-telemetry b {
+  color: var(--pw-text);
+  font-weight: 600;
+}
+
+.pro-telemetry em {
+  font-style: normal;
+  color: var(--tool-accent);
+  font-weight: 600;
+}
+
+/* Stat card (rotate mockup's 3-up telemetry row). */
+.pro-stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--pw-line);
+  border-radius: 9px;
+  background: linear-gradient(180deg, var(--pw-mid), var(--pw-low));
+  min-width: 0;
+}
+
+.pro-stat__glyph {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  color: var(--tool-accent);
+  background: var(--pw-high);
+}
+
+.pro-stat__glyph--2 { color: var(--tool-accent-2); }
+.pro-stat__glyph--hot { color: var(--tool-accent-hot); }
+
+.pro-stat__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pro-stat__value {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pw-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pro-stat__value--accent { color: var(--tool-accent); }
+
+.pro-stat-row {
+  display: grid;
+  gap: 10px;
+}
+
+.pro-stat-row--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pro-stat-row--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+/* ─── 12. Scrubber / timeline ───────────────────────────────────────── */
+
+.pro-track {
+  position: relative;
+  height: 26px;
+  margin: 0 2px;
+}
+
+.pro-track__rail {
+  position: absolute;
+  top: 11px;
+  right: 0;
+  left: 0;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--pw-lowest);
+  box-shadow: inset 0 0 0 1px var(--pw-line);
+}
+
+.pro-track__sel {
+  position: absolute;
+  top: 11px;
+  height: 5px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--tool-accent-strong), var(--tool-accent));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--tool-accent) 40%, transparent);
+}
+
+.pro-track__head {
+  position: absolute;
+  top: 5px;
+  width: 3px;
+  height: 17px;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.7);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* Thin progress variant used by compression / gif readouts. */
+.pro-track--slim { height: 14px; }
+.pro-track--slim .pro-track__rail { top: 5px; }
+.pro-track--slim .pro-track__sel { top: 5px; }
+.pro-track--slim .pro-track__head { top: 1px; height: 13px; }
+
+/* Transport deck under a canvas (compact). */
+.pro-transport {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 1px solid var(--pw-line);
+  border-radius: 9px;
+  background: linear-gradient(180deg, var(--pw-mid), var(--pw-low));
+  min-width: 0;
+}
+
+.pro-transport__cluster {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pro-transport__readout {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  font-family: var(--pw-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.pro-transport__readout small {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--pw-text-faint);
+}
+
+/* ─── 13. Footer / command bar ──────────────────────────────────────── */
+
+.converter-feature-dialog > .converter-feature-footer,
+.converter-feature-dialog > footer.converter-feature-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 64px;
+  padding: 12px 20px !important;
+  border-top: 1px solid var(--pw-line) !important;
+  background: linear-gradient(180deg, var(--pw-low), var(--pw-lowest)) !important;
+}
+
+.converter-feature-footer > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.converter-feature-footer .pw-footer__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+/* The apply button is always the last child. */
+.converter-feature-footer > button:last-child,
+.converter-feature-footer > div:last-child > button:last-child {
+  min-height: 40px;
+  padding: 9px 18px !important;
+  border: 1px solid color-mix(in srgb, var(--tool-accent) 55%, transparent) !important;
+  border-radius: 10px !important;
+  color: #fff !important;
+  background: linear-gradient(135deg, var(--tool-accent-strong), var(--tool-accent-2)) !important;
+  box-shadow: 0 0 18px color-mix(in srgb, var(--tool-accent) 34%, transparent) !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  gap: 8px !important;
+}
+
+.converter-feature-footer > button:first-child,
+.converter-feature-footer > div:last-child > button:first-child {
+  min-height: 38px;
+  padding: 8px 14px !important;
+  border: 1px solid var(--pw-hi-line) !important;
+  border-radius: 9px !important;
+  color: var(--pw-text-dim) !important;
+  background: var(--pw-high) !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+}
+
+/* ─── 14. Note / callout ────────────────────────────────────────────── */
+
+.pro-note {
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--tool-accent) 22%, transparent);
+  border-radius: 8px;
+  color: var(--pw-text-dim);
+  background: color-mix(in srgb, var(--tool-accent) 8%, transparent);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.pro-note strong { color: var(--tool-accent); font-weight: 600; }
+
+/* ─── 15. Utility ───────────────────────────────────────────────────── */
+
+.pro-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pro-row--between { justify-content: space-between; }
+.pro-row--wrap { flex-wrap: wrap; }
+.pro-col {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.pro-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.pro-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.pro-grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.pro-sub {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--pw-text-faint);
+}
+
+.pro-stack-tight { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+
+/* ─── 16. Responsive ────────────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .converter-feature-dialog > .converter-feature-content,
+  .converter-feature-dialog > .pro-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pro-stat-row--3 { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .converter-feature-overlay { padding: 10px !important; }
+  .converter-feature-dialog,
+  .converter-feature-dialog--wide {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 95vh !important;
+    border-radius: 13px !important;
+  }
+  .converter-feature-dialog > .converter-feature-header,
+  .converter-feature-dialog > header.converter-feature-header { padding: 11px 14px !important; }
+  .converter-feature-dialog > .converter-feature-footer,
+  .converter-feature-dialog > footer.converter-feature-footer { padding: 10px 12px !important; }
+  .pro-grid-2,
+  .pro-grid-3,
+  .pro-grid-4,
+  .pw-tile-grid,
+  .pw-tile-grid--3 { grid-template-columns: minmax(0, 1fr); }
+  .pw-tile-grid--5 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .converter-tool-preview { min-height: 175px; }
+}

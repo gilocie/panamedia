@@ -1,5 +1,25 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Check, Pause, Play, RotateCcw, Scissors, X } from 'lucide-react';
+import React, { useRef, useState } from "react";
+import {
+  Check,
+  FastForward,
+  Pause,
+  Play,
+  RefreshCw,
+  Scissors,
+  SkipBack,
+  SkipForward,
+  Timer,
+  Volume2
+} from "lucide-react";
+import { Filmstrip } from "./Filmstrip";
+import { AudioWaveform } from "./AudioWaveform";
+import { useTimelineDrag } from "./useTimelineDrag";
+import {
+  ProInspector,
+  ProPanel,
+  ProTimeline,
+  ProToolShell
+} from "./ProToolShell";
 
 interface CutTrimToolProps {
   fileName: string;
@@ -22,6 +42,12 @@ const formatTrimTime = (value: number) => {
   return `${time}.${tenths % 10}`;
 };
 
+const ACCENT = '#38bdf8';
+const HOT = '#ec4899';
+
+/* Reference: convertor_pro_features_ui/cut_trim_studio/code.html
+   Left = live monitor + transport dock, then a full-width timeline stage.
+   Right = trim mode, boundary telemetry inputs, presets, net length. */
 export const CutTrimTool: React.FC<CutTrimToolProps> = ({
   fileName,
   duration = 0,
@@ -42,18 +68,10 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
   const totalDuration = mediaDuration > 0 ? mediaDuration : duration;
   const usableDuration = Math.max(0, totalDuration);
   const clipDuration = Math.max(0, endSec - startSec);
-  const startPercent = usableDuration > 0 ? (startSec / usableDuration) * 100 : 0;
-  const endPercent = usableDuration > 0 ? (endSec / usableDuration) * 100 : 100;
+  const pct = (value: number) => (usableDuration > 0 ? Math.min(100, Math.max(0, (value / usableDuration) * 100)) : 0);
   const mediaUrl = `http://127.0.0.1:${streamingPort}/stream?path=${encodeURIComponent(fileName)}`;
   const thumbnailUrl = `http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(fileName)}`;
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  const selectionPct = usableDuration > 0 ? Math.round((clipDuration / usableDuration) * 100) : 0;
 
   const seekPreview = (time: number) => {
     setPlayhead(time);
@@ -117,461 +135,454 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
     });
   };
 
+  const applyPreset = (preset: 'first30' | 'last30' | 'middle') => {
+    if (usableDuration <= 0) return;
+    hasEditedRange.current = true;
+    if (preset === 'first30') {
+      setEndSec(Math.min(usableDuration, 30));
+      setStartSec(0);
+      seekPreview(0);
+    } else if (preset === 'last30') {
+      setStartSec(Math.max(0, usableDuration - 30));
+      setEndSec(usableDuration);
+      seekPreview(Math.max(0, usableDuration - 30));
+    } else {
+      const third = usableDuration / 3;
+      setStartSec(third);
+      setEndSec(third * 2);
+      seekPreview(third);
+    }
+  };
+
   const handleApply = () => {
     if (clipDuration <= 0) return;
     onApply({ startSec, endSec });
     onClose();
   };
 
-  return (
-    <div
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 12000,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '24px',
-        background: 'rgba(3, 5, 12, 0.78)',
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)'
-      }}
-    >
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="cut-trim-title"
-        style={{
-          width: 'min(760px, 100%)',
-          maxHeight: 'min(92vh, 820px)',
-          overflowY: 'auto',
-          borderRadius: '18px',
-          border: '1px solid rgba(56,189,248,0.28)',
-          background: 'linear-gradient(155deg, #191b29 0%, #101119 72%)',
-          boxShadow: '0 32px 100px rgba(0,0,0,0.68), 0 0 45px rgba(14,165,233,0.1)',
-          color: '#f8fafc'
-        }}
-      >
-        <style>{`
-          .cut-trim-range {
-            appearance: none;
-            -webkit-appearance: none;
-            pointer-events: none;
-            background: transparent;
-          }
-          .cut-trim-range::-webkit-slider-runnable-track {
-            height: 6px;
-            background: transparent;
-          }
-          .cut-trim-range::-moz-range-track {
-            height: 6px;
-            background: transparent;
-          }
-          .cut-trim-range::-webkit-slider-thumb {
-            appearance: none;
-            -webkit-appearance: none;
-            width: 16px;
-            height: 16px;
-            margin-top: -5px;
-            border: 2px solid #e0f2fe;
-            border-radius: 50%;
-            background: #0ea5e9;
-            box-shadow: 0 0 0 3px rgba(14,165,233,0.18), 0 0 12px rgba(14,165,233,0.5);
-            pointer-events: auto;
-            cursor: ew-resize;
-          }
-          .cut-trim-range--end::-webkit-slider-thumb {
-            background: #ec4899;
-            border-color: #fce7f3;
-            box-shadow: 0 0 0 3px rgba(236,72,153,0.16), 0 0 12px rgba(236,72,153,0.45);
-          }
-          .cut-trim-range::-moz-range-thumb {
-            width: 12px;
-            height: 12px;
-            border: 2px solid #e0f2fe;
-            border-radius: 50%;
-            background: #0ea5e9;
-            box-shadow: 0 0 0 3px rgba(14,165,233,0.18), 0 0 12px rgba(14,165,233,0.5);
-            pointer-events: auto;
-            cursor: ew-resize;
-          }
-          .cut-trim-range--end::-moz-range-thumb {
-            background: #ec4899;
-            border-color: #fce7f3;
-            box-shadow: 0 0 0 3px rgba(236,72,153,0.16), 0 0 12px rgba(236,72,153,0.45);
-          }
-        `}</style>
-        <header style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '16px',
-          padding: '18px 22px',
-          borderBottom: '1px solid rgba(255,255,255,0.07)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-            <div style={{
-              display: 'grid',
-              placeItems: 'center',
-              width: '40px',
-              height: '40px',
-              flexShrink: 0,
-              borderRadius: '12px',
-              color: '#e0f2fe',
-              background: 'linear-gradient(145deg, #0284c7, #38bdf8)',
-              boxShadow: '0 5px 18px rgba(14,165,233,0.25)'
-            }}>
-              <Scissors size={19} />
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <h2 id="cut-trim-title" style={{ margin: 0, fontSize: '16px', fontWeight: 750 }}>
-                Cut &amp; Trim
-              </h2>
-              <div title={fileName} style={{
-                marginTop: '4px',
-                overflow: 'hidden',
-                color: 'rgba(203,213,225,0.65)',
-                fontSize: '11px',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap'
-              }}>
-                {fileName.split(/[\\/]/).pop()}
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close trim editor"
-            style={{
-              display: 'grid',
-              placeItems: 'center',
-              width: '34px',
-              height: '34px',
-              flexShrink: 0,
-              borderRadius: '10px',
-              border: '1px solid rgba(255,255,255,0.1)',
-              color: 'rgba(226,232,240,0.75)',
-              background: 'rgba(255,255,255,0.045)',
-              cursor: 'pointer'
-            }}
-          >
-            <X size={16} />
-          </button>
-        </header>
+  /* ── Timeline dragging ────────────────────────────────────────────────
+     The handles map a 0–1 fraction of the track straight onto seconds.
+     While a drag is live the preview is parked at that timecode so the
+     monitor follows the handle, which is what makes trimming feel direct. */
+  const trackRef = useRef<HTMLDivElement | null>(null);
 
-        <div style={{ padding: '20px 22px 22px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-          <div style={{
+  const { dragging, handleProps, touchAction } = useTimelineDrag({
+    trackRef,
+    onDrag: (target, fraction) => {
+      const seconds = fraction * usableDuration;
+      if (target === 'in') updateStart(seconds);
+      else if (target === 'out') updateEnd(seconds);
+      else seekPreview(seconds);
+    },
+    onCommit: (target) => {
+      // Snap the preview to whichever edge the drag left behind.
+      if (target === 'in') seekPreview(startSec);
+      else if (target === 'out') seekPreview(Math.max(startSec, endSec - 0.05));
+    },
+    onDragStateChange: (active) => {
+      if (active) setIsPlaying(false);
+    }
+  });
+
+  const inHandleProps = handleProps('in');
+  const outHandleProps = handleProps('out');
+  const handleStyle = { touchAction } as const;
+
+  return (
+    <ProToolShell
+      title="Precision Cut & Trim Studio"
+      subtitle={fileName}
+      icon={<Scissors size={18} />}
+      accent={ACCENT}
+      badges={
+        <>
+          <span className="pw-badge">
+            <i className="pw-badge__dot" /> DIRECT STREAM PREVIEW
+          </span>
+          <span className="pw-badge pw-badge--flat">REC.709 · 1920x1080</span>
+        </>
+      }
+      onClose={onClose}
+      footerLeft={
+        <>
+          <button type="button" className="pw-btn" onClick={resetRange}>
+            <RefreshCw size={13} /> Reset to Default
+          </button>
+          <button type="button" className="pw-btn" onClick={onClose}>
+            Discard
+          </button>
+        </>
+      }
+      footerMeta={
+        <>
+          <span className="pw-eyebrow">Keeps {formatTrimTime(clipDuration)} of {formatTrimTime(usableDuration)}</span>
+          <span className="pw-data" style={{ color: ACCENT }}>{selectionPct}% of source retained</span>
+        </>
+      }
+      footerActionLabel="Apply to Conversion Pipeline"
+      footerActionIcon={<Check size={14} />}
+      applyDisabled={clipDuration <= 0}
+      onApply={handleApply}
+    >
+      {/* ── Monitor + transport ── */}
+      <section className="pro-panel pro-panel--canvas" style={{ gap: 6 }}>
+        <div
+          className="pro-monitor"
+          style={{
             position: 'relative',
             overflow: 'hidden',
-            aspectRatio: '16 / 8.5',
-            minHeight: '170px',
-            maxHeight: '320px',
-            borderRadius: '12px',
-            border: '1px solid rgba(255,255,255,0.09)',
-            background: '#08090f'
-          }}>
-            {!previewFailed && (
-              <video
-                ref={videoRef}
-                src={mediaUrl}
-                poster={thumbnailUrl}
-                preload="metadata"
-                muted
-                onLoadedMetadata={handleLoadedMetadata}
-                onTimeUpdate={(event) => {
-                  const video = event.currentTarget;
-                  setPlayhead(video.currentTime);
-                  if (video.currentTime >= endSec) {
-                    video.pause();
-                    video.currentTime = startSec;
-                    setPlayhead(startSec);
-                    setIsPlaying(false);
-                  }
-                }}
-                onPlay={() => setIsPlaying(true)}
-                onPause={() => setIsPlaying(false)}
-                onError={() => setPreviewFailed(true)}
-                style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-              />
-            )}
-            {previewFailed && (
-              <div style={{
+            borderRadius: 8,
+            background: 'var(--pw-lowest)'
+          }}
+        >
+          {!previewFailed && (
+            <video
+              ref={videoRef}
+              src={mediaUrl}
+              poster={thumbnailUrl}
+              preload="metadata"
+              muted
+              onLoadedMetadata={handleLoadedMetadata}
+              onTimeUpdate={(event) => {
+                const video = event.currentTarget;
+                setPlayhead(video.currentTime);
+                if (video.currentTime >= endSec) {
+                  video.pause();
+                  video.currentTime = startSec;
+                  setPlayhead(startSec);
+                  setIsPlaying(false);
+                }
+              }}
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              onError={() => setPreviewFailed(true)}
+              style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+            />
+          )}
+          {previewFailed && (
+            <div
+              style={{
                 position: 'absolute',
                 inset: 0,
                 display: 'grid',
                 placeItems: 'center',
-                padding: '20px',
-                color: 'rgba(203,213,225,0.72)',
-                background: `linear-gradient(rgba(7,8,14,0.7), rgba(7,8,14,0.88)), url("${thumbnailUrl}") center / cover`,
-                fontSize: '12px',
-                textAlign: 'center'
-              }}>
-                Preview unavailable. You can still set the trim range below.
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={togglePreview}
-              aria-label={isPlaying ? 'Pause preview' : 'Preview selected range'}
-              style={{
-                position: 'absolute',
-                left: '16px',
-                bottom: '14px',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '8px 12px',
-                borderRadius: '9px',
-                border: '1px solid rgba(255,255,255,0.16)',
-                color: '#fff',
-                background: 'rgba(8,10,18,0.78)',
-                backdropFilter: 'blur(8px)',
-                cursor: 'pointer'
+                padding: 20,
+                textAlign: 'center',
+                color: 'var(--pw-text-dim)',
+                background: `linear-gradient(rgba(7,8,14,0.72), rgba(7,8,14,0.9)), url("${thumbnailUrl}") center / cover`,
+                fontSize: 12
               }}
             >
-              {isPlaying ? <Pause size={14} /> : <Play size={14} fill="currentColor" />}
-              <span style={{ fontSize: '11px', fontWeight: 650 }}>{isPlaying ? 'Pause preview' : 'Preview selection'}</span>
-            </button>
-            <span style={{
+              Preview unavailable. You can still set the trim range.
+            </div>
+          )}
+          {/* Excluded-region scrims, driven by the live range */}
+          <div
+            aria-hidden="true"
+            style={{
               position: 'absolute',
-              right: '14px',
-              bottom: '17px',
-              color: '#fff',
-              fontFamily: 'monospace',
-              fontSize: '11px',
-              textShadow: '0 1px 5px #000'
-            }}>
-              {formatTrimTime(playhead)} / {formatTrimTime(usableDuration)}
-            </span>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '10px' }}>
-            {[
-              { label: 'START', value: startSec, color: '#38bdf8' },
-              { label: 'CLIP LENGTH', value: clipDuration, color: '#4ade80' },
-              { label: 'END', value: endSec, color: '#f472b6' }
-            ].map((item) => (
-              <div key={item.label} style={{
-                minWidth: 0,
-                padding: '11px 12px',
-                borderRadius: '11px',
-                border: '1px solid rgba(255,255,255,0.07)',
-                background: 'rgba(255,255,255,0.035)'
-              }}>
-                <div style={{ color: 'rgba(148,163,184,0.72)', fontSize: '9px', fontWeight: 750, letterSpacing: '0.08em' }}>
-                  {item.label}
-                </div>
-                <div style={{ marginTop: '4px', color: item.color, fontFamily: 'monospace', fontSize: '17px', fontWeight: 750 }}>
-                  {formatTrimTime(item.value)}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div style={{
-            padding: '15px',
-            borderRadius: '12px',
-            border: '1px solid rgba(255,255,255,0.07)',
-            background: 'rgba(6,8,15,0.42)'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '12px' }}>
-              <div>
-                <div style={{ fontSize: '12px', fontWeight: 700 }}>Selected range</div>
-                <div style={{ marginTop: '3px', color: 'rgba(148,163,184,0.72)', fontSize: '10px' }}>
-                  Drag a handle or enter a time in seconds
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={resetRange}
-                disabled={usableDuration <= 0}
+              top: 0,
+              bottom: 0,
+              left: 0,
+              width: `${pct(startSec)}%`,
+              background: 'rgba(4,5,11,0.78)',
+              backdropFilter: 'blur(1px)'
+            }}
+          />
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              top: 0,
+              right: 0,
+              bottom: 0,
+              width: `${100 - pct(endSec)}%`,
+              background: 'rgba(4,5,11,0.78)',
+              backdropFilter: 'blur(1px)'
+            }}
+          />
+          {usableDuration > 0 && (
+            <>
+              <div
+                aria-hidden="true"
                 style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '7px 9px',
-                  borderRadius: '8px',
-                  border: '1px solid rgba(255,255,255,0.09)',
-                  color: 'rgba(203,213,225,0.85)',
-                  background: 'rgba(255,255,255,0.04)',
-                  fontSize: '10px',
-                  cursor: usableDuration > 0 ? 'pointer' : 'not-allowed',
-                  opacity: usableDuration > 0 ? 1 : 0.45
-                }}
-              >
-                <RotateCcw size={12} /> Full clip
-              </button>
-            </div>
-
-            <div style={{ position: 'relative', height: '30px', margin: '0 4px 12px' }}>
-              <div style={{
-                position: 'absolute',
-                top: '12px',
-                right: 0,
-                left: 0,
-                height: '6px',
-                borderRadius: '99px',
-                background: 'rgba(255,255,255,0.12)'
-              }} />
-              <div style={{
-                position: 'absolute',
-                top: '12px',
-                left: `${startPercent}%`,
-                width: `${Math.max(0, endPercent - startPercent)}%`,
-                height: '6px',
-                borderRadius: '99px',
-                background: 'linear-gradient(90deg, #38bdf8, #818cf8, #ec4899)',
-                boxShadow: '0 0 12px rgba(56,189,248,0.24)'
-              }} />
-              {usableDuration > 0 && (
-                <div style={{
                   position: 'absolute',
-                  top: '5px',
-                  left: `${Math.min(100, Math.max(0, (playhead / usableDuration) * 100))}%`,
-                  width: '2px',
-                  height: '20px',
+                  top: 0,
+                  bottom: 0,
+                  left: `${pct(startSec)}%`,
+                  width: 2,
+                  background: ACCENT,
+                  boxShadow: `0 0 12px ${ACCENT}`
+                }}
+              />
+              <div
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  right: `${100 - pct(endSec)}%`,
+                  bottom: 0,
+                  width: 2,
+                  background: HOT,
+                  boxShadow: `0 0 12px ${HOT}`
+                }}
+              />
+              <div
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
+                  left: `${pct(playhead)}%`,
+                  width: 2,
                   background: '#fff',
-                  boxShadow: '0 0 7px rgba(255,255,255,0.8)',
-                  pointerEvents: 'none'
-                }} />
-              )}
-              <input
-                type="range"
-                min={0}
-                max={usableDuration || 1}
-                step={0.1}
-                value={Math.min(startSec, usableDuration || startSec)}
-                onChange={(event) => updateStart(Number(event.target.value))}
-                aria-label="Trim start time"
-                className="cut-trim-range"
-                style={{ position: 'absolute', inset: 0, width: '100%', height: '30px', margin: 0, zIndex: 2 }}
+                  opacity: 0.85
+                }}
               />
-              <input
-                type="range"
-                min={0}
-                max={usableDuration || 1}
-                step={0.1}
-                value={Math.min(endSec, usableDuration || endSec)}
-                onChange={(event) => updateEnd(Number(event.target.value))}
-                aria-label="Trim end time"
-                className="cut-trim-range cut-trim-range--end"
-                style={{ position: 'absolute', inset: 0, width: '100%', height: '30px', margin: 0, zIndex: 3 }}
-              />
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              <label style={{ color: 'rgba(203,213,225,0.72)', fontSize: '10px', fontWeight: 650 }}>
-                Start time (seconds)
-                <input
-                  type="number"
-                  min={0}
-                  max={Math.max(0, endSec - 0.1)}
-                  step={0.1}
-                  value={startSec}
-                  onChange={(event) => updateStart(Number(event.target.value))}
-                  style={{
-                    display: 'block',
-                    boxSizing: 'border-box',
-                    width: '100%',
-                    marginTop: '6px',
-                    padding: '9px 10px',
-                    borderRadius: '8px',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    color: '#e0f2fe',
-                    background: 'rgba(255,255,255,0.045)',
-                    fontFamily: 'monospace',
-                    fontSize: '12px'
-                  }}
-                />
-              </label>
-              <label style={{ color: 'rgba(203,213,225,0.72)', fontSize: '10px', fontWeight: 650 }}>
-                End time (seconds)
-                <input
-                  type="number"
-                  min={Math.min(usableDuration, startSec + 0.1)}
-                  max={usableDuration || undefined}
-                  step={0.1}
-                  value={endSec}
-                  onChange={(event) => updateEnd(Number(event.target.value))}
-                  style={{
-                    display: 'block',
-                    boxSizing: 'border-box',
-                    width: '100%',
-                    marginTop: '6px',
-                    padding: '9px 10px',
-                    borderRadius: '8px',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    color: '#fce7f3',
-                    background: 'rgba(255,255,255,0.045)',
-                    fontFamily: 'monospace',
-                    fontSize: '12px'
-                  }}
-                />
-              </label>
-            </div>
-          </div>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={togglePreview}
+            aria-label={isPlaying ? 'Pause preview' : 'Preview selected range'}
+            className="pw-icon-btn pw-icon-btn--on"
+            style={{
+              position: 'absolute',
+              left: 14,
+              bottom: 14,
+              width: 44,
+              height: 44,
+              borderRadius: 999
+            }}
+          >
+            {isPlaying ? <Pause size={18} /> : <Play size={18} fill="currentColor" />}
+          </button>
+          <span className="pro-canvas__chip pro-canvas__chip--br">
+            {formatTrimTime(playhead)} / {formatTrimTime(usableDuration)}
+          </span>
         </div>
 
-        <footer style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '12px',
-          padding: '14px 22px',
-          borderTop: '1px solid rgba(255,255,255,0.07)',
-          background: 'rgba(0,0,0,0.15)'
-        }}>
-          <div style={{ color: 'rgba(148,163,184,0.78)', fontSize: '10px' }}>
-            Apply saves these settings. RUN uses your destination and lists the result under its matching Output tab.
+        <div className="pro-transport" style={{ padding: '5px 8px' }}>
+          <div className="pro-transport__readout">
+            <span style={{ color: ACCENT, fontSize: 10 }}>{formatTrimTime(playhead)}</span>
+            <small>/</small>
+            <small style={{ color: 'var(--pw-text-dim)', fontSize: 9 }}>{formatTrimTime(usableDuration)}</small>
           </div>
-          <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
-            <button
-              type="button"
-              onClick={onClose}
-              style={{
-                padding: '9px 15px',
-                borderRadius: '9px',
-                border: '1px solid rgba(255,255,255,0.11)',
-                color: '#e2e8f0',
-                background: 'rgba(255,255,255,0.05)',
-                fontSize: '11px',
-                fontWeight: 650,
-                cursor: 'pointer'
-              }}
-            >
-              Cancel
+          <div className="pro-transport__cluster">
+            <button type="button" className="pw-icon-btn" aria-label="Jump to start" onClick={() => seekPreview(0)}>
+              <SkipBack size={11} />
             </button>
-            <button
-              type="button"
-              onClick={handleApply}
-              disabled={clipDuration <= 0}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '7px',
-                padding: '9px 16px',
-                borderRadius: '9px',
-                border: '1px solid rgba(56,189,248,0.4)',
-                color: '#fff',
-                background: 'linear-gradient(135deg, #0284c7, #2563eb)',
-                boxShadow: '0 5px 18px rgba(14,165,233,0.2)',
-                fontSize: '11px',
-                fontWeight: 750,
-                cursor: clipDuration > 0 ? 'pointer' : 'not-allowed',
-                opacity: clipDuration > 0 ? 1 : 0.5
-              }}
-            >
-              <Check size={14} /> Apply range
+            <button type="button" className="pw-icon-btn" aria-label="Mark in point" onClick={() => updateStart(playhead)}>
+              <Scissors size={11} />
+            </button>
+            <button type="button" className="pw-icon-btn" aria-label="Step back" onClick={() => seekPreview(Math.max(0, playhead - 1))}>
+              <SkipBack size={10} />
+            </button>
+            <button type="button" className="pw-icon-btn pw-icon-btn--on" aria-label="Play or pause" onClick={togglePreview} style={{ width: 30, height: 30 }}>
+              {isPlaying ? <Pause size={12} /> : <Play size={12} fill="currentColor" />}
+            </button>
+            <button type="button" className="pw-icon-btn" aria-label="Step forward" onClick={() => seekPreview(Math.min(usableDuration, playhead + 1))}>
+              <FastForward size={10} />
+            </button>
+            <button type="button" className="pw-icon-btn" aria-label="Mark out point" onClick={() => updateEnd(playhead)}>
+              <Scissors size={11} />
+            </button>
+            <button type="button" className="pw-icon-btn" aria-label="Jump to end" onClick={() => seekPreview(usableDuration)}>
+              <SkipForward size={11} />
             </button>
           </div>
-        </footer>
+          <div className="pro-row" style={{ gap: 5 }}>
+            <Volume2 size={11} style={{ color: 'var(--pw-text-dim)' }} />
+            <span className="pw-data" style={{ fontSize: 9 }}>MUTED</span>
+          </div>
+        </div>
       </section>
-    </div>
+
+      <ProInspector>
+      {/* ── Inspector ── */}
+      <ProPanel
+        title="Trimming Strategy"
+        icon={<Timer size={13} />}
+        action={<span className="pw-badge" style={{ fontSize: 8 }}>LIVE</span>}
+      >
+        <div className="pw-seg pw-seg--row">
+          <button type="button" className="pw-seg__item" aria-pressed="true" style={{ fontSize: 10 }}>
+            <Scissors size={11} /> Keep Range
+          </button>
+          <button type="button" className="pw-seg__item" aria-pressed="false" disabled title="Cut &amp; delete is not part of this pipeline" style={{ fontSize: 10 }}>
+            Cut &amp; Delete
+          </button>
+        </div>
+
+        <div className="pro-grid-2">
+          <label className="pw-field">
+            <span className="pw-label" style={{ color: ACCENT, fontSize: 9 }}>● Start Time [In]</span>
+            <div className="pro-row" style={{ gap: 4 }}>
+              <input
+                className="pw-number"
+                type="number"
+                min={0}
+                max={Math.max(0, endSec - 0.1)}
+                step={0.1}
+                value={Number(startSec.toFixed(2))}
+                onChange={(event) => updateStart(Number(event.target.value))}
+                style={{ color: ACCENT }}
+                aria-label="Start time in seconds"
+              />
+              <button type="button" className="pw-icon-btn" aria-label="Set start to playhead" onClick={() => updateStart(playhead)}>
+                <SkipBack size={10} />
+              </button>
+            </div>
+          </label>
+          <label className="pw-field">
+            <span className="pw-label" style={{ color: '#d8b4fe', fontSize: 9 }}>● End Time [Out]</span>
+            <div className="pro-row" style={{ gap: 4 }}>
+              <input
+                className="pw-number"
+                type="number"
+                min={Math.min(usableDuration, startSec + 0.1)}
+                max={usableDuration || undefined}
+                step={0.1}
+                value={Number(endSec.toFixed(2))}
+                onChange={(event) => updateEnd(Number(event.target.value))}
+                style={{ color: '#d8b4fe' }}
+                aria-label="End time in seconds"
+              />
+              <button type="button" className="pw-icon-btn" aria-label="Set end to playhead" onClick={() => updateEnd(playhead)}>
+                <SkipForward size={10} />
+              </button>
+            </div>
+          </label>
+        </div>
+
+        <div className="pro-transport__readout pro-telemetry" style={{ fontSize: 11, padding: '5px 8px' }}>
+          <span style={{ color: 'var(--pw-text-dim)', fontSize: 9 }}>Trimmed Output Span:</span>
+          <span style={{ color: ACCENT, marginLeft: 'auto', fontSize: 11 }}>{formatTrimTime(clipDuration)}</span>
+        </div>
+      </ProPanel>
+
+      <ProPanel
+        title="Quick Presets"
+        icon={<Scissors size={13} />}
+        action={<button type="button" className="pw-btn pw-btn--quiet" onClick={resetRange} style={{ fontSize: 9 }}>Reset Selection</button>}
+      >
+        <div className="pw-tile-grid pw-tile-grid--3">
+          <button type="button" className="pw-tile" onClick={() => applyPreset('first30')} disabled={usableDuration <= 0} style={{ padding: '5px 4px' }}>
+            First 30s
+          </button>
+          <button type="button" className="pw-tile" onClick={() => applyPreset('last30')} disabled={usableDuration <= 0} style={{ padding: '5px 4px' }}>
+            Last 30s
+          </button>
+          <button type="button" className="pw-tile" onClick={() => applyPreset('middle')} disabled={usableDuration <= 0} style={{ padding: '5px 4px' }}>
+            Clip Middle
+          </button>
+        </div>
+      </ProPanel>
+      </ProInspector>
+
+<ProTimeline>
+        <section className="pro-timeline" style={{ padding: '6px 8px' }}>
+          <div className="pro-timeline__head">
+            <div className="pro-panel__title">
+              <Timer size={13} />
+              <span style={{ fontSize: 11 }}>Precision Cut Scrubber</span>
+            </div>
+            <div className="pro-row" style={{ gap: 6 }}>
+              <span className="pw-badge pw-badge--flat" style={{ fontSize: 8 }}>SAMPLE-ACCURATE</span>
+              <span className="pw-data" style={{ color: 'var(--pw-text-faint)', fontSize: 8 }}>
+                DRAG HANDLES TO TRIM
+              </span>
+            </div>
+          </div>
+
+          {/* The ruler and both lanes live in one `surface` box so the drag
+              overlay maps a pointer x straight onto a timecode. */}
+          <div className="pro-timeline__surface" ref={trackRef}>
+            <div className="pw-scale pro-timeline__ruler">
+              {[0, 0.25, 0.5, 0.75, 1].map(f => (
+                <span key={f}>{formatTrimTime(usableDuration * f)}</span>
+              ))}
+            </div>
+
+            <div className="pro-timeline__tracks">
+              <div className="pro-tracklane">
+                <span className="pro-tracklane__label">V1</span>
+                <div className="pro-tracklane__body">
+                  <Filmstrip
+                    fileName={fileName}
+                    streamingPort={streamingPort}
+                    duration={usableDuration}
+                    frames={20}
+                  />
+                  <div className="pro-tracklane__scrim" style={{ left: 0, width: `${pct(startSec)}%` }} />
+                  <div className="pro-tracklane__scrim" style={{ left: `${pct(endSec)}%`, right: 0 }} />
+                  <div
+                    className="pro-tracklane__sel"
+                    style={{ left: `${pct(startSec)}%`, width: `${Math.max(0, pct(endSec) - pct(startSec))}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="pro-tracklane">
+                <span className="pro-tracklane__label">A1</span>
+                <div className="pro-tracklane__body pro-tracklane__body--audio">
+                  <AudioWaveform
+                    fileName={fileName}
+                    streamingPort={streamingPort}
+                    height={52}
+                    color="#38bdf8"
+                  />
+                  <div className="pro-tracklane__scrim" style={{ left: 0, width: `${pct(startSec)}%` }} />
+                  <div className="pro-tracklane__scrim" style={{ left: `${pct(endSec)}%`, right: 0 }} />
+                </div>
+              </div>
+            </div>
+
+            {/* Draggable In / Out handles + playhead, pinned over the tracks. */}
+            {usableDuration > 0 && (
+              <div className={`pro-timeline__overlay${dragging ? ' is-dragging' : ''}`}>
+                <button
+                  type="button"
+                  className="pro-timeline__handle pro-timeline__handle--in"
+                  style={{ left: `${pct(startSec)}%`, ...handleStyle }}
+                  aria-label="In point — drag along the timeline to trim the head"
+                  title="Drag to set the in point"
+                  {...inHandleProps}
+                >
+                  <i />
+                </button>
+                <button
+                  type="button"
+                  className="pro-timeline__handle pro-timeline__handle--out"
+                  style={{ left: `${pct(endSec)}%`, ...handleStyle }}
+                  aria-label="Out point — drag along the timeline to trim the tail"
+                  title="Drag to set the out point"
+                  {...outHandleProps}
+                >
+                  <i />
+                </button>
+                <div className="pro-timeline__playhead" style={{ left: `${pct(playhead)}%` }} aria-hidden="true">
+                  <i />
+                  <span>{formatTrimTime(playhead)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Footer status strip */}
+          <div className="pro-timeline__status">
+            <span>IN: {formatTrimTime(startSec)}</span>
+            <span>·</span>
+            <span>OUT: {formatTrimTime(endSec)}</span>
+            <span>·</span>
+            <em>SELECTED: {formatTrimTime(clipDuration)} ({selectionPct}% of clip)</em>
+            <span className="pro-timeline__accel">
+              <i className="pw-badge__dot" /> KEYFRAME ACCURATE
+            </span>
+          </div>
+        </section>
+      </ProTimeline>
+
+    </ProToolShell>
   );
 };
