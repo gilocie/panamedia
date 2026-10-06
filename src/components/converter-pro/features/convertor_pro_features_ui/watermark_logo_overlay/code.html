@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_standard" name="shell-type"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={"darkMode":"class","theme":{"extend":{"colors":{"secondary-fixed-dim":"#d0bcff","background":"#0f131d","inverse-surface":"#dfe2f1","surface-variant":"#313540","surface-container":"#1c1f2a","on-surface":"#dfe2f1","error-container":"#93000a","tertiary-container":"#ff79b4","inverse-primary":"#00687a","on-primary":"#003640","outline-variant":"#3d494c","on-secondary-container":"#c4abff","surface-container-low":"#171b26","on-surface-variant":"#bcc9cd","on-error":"#690005","on-background":"#dfe2f1","on-error-container":"#ffdad6","outline":"#869397","on-tertiary-fixed":"#3e0022","surface-container-highest":"#313540","secondary":"#d0bcff","on-secondary-fixed":"#23005c","secondary-container":"#571bc1","on-primary-container":"#00424f","primary":"#4cd7f6","primary-container":"#06b6d4","on-tertiary-container":"#780047","on-tertiary-fixed-variant":"#8c0053","surface-container-lowest":"#0a0e18","surface-bright":"#353944","surface-tint":"#4cd7f6","primary-fixed-dim":"#4cd7f6","on-primary-fixed-variant":"#004e5c","surface-container-high":"#262a35","error":"#ffb4ab","inverse-on-surface":"#2c303b","tertiary-fixed":"#ffd9e4","surface":"#0f131d","secondary-fixed":"#e9ddff","on-secondary-fixed-variant":"#5516be","surface-dim":"#0f131d","on-tertiary":"#640039","primary-fixed":"#acedff","tertiary":"#ffb0cd","tertiary-fixed-dim":"#ffb0cd","on-primary-fixed":"#001f26","on-secondary":"#3c0091"},"borderRadius":{"DEFAULT":"0.125rem","lg":"0.25rem","xl":"0.5rem","full":"0.75rem"},"spacing":{"space-sm":"0.5rem","space-md":"0.75rem","space-xl":"1.5rem","space-lg":"1rem","space-xs":"0.25rem","margin":"1rem","gutter":"0.75rem"},"fontFamily":{"label-md":["Inter"],"headline-sm":["Inter"],"label-sm":["Inter"],"headline-lg":["Inter"],"body-lg":["Inter"],"body-sm":["Inter"],"display-lg":["Inter"],"tech-data":["JetBrains Mono"],"body-md":["Inter"],"headline-md":["Inter"],"tech-timecode":["JetBrains Mono"]},"fontSize":{"label-md":["12px",{"lineHeight":"16px","letterSpacing":"0.02em","fontWeight":"500"}],"headline-sm":["15px",{"lineHeight":"22px","letterSpacing":"0em","fontWeight":"600"}],"label-sm":["11px",{"lineHeight":"14px","letterSpacing":"0.04em","fontWeight":"600"}],"headline-lg":["24px",{"lineHeight":"32px","letterSpacing":"-0.015em","fontWeight":"600"}],"body-lg":["14px",{"lineHeight":"20px","letterSpacing":"0em","fontWeight":"400"}],"body-sm":["12px",{"lineHeight":"16px","letterSpacing":"0.01em","fontWeight":"400"}],"display-lg":["32px",{"lineHeight":"40px","letterSpacing":"-0.02em","fontWeight":"700"}],"tech-data":["11px",{"lineHeight":"14px","letterSpacing":"0.02em","fontWeight":"500"}],"body-md":["13px",{"lineHeight":"18px","letterSpacing":"0em","fontWeight":"400"}],"headline-md":["18px",{"lineHeight":"26px","letterSpacing":"-0.01em","fontWeight":"600"}],"tech-timecode":["13px",{"lineHeight":"18px","letterSpacing":"0.04em","fontWeight":"500"}]}}}}</script></head><body class="bg-surface font-body-md text-body-md text-on-surface antialiased select-none"><header class="fixed top-0 left-0 right-0 z-50 flex flex-col bg-surface-container-lowest/90 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]"><div class="h-11 px-space-md flex items-center justify-between bg-surface-container-lowest"><div class="flex items-center gap-space-md"><div class="w-5 h-5 rounded-lg bg-primary-container flex items-center justify-center"><span class="material-symbols-outlined text-[13px] text-on-primary-container">movie_edit</span></div><span class="font-label-sm text-label-sm tracking-wider uppercase text-on-surface">Panamedia Converter Pro</span><div class="h-3 w-[1px] bg-surface-variant mx-space-xs"></div><div class="flex items-center gap-space-xs px-space-sm py-0.5 rounded bg-surface-container-low"><span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span><span class="font-tech-data text-tech-data text-on-surface-variant">RTX 4090 ACTIVE • QUEUE (3)</span></div></div><div class="flex items-center"><div class="flex items-center gap-space-xs mr-space-md"><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div><div class="flex items-center"><button aria-label="Minimize" class="h-8 w-11 flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" type="button"><span class="material-symbols-outlined text-[14px]">minimize</span></button><button aria-label="Maximize" class="h-8 w-11 flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" type="button"><span class="material-symbols-outlined text-[13px]">check_box_outline_blank</span></button><button aria-label="Close" class="h-8 w-11 flex items-center justify-center text-on-surface-variant hover:bg-error-container hover:text-on-error transition-colors" type="button"><span class="material-symbols-outlined text-[16px]">close</span></button></div></div></div><div class="h-14 px-space-lg flex items-center justify-between bg-surface-container-low"><div class="flex items-center gap-space-md min-w-0 flex-1"><button class="flex items-center gap-space-xs px-space-sm py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors" type="button"><span class="material-symbols-outlined text-[16px]">arrow_back</span><span class="font-label-sm text-label-sm">Queue</span></button><div class="flex flex-col min-w-0"><div class="flex items-center gap-space-sm"><span class="font-headline-sm text-headline-sm text-on-surface truncate">Suffix - Mwandikondela ft. Ndirande Anglican Voices_1080p.mp4</span><span class="px-space-xs py-0.5 rounded bg-surface-variant font-tech-data text-tech-data text-primary">READY</span></div><div class="flex items-center gap-space-sm text-on-surface-variant font-tech-data text-tech-data"><span>1080p60</span><span>•</span><span>428 MB</span><span>•</span><span>03:42.18</span><span>•</span><span>H.264 / AAC 320kbps</span></div></div></div><div class="flex items-center gap-space-sm pl-space-md"><button class="flex items-center gap-space-xs px-space-md py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors" type="button"><span class="material-symbols-outlined text-[16px]">picture_in_picture_alt</span><span class="font-label-sm text-label-sm">Detached Preview</span></button><button class="flex items-center gap-space-xs px-space-md py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors" type="button"><span class="material-symbols-outlined text-[16px]">tune</span><span class="font-label-sm text-label-sm">Global Settings</span></button></div></div><div class="h-11 px-space-lg flex items-center bg-surface-container-lowest overflow-x-auto"><nav class="flex items-center gap-space-xs w-full" data-active-classes="bg-primary-container text-on-primary-container font-semibold rounded-lg"><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="cut-trim" href="#">Cut / Trim</a><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="crop-aspect" href="#">Crop &amp; Aspect</a><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="subtitles" href="#">Subtitles</a><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="visual-effects" href="#">Visual Effects</a><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="rotate-level" href="#">Rotate &amp; Level</a><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="watermark-logo" href="#">Watermark &amp; Logo</a><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="mirror-flip" href="#">Mirror &amp; Flip</a><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="smart-compress" href="#">Smart Compress</a><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="gif-creator" href="#">GIF Creator</a><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="denoise-audio" href="#">Denoise &amp; Audio</a></nav></div></header><main class="w-full pt-36 pb-20 px-space-lg bg-surface min-h-screen"><div class="flex flex-col w-full">
+<div class="grid grid-cols-12 gap-space-lg w-full max-w-[1720px] mx-auto items-start">
+<!-- LEFT PANE: Video Canvas & Draggable Interactive Watermark Overlay (7 of 12 cols) -->
+<section class="col-span-12 xl:col-span-7 flex flex-col gap-space-md">
+<!-- Preview Frame Header / Bar -->
+<div class="flex items-center justify-between px-space-md py-2 rounded-xl bg-surface-container-low">
+<div class="flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-[18px] text-primary">aspect_ratio</span>
+<span class="font-headline-sm text-headline-sm text-on-surface">Canvas Viewport</span>
+<span class="px-space-xs py-0.5 rounded bg-surface-container-high font-tech-data text-tech-data text-on-surface-variant">1920 × 1080 (16:9 Native)</span>
+<span class="px-space-xs py-0.5 rounded bg-primary/10 font-tech-data text-tech-data text-primary">GPU RENDER PIPELINE</span>
+</div>
+<div class="flex items-center gap-space-xs">
+<button class="flex items-center gap-space-xs px-space-sm py-1 rounded bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-all text-label-sm font-label-sm" id="toggleGuidesBtn" type="button">
+<span class="material-symbols-outlined text-[15px] text-primary">grid_3x3</span>
+<span>Title Safe Area</span>
+</button>
+<button class="flex items-center gap-space-xs px-space-sm py-1 rounded bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-all text-label-sm font-label-sm" id="resetTransformBtn" type="button">
+<span class="material-symbols-outlined text-[15px]">center_focus_strong</span>
+<span>Center Box</span>
+</button>
+<div class="h-4 w-[1px] bg-surface-variant mx-1"></div>
+<span class="font-tech-timecode text-tech-timecode text-primary px-space-xs">100% Fit</span>
+</div>
+</div>
+<!-- Video Display Container with Overlay Coordinates & Canvas -->
+<div class="relative w-full aspect-video rounded-xl bg-surface-container-lowest overflow-hidden shadow-2xl select-none group">
+<!-- Underlaying Mock Video Still / Background Asset -->
+<div class="absolute inset-0 bg-cover bg-center w-full h-full filter brightness-95 contrast-105" data-alt="Cinematic 4k video production still featuring modern studio lighting, high production value camera rig, soft neon teal and magenta backlights, cinematic mood inside a multimedia recording studio" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDkSWHeMXNZdttf8n4-4HdkoE4U7j3B6pyLsOJWHwJPm8W95kSk_t9ZldDdS3i1DAYmEP-lZjkkA0u7JVVg1wQK5kiiaoz7_ZxPdvKKjOFGgFfSYxmlYKZmzIigX33aa4ruDgacM_2rvwZnCon6t1YIE-FtDSAD8stAqOME2UEJedvtb2aDINguxSuxgoiMz1Ch54Ga5s-JscCdrLu5q_v0iKSwqtpSgrxgPkC3IOer')"></div>
+<!-- Safe Title & Action Area Guidelines (Rule of Thirds & Broadcast Margins) -->
+<div class="absolute inset-[6%] pointer-events-none transition-opacity duration-200" id="guidelinesBox">
+<!-- Outer Broadcast Action Safe -->
+<div class="w-full h-full rounded border-dashed bg-primary/5 shadow-[0_0_0_1px_rgba(76,215,246,0.15)]"></div>
+<!-- Inner Title Safe (10% standard) -->
+<div class="absolute inset-[4%] shadow-[0_0_0_1px_rgba(208,188,255,0.2)]"></div>
+<!-- Center Crosshairs -->
+<div class="absolute inset-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center">
+<span class="w-[1px] h-full bg-primary/40"></span>
+<span class="h-[1px] w-full bg-primary/40 absolute"></span>
+</div>
+</div>
+<!-- Repeated Pattern Tiling Mesh Layer (Interactive toggle preview) -->
+<div class="absolute inset-0 pointer-events-none hidden grid-cols-4 grid-rows-3 gap-6 p-6 opacity-25" id="tiledWatermarkGrid">
+<div class="flex items-center justify-center -rotate-12"><span class="font-tech-data text-tech-data uppercase tracking-widest text-on-surface bg-surface-container-lowest/60 px-2 py-1 rounded">PANAMEDIA • PRO</span></div>
+<div class="flex items-center justify-center -rotate-12"><span class="font-tech-data text-tech-data uppercase tracking-widest text-on-surface bg-surface-container-lowest/60 px-2 py-1 rounded">PANAMEDIA • PRO</span></div>
+<div class="flex items-center justify-center -rotate-12"><span class="font-tech-data text-tech-data uppercase tracking-widest text-on-surface bg-surface-container-lowest/60 px-2 py-1 rounded">PANAMEDIA • PRO</span></div>
+<div class="flex items-center justify-center -rotate-12"><span class="font-tech-data text-tech-data uppercase tracking-widest text-on-surface bg-surface-container-lowest/60 px-2 py-1 rounded">PANAMEDIA • PRO</span></div>
+<div class="flex items-center justify-center -rotate-12"><span class="font-tech-data text-tech-data uppercase tracking-widest text-on-surface bg-surface-container-lowest/60 px-2 py-1 rounded">PANAMEDIA • PRO</span></div>
+<div class="flex items-center justify-center -rotate-12"><span class="font-tech-data text-tech-data uppercase tracking-widest text-on-surface bg-surface-container-lowest/60 px-2 py-1 rounded">PANAMEDIA • PRO</span></div>
+<div class="flex items-center justify-center -rotate-12"><span class="font-tech-data text-tech-data uppercase tracking-widest text-on-surface bg-surface-container-lowest/60 px-2 py-1 rounded">PANAMEDIA • PRO</span></div>
+<div class="flex items-center justify-center -rotate-12"><span class="font-tech-data text-tech-data uppercase tracking-widest text-on-surface bg-surface-container-lowest/60 px-2 py-1 rounded">PANAMEDIA • PRO</span></div>
+<div class="flex items-center justify-center -rotate-12"><span class="font-tech-data text-tech-data uppercase tracking-widest text-on-surface bg-surface-container-lowest/60 px-2 py-1 rounded">PANAMEDIA • PRO</span></div>
+<div class="flex items-center justify-center -rotate-12"><span class="font-tech-data text-tech-data uppercase tracking-widest text-on-surface bg-surface-container-lowest/60 px-2 py-1 rounded">PANAMEDIA • PRO</span></div>
+<div class="flex items-center justify-center -rotate-12"><span class="font-tech-data text-tech-data uppercase tracking-widest text-on-surface bg-surface-container-lowest/60 px-2 py-1 rounded">PANAMEDIA • PRO</span></div>
+<div class="flex items-center justify-center -rotate-12"><span class="font-tech-data text-tech-data uppercase tracking-widest text-on-surface bg-surface-container-lowest/60 px-2 py-1 rounded">PANAMEDIA • PRO</span></div>
+</div>
+<!-- Draggable / Resizable Watermark Graphic Box Overlay -->
+<div class="absolute cursor-move transition-transform ease-out" id="watermarkTargetBox" style="top: 72%; left: 74%; width: 172px; opacity: 0.85;">
+<!-- Active Selection Bounding Box Glow & Dashes -->
+<div class="relative w-full p-2 rounded bg-surface-container-lowest/80 backdrop-blur-sm shadow-[0_0_18px_rgba(76,215,246,0.35)]">
+<!-- Graphic Element Preview Inside Transform Box -->
+<div class="flex items-center gap-space-xs pointer-events-none select-none" id="graphicContentInner">
+<div class="w-7 h-7 rounded bg-primary flex items-center justify-center text-on-primary font-headline-sm text-headline-sm shadow-md">
+<span class="material-symbols-outlined text-[18px]">motion_blur</span>
+</div>
+<div class="flex flex-col leading-none">
+<span class="font-headline-sm text-headline-sm text-on-surface tracking-wide uppercase">PANAMEDIA</span>
+<span class="font-tech-data text-[8px] text-primary tracking-widest">OFFICIAL MASTER</span>
+</div>
+</div>
+<!-- Alternative Text Mode Template (hidden by default) -->
+<div class="hidden pointer-events-none select-none text-left" id="textContentInner">
+<span class="font-headline-lg text-headline-sm text-on-surface tracking-wider" id="renderedCustomText">© 2025 PANAMEDIA CORP</span>
+</div>
+<!-- Rotation Pin Indicator top-center -->
+<div class="absolute -top-6 left-1/2 -translate-x-1/2 flex flex-col items-center cursor-grab active:cursor-grabbing">
+<div class="w-3 h-3 rounded-full bg-primary flex items-center justify-center shadow-[0_0_8px_rgba(76,215,246,0.8)]">
+<span class="w-1 h-1 rounded-full bg-surface"></span>
+</div>
+<div class="w-[1px] h-3 bg-primary"></div>
+</div>
+<!-- Resizing Handles (8 points) -->
+<div class="absolute -top-1 -left-1 w-2.5 h-2.5 rounded bg-primary cursor-nwse-resize shadow"></div>
+<div class="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 rounded bg-primary cursor-ns-resize shadow"></div>
+<div class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded bg-primary cursor-nesw-resize shadow"></div>
+<div class="absolute top-1/2 -translate-y-1/2 -right-1 w-2 h-2 rounded bg-primary cursor-ew-resize shadow"></div>
+<div class="absolute -bottom-1 -right-1 w-2.5 h-2.5 rounded bg-primary cursor-nwse-resize shadow"></div>
+<div class="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 rounded bg-primary cursor-ns-resize shadow"></div>
+<div class="absolute -bottom-1 -left-1 w-2.5 h-2.5 rounded bg-primary cursor-nesw-resize shadow"></div>
+<div class="absolute top-1/2 -translate-y-1/2 -left-1 w-2 h-2 rounded bg-primary cursor-ew-resize shadow"></div>
+<!-- Live HUD Coordinates Pill (Hover/Transform Telemetry) -->
+<div class="absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap px-1.5 py-0.5 rounded bg-surface-container-highest text-primary font-tech-data text-[9px] shadow-lg pointer-events-none">
+              POS: <span id="hudX">1420</span>px, <span id="hudY">780</span>px • 75% OPAC
+            </div>
+</div>
+</div>
+<!-- Video Transport Bottom Bar HUD -->
+<div class="absolute bottom-0 left-0 right-0 p-space-md bg-gradient-to-t from-surface-container-lowest via-surface-container-lowest/80 to-transparent flex flex-col gap-space-xs">
+<!-- Time Scrubber Track -->
+<div class="relative w-full h-1.5 bg-surface-variant/80 rounded-full cursor-pointer flex items-center group/scrub">
+<!-- Active range bar -->
+<div class="h-full bg-primary rounded-full w-2/5"></div>
+<div class="w-3.5 h-3.5 rounded-full bg-primary-fixed shadow-[0_0_10px_rgba(76,215,246,0.9)] -ml-1 cursor-grab active:cursor-grabbing scale-100 group-hover/scrub:scale-125 transition-transform"></div>
+<!-- Watermark In/Out Active Clip Indicator on Scrubber -->
+<div class="absolute left-0 w-full h-full rounded-full bg-secondary/30 pointer-events-none"></div>
+</div>
+<div class="flex items-center justify-between pt-1">
+<div class="flex items-center gap-space-sm">
+<button class="w-7 h-7 rounded-lg bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-on-surface transition-colors" type="button">
+<span class="material-symbols-outlined text-[18px]">play_arrow</span>
+</button>
+<button class="w-7 h-7 rounded-lg bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-on-surface transition-colors" type="button">
+<span class="material-symbols-outlined text-[18px]">skip_previous</span>
+</button>
+<button class="w-7 h-7 rounded-lg bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-on-surface transition-colors" type="button">
+<span class="material-symbols-outlined text-[18px]">skip_next</span>
+</button>
+<div class="flex items-center gap-1 font-tech-timecode text-tech-timecode ml-space-xs text-on-surface">
+<span class="text-primary font-semibold">01:28.12</span>
+<span class="text-on-surface-variant">/</span>
+<span class="text-on-surface-variant">03:42.18</span>
+</div>
+</div>
+<div class="flex items-center gap-space-md font-tech-data text-tech-data text-on-surface-variant">
+<div class="flex items-center gap-space-xs">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+<span>CHROMA LOCK</span>
+</div>
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[15px] text-primary">speed</span>
+<span>60.00 FPS SYNC</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Quick Tips Card -->
+<div class="flex items-center justify-between px-space-md py-space-sm rounded-xl bg-surface-container-low text-on-surface-variant">
+<div class="flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-primary text-[18px]">tips_and_updates</span>
+<span class="font-body-sm text-body-sm">Drag bounding box to reposition freely. Use corner handles to adjust visual scale proportionally.</span>
+</div>
+<div class="flex items-center gap-space-xs">
+<kbd class="px-space-xs py-0.5 rounded bg-surface-container-highest font-tech-data text-[10px] text-on-surface">Shift</kbd>
+<span class="font-body-sm text-body-sm">+ Drag for 15° snap</span>
+</div>
+</div>
+</section>
+<!-- RIGHT CONTROL DOCK: Deep Watermark Parameters & Customization (5 of 12 cols) -->
+<aside class="col-span-12 xl:col-span-5 flex flex-col gap-space-md">
+<!-- Primary Configuration Surface Container -->
+<div class="flex flex-col gap-space-md p-space-lg rounded-xl bg-surface-container-low shadow-xl">
+<!-- Header & Mode Tabs Switcher -->
+<div class="flex flex-col gap-space-sm pb-space-sm">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-primary text-[20px]">branding_watermark</span>
+<h2 class="font-headline-md text-headline-md text-on-surface">Watermark Controls</h2>
+</div>
+<span class="px-space-sm py-0.5 rounded-full bg-surface-container-high font-tech-data text-tech-data text-primary">LAYER 1</span>
+</div>
+<!-- Mode Tabs: Image vs Text -->
+<div class="grid grid-cols-2 p-1 rounded-xl bg-surface-container-lowest gap-1">
+<button class="flex items-center justify-center gap-space-xs py-2 rounded-lg bg-surface-container-high text-primary shadow-sm font-label-md text-label-md transition-all" id="modeImageBtn" type="button">
+<span class="material-symbols-outlined text-[17px]">image</span>
+<span>Image / Logo</span>
+</button>
+<button class="flex items-center justify-center gap-space-xs py-2 rounded-lg text-on-surface-variant hover:text-on-surface font-label-md text-label-md transition-all" id="modeTextBtn" type="button">
+<span class="material-symbols-outlined text-[17px]">title</span>
+<span>Text Watermark</span>
+</button>
+</div>
+</div>
+<!-- TAB CONTENT: IMAGE ASSET UPLOAD & METRICS -->
+<div class="flex flex-col gap-space-md" id="imageSettingsSection">
+<label class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Source Graphic Asset</label>
+<div class="flex items-center justify-between p-space-md rounded-xl bg-surface-container">
+<div class="flex items-center gap-space-md min-w-0">
+<div class="w-14 h-14 rounded-lg bg-surface-container-lowest flex items-center justify-center relative overflow-hidden flex-shrink-0 shadow-inner">
+<!-- Checkered Alpha Transparency Graphic Backdrop -->
+<div class="absolute inset-0 opacity-10 bg-[radial-gradient(#4cd7f6_1px,transparent_1px)] [background-size:6px_6px]"></div>
+<!-- Mini Logo Icon -->
+<div class="w-8 h-8 rounded bg-primary/20 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[20px]">motion_blur</span>
+</div>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-headline-sm text-headline-sm text-on-surface truncate">panamedia_badge_white.png</span>
+<span class="font-tech-data text-tech-data text-on-surface-variant">PNG-32 Alpha • 512×128 • 48 KB</span>
+<span class="font-tech-data text-[10px] text-primary">Lossless Transparency Retained</span>
+</div>
+</div>
+<div class="flex items-center gap-space-xs ml-space-sm flex-shrink-0">
+<button class="px-space-md py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface font-label-sm text-label-sm transition-colors flex items-center gap-1" type="button">
+<span class="material-symbols-outlined text-[15px]">folder_open</span>
+<span>Browse</span>
+</button>
+<button aria-label="Remove watermark asset" class="p-1.5 rounded-lg bg-surface-container hover:bg-error-container text-on-surface-variant hover:text-on-error transition-colors" type="button">
+<span class="material-symbols-outlined text-[17px]">delete</span>
+</button>
+</div>
+</div>
+</div>
+<!-- TAB CONTENT: TEXT WATERMARK OPTIONS (Toggled via JS) -->
+<div class="hidden flex-col gap-space-md" id="textSettingsSection">
+<div class="flex flex-col gap-space-xs">
+<label class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider" for="customTextInput">Custom Copyright / Text</label>
+<input class="w-full px-space-md py-2 rounded-xl bg-surface-container text-on-surface font-headline-sm text-headline-sm focus:outline-none focus:ring-2 focus:ring-primary shadow-inner" id="customTextInput" placeholder="Enter watermark string..." type="text" value="© 2025 PANAMEDIA CORP"/>
+</div>
+<div class="grid grid-cols-2 gap-space-md">
+<div class="flex flex-col gap-space-xs">
+<label class="font-label-sm text-label-sm text-on-surface-variant">Font Family</label>
+<select class="w-full px-space-sm py-1.5 rounded-lg bg-surface-container text-on-surface font-label-md text-label-md focus:outline-none">
+<option selected="">Inter Display Bold</option>
+<option>JetBrains Mono Medium</option>
+<option>Impact Heavy</option>
+<option>Arial Black</option>
+</select>
+</div>
+<div class="flex flex-col gap-space-xs">
+<label class="font-label-sm text-label-sm text-on-surface-variant">Color &amp; Fill</label>
+<div class="flex items-center gap-space-xs">
+<div class="w-8 h-8 rounded-lg bg-on-surface flex items-center justify-center shadow cursor-pointer">
+<span class="material-symbols-outlined text-[16px] text-surface">palette</span>
+</div>
+<input class="w-full px-space-xs py-1.5 rounded-lg bg-surface-container font-tech-data text-tech-data text-on-surface" type="text" value="#DFE2F1"/>
+</div>
+</div>
+</div>
+</div>
+<!-- 9-POINT QUICK ANCHOR POSITIONING GRID -->
+<div class="flex flex-col gap-space-sm pt-space-xs">
+<div class="flex items-center justify-between">
+<label class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Quick Anchor Origin</label>
+<span class="font-tech-data text-tech-data text-primary" id="currentAnchorLabel">BOTTOM RIGHT (BR)</span>
+</div>
+<div class="grid grid-cols-3 gap-2 p-2 rounded-xl bg-surface-container max-w-[280px]">
+<!-- Row 1: Top -->
+<button class="anchor-btn h-9 rounded-lg bg-surface-container-low hover:bg-surface-container-high text-on-surface-variant flex items-center justify-center transition-all hover:text-primary" data-anchor="TL" type="button">
+<span class="material-symbols-outlined text-[18px]">north_west</span>
+</button>
+<button class="anchor-btn h-9 rounded-lg bg-surface-container-low hover:bg-surface-container-high text-on-surface-variant flex items-center justify-center transition-all hover:text-primary" data-anchor="TC" type="button">
+<span class="material-symbols-outlined text-[18px]">north</span>
+</button>
+<button class="anchor-btn h-9 rounded-lg bg-surface-container-low hover:bg-surface-container-high text-on-surface-variant flex items-center justify-center transition-all hover:text-primary" data-anchor="TR" type="button">
+<span class="material-symbols-outlined text-[18px]">north_east</span>
+</button>
+<!-- Row 2: Center -->
+<button class="anchor-btn h-9 rounded-lg bg-surface-container-low hover:bg-surface-container-high text-on-surface-variant flex items-center justify-center transition-all hover:text-primary" data-anchor="CL" type="button">
+<span class="material-symbols-outlined text-[18px]">west</span>
+</button>
+<button class="anchor-btn h-9 rounded-lg bg-surface-container-low hover:bg-surface-container-high text-on-surface-variant flex items-center justify-center transition-all hover:text-primary" data-anchor="CC" type="button">
+<span class="material-symbols-outlined text-[18px]">filter_center_focus</span>
+</button>
+<button class="anchor-btn h-9 rounded-lg bg-surface-container-low hover:bg-surface-container-high text-on-surface-variant flex items-center justify-center transition-all hover:text-primary" data-anchor="CR" type="button">
+<span class="material-symbols-outlined text-[18px]">east</span>
+</button>
+<!-- Row 3: Bottom -->
+<button class="anchor-btn h-9 rounded-lg bg-surface-container-low hover:bg-surface-container-high text-on-surface-variant flex items-center justify-center transition-all hover:text-primary" data-anchor="BL" type="button">
+<span class="material-symbols-outlined text-[18px]">south_west</span>
+</button>
+<button class="anchor-btn h-9 rounded-lg bg-surface-container-low hover:bg-surface-container-high text-on-surface-variant flex items-center justify-center transition-all hover:text-primary" data-anchor="BC" type="button">
+<span class="material-symbols-outlined text-[18px]">south</span>
+</button>
+<button class="anchor-btn h-9 rounded-lg bg-primary text-on-primary font-bold flex items-center justify-center shadow-lg transition-all" data-anchor="BR" type="button">
+<span class="material-symbols-outlined text-[18px]">south_east</span>
+</button>
+</div>
+</div>
+<!-- FINE ALIGNMENT & DIMENSION SLIDERS -->
+<div class="flex flex-col gap-space-md pt-space-xs">
+<!-- Scale Slider -->
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md text-on-surface">Size Scale</span>
+<span class="font-tech-data text-tech-data text-primary" id="scaleValueDisplay">35%</span>
+</div>
+<div class="flex items-center gap-space-sm">
+<span class="font-tech-data text-tech-data text-on-surface-variant">10%</span>
+<input class="w-full h-1.5 rounded-lg bg-surface-container accent-primary cursor-pointer" id="scaleSlider" max="100" min="10" type="range" value="35"/>
+<span class="font-tech-data text-tech-data text-on-surface-variant">100%</span>
+</div>
+</div>
+<!-- Opacity Slider -->
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md text-on-surface">Opacity &amp; Transparency</span>
+<span class="font-tech-data text-tech-data text-primary" id="opacityValueDisplay">85%</span>
+</div>
+<div class="flex items-center gap-space-sm">
+<span class="font-tech-data text-tech-data text-on-surface-variant">0%</span>
+<input class="w-full h-1.5 rounded-lg bg-surface-container accent-primary cursor-pointer" id="opacitySlider" max="100" min="0" type="range" value="85"/>
+<span class="font-tech-data text-tech-data text-on-surface-variant">100%</span>
+</div>
+</div>
+<!-- Margins X and Y Offset in px -->
+<div class="grid grid-cols-2 gap-space-md">
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-on-surface-variant">Edge Inset X</span>
+<span class="font-tech-data text-tech-data text-primary" id="marginValX">32 px</span>
+</div>
+<input class="w-full h-1.5 rounded bg-surface-container accent-primary cursor-pointer" id="sliderMarginX" max="200" min="0" type="range" value="32"/>
+</div>
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-on-surface-variant">Edge Inset Y</span>
+<span class="font-tech-data text-tech-data text-primary" id="marginValY">32 px</span>
+</div>
+<input class="w-full h-1.5 rounded bg-surface-container accent-primary cursor-pointer" id="sliderMarginY" max="200" min="0" type="range" value="32"/>
+</div>
+</div>
+<!-- Blending Mode Selection Dropdown -->
+<div class="flex items-center justify-between pt-space-xs">
+<span class="font-label-md text-label-md text-on-surface">Blend Composite Mode</span>
+<select class="px-space-md py-1.5 rounded-lg bg-surface-container text-on-surface font-label-md text-label-md focus:outline-none focus:ring-1 focus:ring-primary" id="blendModeSelect">
+<option selected="" value="normal">Normal (Standard)</option>
+<option value="screen">Screen (Lighten)</option>
+<option value="overlay">Overlay (Balanced Dynamic)</option>
+<option value="soft-light">Soft Light (Subtle Engraved)</option>
+<option value="multiply">Multiply (Darken)</option>
+</select>
+</div>
+</div>
+<!-- TIMELINE DURATION RANGE (SHOW THROUGHOUT VS CUSTOM RANGE) -->
+<div class="flex flex-col gap-space-sm pt-space-sm">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Playback Display Range</span>
+<div class="flex flex-col gap-space-xs">
+<label class="flex items-center gap-space-sm p-space-sm rounded-lg bg-surface-container hover:bg-surface-container-high transition-colors cursor-pointer">
+<input checked="" class="w-4 h-4 accent-primary" name="timelineScope" type="radio" value="all"/>
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-on-surface">Entire Video Duration</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Visible seamlessly from 00:00.00 to 03:42.18</span>
+</div>
+</label>
+<label class="flex items-center gap-space-sm p-space-sm rounded-lg bg-surface-container hover:bg-surface-container-high transition-colors cursor-pointer">
+<input class="w-4 h-4 accent-primary" name="timelineScope" type="radio" value="custom"/>
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-on-surface">Custom Timecode Cue Range</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Specify custom In and Out points for intro/outro display</span>
+</div>
+</label>
+</div>
+<!-- Cue Timecode Range Inputs (Collapsible) -->
+<div class="opacity-50 pointer-events-none grid grid-cols-2 gap-space-md pt-1 transition-opacity" id="cueInputsContainer">
+<div class="flex flex-col gap-1">
+<span class="font-tech-data text-tech-data text-on-surface-variant">MARK IN</span>
+<input class="w-full px-space-sm py-1 rounded bg-surface-container-highest font-tech-timecode text-tech-timecode text-on-surface focus:outline-none text-center" type="text" value="00:00:15.00"/>
+</div>
+<div class="flex flex-col gap-1">
+<span class="font-tech-data text-tech-data text-on-surface-variant">MARK OUT</span>
+<input class="w-full px-space-sm py-1 rounded bg-surface-container-highest font-tech-timecode text-tech-timecode text-on-surface focus:outline-none text-center" type="text" value="03:20:00.00"/>
+</div>
+</div>
+</div>
+<!-- FULL-SCREEN TILED WATERMARK TOGGLE (ANTI-PIRACY) -->
+<div class="flex items-center justify-between p-space-md rounded-xl bg-surface-container-high/60 shadow-inner">
+<div class="flex items-center gap-space-sm">
+<div class="w-9 h-9 rounded-lg bg-surface-container flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[20px]">security</span>
+</div>
+<div class="flex flex-col">
+<span class="font-headline-sm text-headline-sm text-on-surface">Anti-Piracy Tiled Mesh</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Replicates watermark diagonally across full frame</span>
+</div>
+</div>
+<!-- Windows 11 Fluent Style Toggle -->
+<label class="relative inline-flex items-center cursor-pointer">
+<input class="sr-only peer" id="tileToggle" type="checkbox"/>
+<div class="w-11 h-6 bg-surface-container peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-surface peer-checked:bg-primary after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-primary peer-checked:after:bg-on-primary-container after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+</label>
+</div>
+</div>
+<!-- Conversion Pipeline Metadata Summary Pill -->
+<div class="flex items-center justify-between px-space-md py-space-sm rounded-xl bg-surface-container-lowest text-on-surface-variant font-tech-data text-tech-data">
+<div class="flex items-center gap-space-xs">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
+<span>FILTER: <span class="text-on-surface">OVERLAY_NVENC_2X</span></span>
+</div>
+<div>
+<span>ALPHA BLIT: <span class="text-primary font-bold">ZERO LATENCY PASS</span></span>
+</div>
+</div>
+</aside>
+</div>
+<!-- Client-side Interactive Logic -->
+<script>
+    (function initWatermarkStudio() {
+      // Elements
+      const box = document.getElementById('watermarkTargetBox');
+      const scaleSlider = document.getElementById('scaleSlider');
+      const scaleDisplay = document.getElementById('scaleValueDisplay');
+      const opacitySlider = document.getElementById('opacitySlider');
+      const opacityDisplay = document.getElementById('opacityValueDisplay');
+      const blendSelect = document.getElementById('blendModeSelect');
+      const tileToggle = document.getElementById('tileToggle');
+      const tiledGrid = document.getElementById('tiledWatermarkGrid');
+      const guideBtn = document.getElementById('toggleGuidesBtn');
+      const guidesBox = document.getElementById('guidelinesBox');
+      const resetBtn = document.getElementById('resetTransformBtn');
+      const modeImageBtn = document.getElementById('modeImageBtn');
+      const modeTextBtn = document.getElementById('modeTextBtn');
+      const imageSettings = document.getElementById('imageSettingsSection');
+      const textSettings = document.getElementById('textSettingsSection');
+      const graphicContent = document.getElementById('graphicContentInner');
+      const textContent = document.getElementById('textContentInner');
+      const customTextInput = document.getElementById('customTextInput');
+      const renderedCustomText = document.getElementById('renderedCustomText');
+      const anchorButtons = document.querySelectorAll('.anchor-btn');
+      const anchorLabel = document.getElementById('currentAnchorLabel');
+      const hudX = document.getElementById('hudX');
+      const hudY = document.getElementById('hudY');
+      const scopeRadios = document.querySelectorAll('input[name="timelineScope"]');
+      const cueInputs = document.getElementById('cueInputsContainer');
+      const marginX = document.getElementById('sliderMarginX');
+      const marginY = document.getElementById('sliderMarginY');
+      const marginValX = document.getElementById('marginValX');
+      const marginValY = document.getElementById('marginValY');
+
+      // Scale slider handler
+      scaleSlider.addEventListener('input', (e) => {
+        const val = e.target.value;
+        scaleDisplay.textContent = val + '%';
+        const pxWidth = Math.round(90 + (val * 2.4));
+        box.style.width = pxWidth + 'px';
+      });
+
+      // Opacity slider handler
+      opacitySlider.addEventListener('input', (e) => {
+        const val = e.target.value;
+        opacityDisplay.textContent = val + '%';
+        box.style.opacity = val / 100;
+      });
+
+      // Blend Mode selector
+      blendSelect.addEventListener('change', (e) => {
+        box.style.mixBlendMode = e.target.value;
+      });
+
+      // Tile Toggle
+      tileToggle.addEventListener('change', (e) => {
+        if (e.target.checked) {
+          tiledGrid.classList.remove('hidden');
+          tiledGrid.classList.add('grid');
+        } else {
+          tiledGrid.classList.remove('grid');
+          tiledGrid.classList.add('hidden');
+        }
+      });
+
+      // Toggle Title Safe Guidelines
+      let guidesActive = true;
+      guideBtn.addEventListener('click', () => {
+        guidesActive = !guidesActive;
+        guidesBox.style.opacity = guidesActive ? '1' : '0';
+        guideBtn.classList.toggle('text-primary');
+      });
+
+      // Reset Center
+      resetBtn.addEventListener('click', () => {
+        box.style.top = '40%';
+        box.style.left = '40%';
+        updateHud();
+      });
+
+      // Switch Modes: Image vs Text
+      modeImageBtn.addEventListener('click', () => {
+        modeImageBtn.classList.add('bg-surface-container-high', 'text-primary', 'shadow-sm');
+        modeImageBtn.classList.remove('text-on-surface-variant');
+        modeTextBtn.classList.remove('bg-surface-container-high', 'text-primary', 'shadow-sm');
+        modeTextBtn.classList.add('text-on-surface-variant');
+        
+        imageSettings.classList.remove('hidden');
+        imageSettings.classList.add('flex');
+        textSettings.classList.remove('flex');
+        textSettings.classList.add('hidden');
+        
+        graphicContent.classList.remove('hidden');
+        textContent.classList.add('hidden');
+      });
+
+      modeTextBtn.addEventListener('click', () => {
+        modeTextBtn.classList.add('bg-surface-container-high', 'text-primary', 'shadow-sm');
+        modeTextBtn.classList.remove('text-on-surface-variant');
+        modeImageBtn.classList.remove('bg-surface-container-high', 'text-primary', 'shadow-sm');
+        modeImageBtn.classList.add('text-on-surface-variant');
+        
+        textSettings.classList.remove('hidden');
+        textSettings.classList.add('flex');
+        imageSettings.classList.remove('flex');
+        imageSettings.classList.add('hidden');
+        
+        graphicContent.classList.add('hidden');
+        textContent.classList.remove('hidden');
+      });
+
+      // Live text string preview
+      customTextInput.addEventListener('input', (e) => {
+        renderedCustomText.textContent = e.target.value || '© WATERMARK';
+      });
+
+      // Anchor Quick Positioning
+      const anchorPositions = {
+        'TL': { top: '8%', left: '8%', name: 'TOP LEFT (TL)' },
+        'TC': { top: '8%', left: '40%', name: 'TOP CENTER (TC)' },
+        'TR': { top: '8%', left: '72%', name: 'TOP RIGHT (TR)' },
+        'CL': { top: '40%', left: '8%', name: 'CENTER LEFT (CL)' },
+        'CC': { top: '40%', left: '40%', name: 'CENTER (CC)' },
+        'CR': { top: '40%', left: '72%', name: 'CENTER RIGHT (CR)' },
+        'BL': { top: '72%', left: '8%', name: 'BOTTOM LEFT (BL)' },
+        'BC': { top: '72%', left: '40%', name: 'BOTTOM CENTER (BC)' },
+        'BR': { top: '72%', left: '74%', name: 'BOTTOM RIGHT (BR)' }
+      };
+
+      anchorButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          anchorButtons.forEach(b => {
+            b.classList.remove('bg-primary', 'text-on-primary', 'font-bold', 'shadow-lg');
+            b.classList.add('bg-surface-container-low', 'text-on-surface-variant');
+          });
+          btn.classList.remove('bg-surface-container-low', 'text-on-surface-variant');
+          btn.classList.add('bg-primary', 'text-on-primary', 'font-bold', 'shadow-lg');
+
+          const code = btn.getAttribute('data-anchor');
+          const pos = anchorPositions[code];
+          if (pos) {
+            box.style.top = pos.top;
+            box.style.left = pos.left;
+            anchorLabel.textContent = pos.name;
+            updateHud();
+          }
+        });
+      });
+
+      // Margin Sliders
+      marginX.addEventListener('input', (e) => {
+        marginValX.textContent = e.target.value + ' px';
+      });
+      marginY.addEventListener('input', (e) => {
+        marginValY.textContent = e.target.value + ' px';
+      });
+
+      // Scope Radios
+      scopeRadios.forEach(radio => {
+        radio.addEventListener('change', () => {
+          if (radio.value === 'custom' && radio.checked) {
+            cueInputs.classList.remove('opacity-50', 'pointer-events-none');
+          } else {
+            cueInputs.classList.add('opacity-50', 'pointer-events-none');
+          }
+        });
+      });
+
+      // Dragging simulation on viewport box
+      let isDragging = false;
+      let startX, startY, initLeft, initTop;
+
+      box.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        initLeft = box.offsetLeft;
+        initTop = box.offsetTop;
+        box.classList.remove('transition-transform');
+        document.body.style.cursor = 'move';
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        const parent = box.parentElement;
+        const parentRect = parent.getBoundingClientRect();
+
+        let newX = initLeft + dx;
+        let newY = initTop + dy;
+
+        // Bounded within video container
+        newX = Math.max(0, Math.min(newX, parentRect.width - box.offsetWidth));
+        newY = Math.max(0, Math.min(newY, parentRect.height - box.offsetHeight));
+
+        box.style.left = newX + 'px';
+        box.style.top = newY + 'px';
+        updateHud();
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (isDragging) {
+          isDragging = false;
+          box.classList.add('transition-transform');
+          document.body.style.cursor = 'default';
+        }
+      });
+
+      function updateHud() {
+        const parent = box.parentElement;
+        const rect = parent.getBoundingClientRect();
+        const normX = Math.round((box.offsetLeft / rect.width) * 1920);
+        const normY = Math.round((box.offsetTop / rect.height) * 1080);
+        hudX.textContent = normX;
+        hudY.textContent = normY;
+      }
+    })();
+  </script>
+</div></main><footer class="fixed bottom-0 left-0 right-0 z-50 h-20 px-space-lg flex items-center justify-between bg-surface-container-lowest/95 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]"><div class="flex items-center gap-space-sm"><button class="flex items-center gap-space-xs px-space-md py-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md" type="button"><span class="material-symbols-outlined text-[16px]">restart_alt</span><span>Reset to Default</span></button><button class="flex items-center gap-space-xs px-space-md py-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md" type="button"><span class="material-symbols-outlined text-[16px]">close</span><span>Discard</span></button><div class="h-4 w-[1px] bg-surface-variant mx-space-xs"></div><button class="flex items-center gap-space-xs px-space-md py-2 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md" type="button"><span class="material-symbols-outlined text-[16px]">compare</span><span>Compare (Hold to view Original)</span></button></div><div class="flex items-center gap-space-md"><div class="flex flex-col items-end mr-space-xs"><span class="font-label-sm text-label-sm text-on-surface-variant">Target: Same as Source (Pass-through)</span><span class="font-tech-data text-tech-data text-primary">Est. Processing: ~18s (NVENC)</span></div><button class="flex items-center gap-space-sm px-space-xl py-2.5 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-headline-sm text-headline-sm transition-all shadow-[0_0_16px_rgba(6,182,212,0.45)]" type="button"><span class="material-symbols-outlined text-[18px]">rocket_launch</span><span>Apply to Conversion Pipeline</span></button></div></footer></body></html>

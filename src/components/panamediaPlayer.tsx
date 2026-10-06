@@ -622,13 +622,13 @@ function tn({ filePath: e, title: t }) {
     if (!K) return;
     // Fetch the port on mount — always returns 52322 default now so the
     // streaming URL is never empty on first render.
-    K.ipcRenderer.invoke(`get-streaming-port`).then((e: number) => {
-      if (e && typeof e === 'number') qt(e);
+    K.ipcRenderer.invoke(`get-streaming-port`).then((port: unknown) => {
+      if (typeof port === 'number' && port > 0) qt(port);
     });
     // When the C++ engine confirms its actual listening port, update immediately
     // so the media URL rebuilds and the video element gets a valid src.
-    const onPortReady = (_evt: any, port: number) => {
-      if (port && typeof port === 'number') qt(port);
+    const onPortReady = (_evt: unknown, port: unknown) => {
+      if (typeof port === 'number' && port > 0) qt(port);
     };
     K.ipcRenderer.on('streaming-port-ready', onPortReady);
     return () => {

@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_standard" name="shell-type"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={"darkMode":"class","theme":{"extend":{"colors":{"secondary-fixed-dim":"#d0bcff","background":"#0f131d","inverse-surface":"#dfe2f1","surface-variant":"#313540","surface-container":"#1c1f2a","on-surface":"#dfe2f1","error-container":"#93000a","tertiary-container":"#ff79b4","inverse-primary":"#00687a","on-primary":"#003640","outline-variant":"#3d494c","on-secondary-container":"#c4abff","surface-container-low":"#171b26","on-surface-variant":"#bcc9cd","on-error":"#690005","on-background":"#dfe2f1","on-error-container":"#ffdad6","outline":"#869397","on-tertiary-fixed":"#3e0022","surface-container-highest":"#313540","secondary":"#d0bcff","on-secondary-fixed":"#23005c","secondary-container":"#571bc1","on-primary-container":"#00424f","primary":"#4cd7f6","primary-container":"#06b6d4","on-tertiary-container":"#780047","on-tertiary-fixed-variant":"#8c0053","surface-container-lowest":"#0a0e18","surface-bright":"#353944","surface-tint":"#4cd7f6","primary-fixed-dim":"#4cd7f6","on-primary-fixed-variant":"#004e5c","surface-container-high":"#262a35","error":"#ffb4ab","inverse-on-surface":"#2c303b","tertiary-fixed":"#ffd9e4","surface":"#0f131d","secondary-fixed":"#e9ddff","on-secondary-fixed-variant":"#5516be","surface-dim":"#0f131d","on-tertiary":"#640039","primary-fixed":"#acedff","tertiary":"#ffb0cd","tertiary-fixed-dim":"#ffb0cd","on-primary-fixed":"#001f26","on-secondary":"#3c0091"},"borderRadius":{"DEFAULT":"0.125rem","lg":"0.25rem","xl":"0.5rem","full":"0.75rem"},"spacing":{"space-sm":"0.5rem","space-md":"0.75rem","space-xl":"1.5rem","space-lg":"1rem","space-xs":"0.25rem","margin":"1rem","gutter":"0.75rem"},"fontFamily":{"label-md":["Inter"],"headline-sm":["Inter"],"label-sm":["Inter"],"headline-lg":["Inter"],"body-lg":["Inter"],"body-sm":["Inter"],"display-lg":["Inter"],"tech-data":["JetBrains Mono"],"body-md":["Inter"],"headline-md":["Inter"],"tech-timecode":["JetBrains Mono"]},"fontSize":{"label-md":["12px",{"lineHeight":"16px","letterSpacing":"0.02em","fontWeight":"500"}],"headline-sm":["15px",{"lineHeight":"22px","letterSpacing":"0em","fontWeight":"600"}],"label-sm":["11px",{"lineHeight":"14px","letterSpacing":"0.04em","fontWeight":"600"}],"headline-lg":["24px",{"lineHeight":"32px","letterSpacing":"-0.015em","fontWeight":"600"}],"body-lg":["14px",{"lineHeight":"20px","letterSpacing":"0em","fontWeight":"400"}],"body-sm":["12px",{"lineHeight":"16px","letterSpacing":"0.01em","fontWeight":"400"}],"display-lg":["32px",{"lineHeight":"40px","letterSpacing":"-0.02em","fontWeight":"700"}],"tech-data":["11px",{"lineHeight":"14px","letterSpacing":"0.02em","fontWeight":"500"}],"body-md":["13px",{"lineHeight":"18px","letterSpacing":"0em","fontWeight":"400"}],"headline-md":["18px",{"lineHeight":"26px","letterSpacing":"-0.01em","fontWeight":"600"}],"tech-timecode":["13px",{"lineHeight":"18px","letterSpacing":"0.04em","fontWeight":"500"}]}}}}</script></head><body class="bg-surface font-body-md text-body-md text-on-surface antialiased select-none"><header class="fixed top-0 left-0 right-0 z-50 flex flex-col bg-surface-container-lowest/90 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]"><div class="h-11 px-space-md flex items-center justify-between bg-surface-container-lowest"><div class="flex items-center gap-space-md"><div class="w-5 h-5 rounded-lg bg-primary-container flex items-center justify-center"><span class="material-symbols-outlined text-[13px] text-on-primary-container">movie_edit</span></div><span class="font-label-sm text-label-sm tracking-wider uppercase text-on-surface">Panamedia Converter Pro</span><div class="h-3 w-[1px] bg-surface-variant mx-space-xs"></div><div class="flex items-center gap-space-xs px-space-sm py-0.5 rounded bg-surface-container-low"><span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span><span class="font-tech-data text-tech-data text-on-surface-variant">RTX 4090 ACTIVE • QUEUE (3)</span></div></div><div class="flex items-center"><div class="flex items-center gap-space-xs mr-space-md"><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div><div class="flex items-center"><button aria-label="Minimize" class="h-8 w-11 flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" type="button"><span class="material-symbols-outlined text-[14px]">minimize</span></button><button aria-label="Maximize" class="h-8 w-11 flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" type="button"><span class="material-symbols-outlined text-[13px]">check_box_outline_blank</span></button><button aria-label="Close" class="h-8 w-11 flex items-center justify-center text-on-surface-variant hover:bg-error-container hover:text-on-error transition-colors" type="button"><span class="material-symbols-outlined text-[16px]">close</span></button></div></div></div><div class="h-14 px-space-lg flex items-center justify-between bg-surface-container-low"><div class="flex items-center gap-space-md min-w-0 flex-1"><button class="flex items-center gap-space-xs px-space-sm py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors" type="button"><span class="material-symbols-outlined text-[16px]">arrow_back</span><span class="font-label-sm text-label-sm">Queue</span></button><div class="flex flex-col min-w-0"><div class="flex items-center gap-space-sm"><span class="font-headline-sm text-headline-sm text-on-surface truncate">Suffix - Mwandikondela ft. Ndirande Anglican Voices_1080p.mp4</span><span class="px-space-xs py-0.5 rounded bg-surface-variant font-tech-data text-tech-data text-primary">READY</span></div><div class="flex items-center gap-space-sm text-on-surface-variant font-tech-data text-tech-data"><span>1080p60</span><span>•</span><span>428 MB</span><span>•</span><span>03:42.18</span><span>•</span><span>H.264 / AAC 320kbps</span></div></div></div><div class="flex items-center gap-space-sm pl-space-md"><button class="flex items-center gap-space-xs px-space-md py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors" type="button"><span class="material-symbols-outlined text-[16px]">picture_in_picture_alt</span><span class="font-label-sm text-label-sm">Detached Preview</span></button><button class="flex items-center gap-space-xs px-space-md py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors" type="button"><span class="material-symbols-outlined text-[16px]">tune</span><span class="font-label-sm text-label-sm">Global Settings</span></button></div></div><div class="h-11 px-space-lg flex items-center bg-surface-container-lowest overflow-x-auto"><nav class="flex items-center gap-space-xs w-full" data-active-classes="bg-primary-container text-on-primary-container font-semibold rounded-lg"><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="cut-trim" href="#">Cut / Trim</a><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="crop-aspect" href="#">Crop &amp; Aspect</a><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="subtitles" href="#">Subtitles</a><a aria-current="page" class="px-space-md py-1 transition-colors bg-primary-container text-on-primary-container font-semibold rounded-lg" data-path="visual-effects" href="#">Visual Effects</a><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="rotate-level" href="#">Rotate &amp; Level</a><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="watermark-logo" href="#">Watermark &amp; Logo</a><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="mirror-flip" href="#">Mirror &amp; Flip</a><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="smart-compress" href="#">Smart Compress</a><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="gif-creator" href="#">GIF Creator</a><a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors" data-path="denoise-audio" href="#">Denoise &amp; Audio</a></nav></div></header><main class="w-full pt-36 pb-20 px-space-lg bg-surface min-h-screen"><div class="flex flex-col w-full gap-space-md">
+<!-- Top Live Pipeline Telemetry Ribbon -->
+<div class="flex items-center justify-between px-space-lg py-space-sm bg-surface-container-low rounded-xl shadow-sm">
+<div class="flex items-center gap-space-lg">
+<div class="flex items-center gap-space-xs text-primary font-tech-data text-tech-data">
+<span class="material-symbols-outlined text-[15px]" style="font-variation-settings: 'FILL' 1;">auto_fix_high</span>
+<span>ENGINE: 32-BIT FLOATING PRECISION (ACEScc)</span>
+</div>
+<div class="h-3 w-px bg-surface-variant"></div>
+<div class="flex items-center gap-space-xs text-on-surface-variant font-tech-data text-tech-data">
+<span>COLOR PROFILE:</span>
+<span class="text-on-surface font-semibold">Rec.709 Gamma 2.4</span>
+</div>
+<div class="h-3 w-px bg-surface-variant"></div>
+<div class="flex items-center gap-space-xs text-secondary font-tech-data text-tech-data">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary animate-ping"></span>
+<span>CUDA CORE REAL-TIME SHADER INJECTION</span>
+</div>
+</div>
+<div class="flex items-center gap-space-sm">
+<div class="flex items-center gap-space-xs px-space-sm py-0.5 rounded bg-surface-container font-tech-data text-tech-data text-on-surface-variant">
+<span>FPS:</span>
+<span class="text-primary font-semibold" id="render-fps">59.94</span>
+</div>
+<div class="flex items-center gap-space-xs px-space-sm py-0.5 rounded bg-surface-container font-tech-data text-tech-data text-on-surface-variant">
+<span>GPU LOAD:</span>
+<span class="text-primary font-semibold">34% (RTX 4090)</span>
+</div>
+<button class="flex items-center gap-space-xs px-space-sm py-1 rounded bg-surface-container-high hover:bg-surface-bright text-on-surface-variant hover:text-on-surface transition-colors font-label-sm text-label-sm" type="button">
+<span class="material-symbols-outlined text-[14px]">tune</span>
+<span>Scopes Setup</span>
+</button>
+</div>
+</div>
+<!-- Primary Asymmetric Workspace: Left Viewport (62%) & Right Inspector Deck (38%) -->
+<div class="grid grid-cols-12 gap-space-md items-start">
+<!-- LEFT COLUMN: Canvas, Split Wipe Preview & Precision Timeline Scrub -->
+<div class="col-span-12 lg:col-span-7 xl:col-span-8 flex flex-col gap-space-md">
+<!-- Video Monitor Canvas Container -->
+<div class="relative w-full aspect-video rounded-xl bg-surface-container-lowest overflow-hidden shadow-xl select-none group" id="viewport-container">
+<!-- Background Layer: Split Screen Viewer (Before / After) -->
+<div class="absolute inset-0 flex">
+<!-- Left side: Original Image (Before) -->
+<div class="relative h-full overflow-hidden" id="wipe-left-container" style="width: 50%;">
+<div class="absolute inset-0 w-full h-full bg-cover bg-center filter grayscale-[25%] contrast-90 brightness-95" data-alt="Cinematic raw music video shot of a charismatic male performer on a neon-lit stage with soft moody blue atmospheric backlight, natural flat skin tones, cinematic dark shadows, high dynamic range 8k video frame" id="before-bg" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuB-TjPe2YTuAy_-dOpx_pvkMWviLaUU87XwLBesgSnyTz5O9pDrBSLHw4ema7-V3KOtIehwFUc5lgtXOfPcyqvNXgC3X99hyQBtSfecKWWmk_98WAPg7byLcGvIYv0zIQJhyiE3b-7sRWOmEBzqHroxcOf4YHBuXIq3G6sQm-6JTNUVdLhrZg2C-x0fkftdx58H5aVatB4h4edp8hAr6TPQ71xEXh44rk_gdT--cpL-')"></div>
+<div class="absolute top-space-md left-space-md px-space-sm py-0.5 rounded bg-surface-container-lowest/80 backdrop-blur-md font-tech-data text-tech-data text-on-surface tracking-wider">
+              ORIGINAL (LOG / REC.709)
+            </div>
+</div>
+<!-- Right side: Graded / Processed Image (After) -->
+<div class="relative flex-1 h-full overflow-hidden">
+<div class="absolute inset-0 w-full h-full bg-cover bg-center transition-all duration-150" data-alt="Cinematic graded film still of male music artist bathed in hyper-stylized teal and warm golden orange lighting, vibrant neon reflections, rich film grain, deep ink shadows, pristine bloom glow and anamorphic lens flares" id="after-bg" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBkMmK3_Mq4w16qFPvZEJkJyYhoWsa4d5JgBGbE7TxbZuxdwemBh54kY4ZI7c6_rJLSiIB6-MEKPQr0sdnXBEL0UjMyqIzJA-eu7Fy7796jP5Xiw0RNeyRJkYKasCJD0kmIghSN0QAZaHMu0pfkX19Z5re5607EkSQo0CTk9XWl3hwXP4_uOvPN8k8zwisMmEV2rfZwPMgoPTjUf8U95G9w1peW-Gb2R4Bv1mwypeQm')"></div>
+<div class="absolute top-space-md right-space-md flex items-center gap-space-xs px-space-sm py-0.5 rounded bg-primary-container/80 backdrop-blur-md font-tech-data text-tech-data text-on-primary-container font-semibold">
+<span class="material-symbols-outlined text-[13px]">palette</span>
+              GRADED (ACTIVE PIPELINE)
+            </div>
+</div>
+</div>
+<!-- Interactive Split-Screen Wipe Divider -->
+<div class="absolute top-0 bottom-0 z-20 cursor-ew-resize flex items-center justify-center -translate-x-1/2 group-hover:opacity-100 transition-opacity" id="wipe-divider" style="left: 50%;">
+<div class="w-[2px] h-full bg-primary shadow-[0_0_12px_rgba(76,215,246,0.8)]"></div>
+<div class="absolute w-8 h-8 rounded-full bg-surface-container-highest shadow-xl flex items-center justify-center text-primary hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-[16px]">compare_arrows</span>
+</div>
+</div>
+<!-- Real-Time Scope / Histogram Overlay Box (Top Left overlay button) -->
+<div class="absolute bottom-space-md left-space-md z-10 flex flex-col gap-space-xs">
+<!-- Mini Collapsible RGB Histogram -->
+<div class="w-48 h-20 rounded-lg bg-surface-container-lowest/90 backdrop-blur-md p-space-xs flex flex-col justify-between shadow-lg" id="scope-overlay">
+<div class="flex items-center justify-between text-on-surface-variant font-tech-data text-tech-data">
+<span>RGB PARADE</span>
+<span class="text-primary">IRE 0-100</span>
+</div>
+<!-- Inline SVG RGB Waveform Simulation -->
+<svg class="w-full h-12 text-on-surface" fill="none" viewbox="0 0 180 50">
+<!-- Grid marks -->
+<line stroke="currentColor" stroke-dasharray="2 2" stroke-opacity="0.08" x1="0" x2="180" y1="12" y2="12"></line>
+<line stroke="currentColor" stroke-dasharray="2 2" stroke-opacity="0.08" x1="0" x2="180" y1="25" y2="25"></line>
+<line stroke="currentColor" stroke-dasharray="2 2" stroke-opacity="0.08" x1="0" x2="180" y1="38" y2="38"></line>
+<!-- Red channel trace -->
+<path d="M0,45 Q15,40 30,22 T60,18 T90,32 T120,10 T150,28 T180,36" fill="none" opacity="0.8" stroke="#ff5c8a" stroke-width="1.2"></path>
+<!-- Green channel trace -->
+<path d="M0,48 Q15,35 30,28 T60,12 T90,26 T120,15 T150,20 T180,40" fill="none" opacity="0.85" stroke="#4cd7f6" stroke-width="1.2"></path>
+<!-- Blue channel trace -->
+<path d="M0,42 Q15,38 30,16 T60,25 T90,14 T120,8 T150,30 T180,32" fill="none" opacity="0.8" stroke="#d0bcff" stroke-width="1.2"></path>
+</svg>
+</div>
+<div class="flex items-center gap-space-xs">
+<button class="px-space-sm py-1 rounded bg-surface-container-high/90 hover:bg-surface-bright backdrop-blur-md font-label-sm text-label-sm text-on-surface-variant hover:text-on-surface flex items-center gap-space-xs transition-colors" id="toggle-scopes-btn" type="button">
+<span class="material-symbols-outlined text-[13px]">analytics</span>
+<span>RGB Parade</span>
+</button>
+<button class="px-space-sm py-1 rounded bg-surface-container-high/90 hover:bg-surface-bright backdrop-blur-md font-label-sm text-label-sm text-on-surface-variant hover:text-on-surface flex items-center gap-space-xs transition-colors" type="button">
+<span class="material-symbols-outlined text-[13px]">grid_4x4</span>
+<span>Safe Areas</span>
+</button>
+<button class="px-space-sm py-1 rounded bg-surface-container-high/90 hover:bg-surface-bright backdrop-blur-md font-label-sm text-label-sm text-on-surface-variant hover:text-on-surface flex items-center gap-space-xs transition-colors" type="button">
+<span class="material-symbols-outlined text-[13px]">crop_free</span>
+<span>100% Zoom</span>
+</button>
+</div>
+</div>
+<!-- Canvas Quick Transport Hover Overlay -->
+<div class="absolute bottom-space-md right-space-md z-10 flex items-center gap-space-xs">
+<button class="w-9 h-9 rounded-lg bg-surface-container-highest/90 hover:bg-primary backdrop-blur-md text-on-surface hover:text-on-primary flex items-center justify-center transition-all shadow-md" id="preview-play-btn" type="button">
+<span class="material-symbols-outlined text-[18px]">play_arrow</span>
+</button>
+<button class="w-9 h-9 rounded-lg bg-surface-container-highest/90 hover:bg-surface-bright backdrop-blur-md text-on-surface flex items-center justify-center transition-colors shadow-md" type="button">
+<span class="material-symbols-outlined text-[16px]">fullscreen</span>
+</button>
+</div>
+</div>
+<!-- Scrubber Timeline Bar with Keyframe Markers -->
+<div class="flex flex-col gap-space-xs p-space-md rounded-xl bg-surface-container-low shadow-sm">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-md">
+<span class="font-tech-timecode text-tech-timecode text-primary font-bold">01:48.12</span>
+<span class="font-tech-data text-tech-data text-on-surface-variant">/ 03:42.18</span>
+<div class="flex items-center gap-space-xs px-space-xs py-0.5 rounded bg-surface-container text-on-surface-variant font-tech-data text-tech-data">
+<span>FRAME:</span>
+<span class="text-on-surface">6,492</span>
+</div>
+</div>
+<div class="flex items-center gap-space-xs">
+<button class="w-7 h-7 rounded hover:bg-surface-container flex items-center justify-center text-on-surface-variant hover:text-on-surface" type="button">
+<span class="material-symbols-outlined text-[16px]">skip_previous</span>
+</button>
+<button class="w-7 h-7 rounded hover:bg-surface-container flex items-center justify-center text-on-surface-variant hover:text-on-surface" type="button">
+<span class="material-symbols-outlined text-[16px]">fast_rewind</span>
+</button>
+<button class="px-space-sm h-7 rounded bg-primary text-on-primary font-label-sm text-label-sm flex items-center justify-center" type="button">
+<span class="material-symbols-outlined text-[15px]">play_arrow</span>
+</button>
+<button class="w-7 h-7 rounded hover:bg-surface-container flex items-center justify-center text-on-surface-variant hover:text-on-surface" type="button">
+<span class="material-symbols-outlined text-[16px]">fast_forward</span>
+</button>
+<button class="w-7 h-7 rounded hover:bg-surface-container flex items-center justify-center text-on-surface-variant hover:text-on-surface" type="button">
+<span class="material-symbols-outlined text-[16px]">skip_next</span>
+</button>
+<div class="h-3 w-px bg-surface-variant mx-space-xs"></div>
+<button class="px-space-sm h-7 rounded bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface font-tech-data text-tech-data flex items-center gap-1" type="button">
+<span class="material-symbols-outlined text-[13px]">bookmark_add</span>
+<span>ADD KEYFRAME</span>
+</button>
+</div>
+</div>
+<!-- Custom Scrubber Slider Track -->
+<div class="relative w-full h-8 flex items-center cursor-pointer select-none">
+<div class="w-full h-2 rounded bg-surface-container relative overflow-hidden">
+<!-- Cached buffer indicator -->
+<div class="absolute left-0 top-0 bottom-0 bg-surface-variant w-3/4"></div>
+<!-- Playhead progress fill -->
+<div class="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-primary-container to-primary w-[48%]"></div>
+</div>
+<!-- Keyframe Diamonds -->
+<div class="absolute left-[15%] top-1/2 -translate-y-1/2 -translate-x-1/2 w-2.5 h-2.5 rotate-45 bg-secondary shadow-[0_0_8px_rgba(208,188,255,0.7)] z-10" title="Keyframe: Contrast Boost"></div>
+<div class="absolute left-[48%] top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rotate-45 bg-primary shadow-[0_0_10px_rgba(76,215,246,0.9)] z-20" title="Current Playhead Position"></div>
+<div class="absolute left-[72%] top-1/2 -translate-y-1/2 -translate-x-1/2 w-2.5 h-2.5 rotate-45 bg-secondary shadow-[0_0_8px_rgba(208,188,255,0.7)] z-10" title="Keyframe: Bloom Fade"></div>
+</div>
+</div>
+<!-- Quick A/B Comparison and LUT Export Bar -->
+<div class="flex items-center justify-between p-space-md rounded-xl bg-surface-container-lowest shadow-sm">
+<div class="flex items-center gap-space-sm">
+<div class="w-2.5 h-2.5 rounded-full bg-primary animate-pulse"></div>
+<span class="font-label-md text-label-md text-on-surface">Dynamic Effect Pipeline</span>
+<span class="px-space-xs py-0.5 rounded bg-surface-container font-tech-data text-tech-data text-on-surface-variant">3 NODES LOADED</span>
+</div>
+<div class="flex items-center gap-space-sm">
+<button class="flex items-center gap-space-xs px-space-md py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface font-label-md text-label-md transition-colors" id="reset-all-btn" type="button">
+<span class="material-symbols-outlined text-[15px]">settings_backup_restore</span>
+<span>Reset Color Profile</span>
+</button>
+<button class="flex items-center gap-space-xs px-space-md py-1.5 rounded-lg bg-secondary-container hover:bg-secondary-container/80 text-on-secondary-container font-label-md text-label-md transition-colors shadow-sm" type="button">
+<span class="material-symbols-outlined text-[15px]">file_download</span>
+<span>Export LUT (.cube)</span>
+</button>
+</div>
+</div>
+</div>
+<!-- RIGHT COLUMN: Grading Deck, 3D LUT Presets, Tuning & Stylization -->
+<div class="col-span-12 lg:col-span-5 xl:col-span-4 flex flex-col gap-space-md">
+<!-- Preset Filters & 3D LUTs Library -->
+<div class="flex flex-col p-space-lg rounded-xl bg-surface-container-low shadow-sm gap-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-primary text-[18px]">filter_vintage</span>
+<span class="font-headline-sm text-headline-sm text-on-surface">Presets &amp; Creative LUTs</span>
+</div>
+<span class="font-tech-data text-tech-data text-primary">3D .CUBE MATRIX</span>
+</div>
+<!-- 8 Presets Grid with Pill Visual Badges -->
+<div class="grid grid-cols-2 gap-space-xs">
+<!-- Preset 1: Cinematic Teal & Orange (Active) -->
+<button class="lut-card flex items-center gap-space-xs p-space-xs rounded-lg bg-primary/10 text-primary ring-1 ring-primary transition-all text-left group" type="button">
+<div class="w-8 h-8 rounded bg-gradient-to-tr from-cyan-600 to-amber-500 flex-shrink-0 flex items-center justify-center shadow-inner">
+<span class="material-symbols-outlined text-[14px] text-white">movie_filter</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-sm text-label-sm font-semibold truncate">Teal &amp; Orange</span>
+<span class="font-tech-data text-tech-data text-on-surface-variant truncate">Hollywood 35mm</span>
+</div>
+</button>
+<!-- Preset 2: Vintage Film 35mm -->
+<button class="lut-card flex items-center gap-space-xs p-space-xs rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-all text-left group" type="button">
+<div class="w-8 h-8 rounded bg-gradient-to-tr from-stone-600 to-amber-200 flex-shrink-0 flex items-center justify-center shadow-inner">
+<span class="material-symbols-outlined text-[14px] text-white">camera_roll</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-sm text-label-sm font-semibold truncate">Vintage Film</span>
+<span class="font-tech-data text-tech-data text-on-surface-variant truncate">Kodak 5207</span>
+</div>
+</button>
+<!-- Preset 3: Cyberpunk Neon -->
+<button class="lut-card flex items-center gap-space-xs p-space-xs rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-all text-left group" type="button">
+<div class="w-8 h-8 rounded bg-gradient-to-tr from-fuchsia-600 to-cyan-400 flex-shrink-0 flex items-center justify-center shadow-inner">
+<span class="material-symbols-outlined text-[14px] text-white">electric_bolt</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-sm text-label-sm font-semibold truncate">Cyberpunk</span>
+<span class="font-tech-data text-tech-data text-on-surface-variant truncate">Neo-Tokyo Lum</span>
+</div>
+</button>
+<!-- Preset 4: B&W Classic Silver -->
+<button class="lut-card flex items-center gap-space-xs p-space-xs rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-all text-left group" type="button">
+<div class="w-8 h-8 rounded bg-gradient-to-tr from-gray-900 to-gray-300 flex-shrink-0 flex items-center justify-center shadow-inner">
+<span class="material-symbols-outlined text-[14px] text-white">contrast</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-sm text-label-sm font-semibold truncate">B&amp;W Silver</span>
+<span class="font-tech-data text-tech-data text-on-surface-variant truncate">Tri-X Pan 400</span>
+</div>
+</button>
+<!-- Preset 5: Warm Golden Hour -->
+<button class="lut-card flex items-center gap-space-xs p-space-xs rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-all text-left group" type="button">
+<div class="w-8 h-8 rounded bg-gradient-to-tr from-amber-600 to-rose-400 flex-shrink-0 flex items-center justify-center shadow-inner">
+<span class="material-symbols-outlined text-[14px] text-white">wb_sunny</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-sm text-label-sm font-semibold truncate">Golden Hour</span>
+<span class="font-tech-data text-tech-data text-on-surface-variant truncate">Sun Glow 3200K</span>
+</div>
+</button>
+<!-- Preset 6: Vivid HDR Dynamic -->
+<button class="lut-card flex items-center gap-space-xs p-space-xs rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-all text-left group" type="button">
+<div class="w-8 h-8 rounded bg-gradient-to-tr from-blue-600 to-emerald-400 flex-shrink-0 flex items-center justify-center shadow-inner">
+<span class="material-symbols-outlined text-[14px] text-white">hdr_on</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-sm text-label-sm font-semibold truncate">Vivid HDR</span>
+<span class="font-tech-data text-tech-data text-on-surface-variant truncate">Dynamic Range</span>
+</div>
+</button>
+<!-- Preset 7: Muted Documentary -->
+<button class="lut-card flex items-center gap-space-xs p-space-xs rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-all text-left group" type="button">
+<div class="w-8 h-8 rounded bg-gradient-to-tr from-slate-700 to-stone-500 flex-shrink-0 flex items-center justify-center shadow-inner">
+<span class="material-symbols-outlined text-[14px] text-white">videocam</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-sm text-label-sm font-semibold truncate">Documentary</span>
+<span class="font-tech-data text-tech-data text-on-surface-variant truncate">Desaturated Cine</span>
+</div>
+</button>
+<!-- Preset 8: Low-Light Boost -->
+<button class="lut-card flex items-center gap-space-xs p-space-xs rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-all text-left group" type="button">
+<div class="w-8 h-8 rounded bg-gradient-to-tr from-indigo-950 to-indigo-500 flex-shrink-0 flex items-center justify-center shadow-inner">
+<span class="material-symbols-outlined text-[14px] text-white">nightlight</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-sm text-label-sm font-semibold truncate">Low-Light+</span>
+<span class="font-tech-data text-tech-data text-on-surface-variant truncate">Shadow Recovery</span>
+</div>
+</button>
+</div>
+<div class="flex items-center justify-between pt-space-xs">
+<span class="font-label-sm text-label-sm text-on-surface-variant">LUT Intensity</span>
+<span class="font-tech-data text-tech-data text-primary" id="lut-intensity-val">85%</span>
+</div>
+<input class="w-full h-1.5 bg-surface-container rounded-lg appearance-none cursor-pointer accent-primary" id="lut-intensity-range" max="100" min="0" type="range" value="85"/>
+</div>
+<!-- Color Balance & Primary Tuning Panel -->
+<div class="flex flex-col p-space-lg rounded-xl bg-surface-container-low shadow-sm gap-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-primary text-[18px]">tune</span>
+<span class="font-headline-sm text-headline-sm text-on-surface">Color Balance &amp; Basic</span>
+</div>
+<button class="text-on-surface-variant hover:text-primary font-tech-data text-tech-data transition-colors" type="button">RESET SECTION</button>
+</div>
+<!-- Slider Group 1: Brightness & Contrast (-100 to +100) -->
+<div class="flex flex-col gap-space-sm">
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-on-surface">Brightness</span>
+<span class="font-tech-data text-tech-data text-primary" id="val-bright">+8</span>
+</div>
+<input class="w-full h-1.5 bg-surface-container rounded-lg appearance-none cursor-pointer accent-primary" max="100" min="-100" type="range" value="8"/>
+</div>
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-on-surface">Contrast</span>
+<span class="font-tech-data text-tech-data text-primary" id="val-contrast">+18</span>
+</div>
+<input class="w-full h-1.5 bg-surface-container rounded-lg appearance-none cursor-pointer accent-primary" max="100" min="-100" type="range" value="18"/>
+</div>
+</div>
+<!-- Slider Group 2: Saturation & Vibrance -->
+<div class="flex flex-col gap-space-sm pt-space-xs">
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-on-surface">Saturation</span>
+<span class="font-tech-data text-tech-data text-primary">+22</span>
+</div>
+<input class="w-full h-1.5 bg-surface-container rounded-lg appearance-none cursor-pointer accent-primary" max="100" min="-100" type="range" value="22"/>
+</div>
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-on-surface">Vibrance (Skin Protect)</span>
+<span class="font-tech-data text-tech-data text-primary">+14</span>
+</div>
+<input class="w-full h-1.5 bg-surface-container rounded-lg appearance-none cursor-pointer accent-primary" max="100" min="-100" type="range" value="14"/>
+</div>
+</div>
+<!-- Slider Group 3: Exposure, Highlights & Shadows -->
+<div class="grid grid-cols-2 gap-space-sm pt-space-xs">
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-on-surface">Highlights</span>
+<span class="font-tech-data text-tech-data text-primary">-12</span>
+</div>
+<input class="w-full h-1.5 bg-surface-container rounded-lg appearance-none cursor-pointer accent-primary" max="100" min="-100" type="range" value="-12"/>
+</div>
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-on-surface">Shadows</span>
+<span class="font-tech-data text-tech-data text-primary">+16</span>
+</div>
+<input class="w-full h-1.5 bg-surface-container rounded-lg appearance-none cursor-pointer accent-primary" max="100" min="-100" type="range" value="16"/>
+</div>
+</div>
+<!-- Color Temperature & Tint Dual Strip -->
+<div class="flex flex-col gap-space-sm pt-space-xs">
+<!-- Temp: Blue to Amber -->
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-1">
+<span class="font-label-sm text-label-sm text-on-surface">Temperature</span>
+<span class="font-tech-data text-tech-data text-on-surface-variant">(Kelvin)</span>
+</div>
+<span class="font-tech-data text-tech-data text-primary">+650 K (Warm)</span>
+</div>
+<div class="relative w-full h-2 rounded bg-gradient-to-r from-blue-500 via-slate-400 to-amber-500 flex items-center">
+<input class="w-full opacity-0 cursor-pointer absolute inset-0 z-10" max="100" min="-100" type="range" value="15"/>
+<div class="w-3.5 h-3.5 rounded-full bg-white shadow-md pointer-events-none absolute left-[57.5%] -translate-x-1/2"></div>
+</div>
+</div>
+<!-- Tint: Green to Magenta -->
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-on-surface">Tint</span>
+<span class="font-tech-data text-tech-data text-secondary">-4 (Magenta)</span>
+</div>
+<div class="relative w-full h-2 rounded bg-gradient-to-r from-emerald-500 via-slate-400 to-fuchsia-500 flex items-center">
+<input class="w-full opacity-0 cursor-pointer absolute inset-0 z-10" max="100" min="-100" type="range" value="-4"/>
+<div class="w-3.5 h-3.5 rounded-full bg-white shadow-md pointer-events-none absolute left-[48%] -translate-x-1/2"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Stylized Creative Effects Section -->
+<div class="flex flex-col p-space-lg rounded-xl bg-surface-container-low shadow-sm gap-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-secondary text-[18px]">grain</span>
+<span class="font-headline-sm text-headline-sm text-on-surface">Stylized Optics &amp; Texture</span>
+</div>
+<span class="px-space-xs py-0.5 rounded bg-surface-container font-tech-data text-tech-data text-secondary">POST-FX</span>
+</div>
+<div class="flex flex-col gap-space-sm">
+<!-- Vignette Intensity & Feather -->
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-on-surface">Vignette (Intensity / Feather)</span>
+<span class="font-tech-data text-tech-data text-primary">32%</span>
+</div>
+<input class="w-full h-1.5 bg-surface-container rounded-lg appearance-none cursor-pointer accent-primary" max="100" min="0" type="range" value="32"/>
+</div>
+<!-- Film Grain Texture -->
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-1">
+<span class="font-label-sm text-label-sm text-on-surface">Film Grain</span>
+<span class="font-tech-data text-tech-data text-on-surface-variant">(Organic 35mm)</span>
+</div>
+<span class="font-tech-data text-tech-data text-primary">24%</span>
+</div>
+<input class="w-full h-1.5 bg-surface-container rounded-lg appearance-none cursor-pointer accent-primary" max="100" min="0" type="range" value="24"/>
+</div>
+<!-- Sharpen / Unsharp Mask Clarity -->
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-on-surface">Unsharp Mask (Clarity)</span>
+<span class="font-tech-data text-tech-data text-primary">18%</span>
+</div>
+<input class="w-full h-1.5 bg-surface-container rounded-lg appearance-none cursor-pointer accent-primary" max="100" min="0" type="range" value="18"/>
+</div>
+<!-- Dehaze & Bloom Glow -->
+<div class="grid grid-cols-2 gap-space-sm pt-space-xs">
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-on-surface">Dehaze</span>
+<span class="font-tech-data text-tech-data text-primary">10%</span>
+</div>
+<input class="w-full h-1.5 bg-surface-container rounded-lg appearance-none cursor-pointer accent-primary" max="100" min="0" type="range" value="10"/>
+</div>
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-on-surface">Bloom Glow</span>
+<span class="font-tech-data text-tech-data text-secondary">38%</span>
+</div>
+<input class="w-full h-1.5 bg-surface-container rounded-lg appearance-none cursor-pointer accent-secondary" max="100" min="0" type="range" value="38"/>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<script>
+  (function() {
+    // Interactive Split-Screen Wipe Scrubber Logic
+    const container = document.getElementById('viewport-container');
+    const divider = document.getElementById('wipe-divider');
+    const leftContainer = document.getElementById('wipe-left-container');
+    const toggleScopesBtn = document.getElementById('toggle-scopes-btn');
+    const scopeOverlay = document.getElementById('scope-overlay');
+    const lutCards = document.querySelectorAll('.lut-card');
+    const resetBtn = document.getElementById('reset-all-btn');
+
+    let isDragging = false;
+
+    function updateWipePosition(clientX) {
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      let percent = ((clientX - rect.left) / rect.width) * 100;
+      if (percent < 5) percent = 5;
+      if (percent > 95) percent = 95;
+
+      divider.style.left = percent + '%';
+      leftContainer.style.width = percent + '%';
+    }
+
+    if (divider && container) {
+      divider.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        e.preventDefault();
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        updateWipePosition(e.clientX);
+      });
+
+      window.addEventListener('mouseup', () => {
+        isDragging = false;
+      });
+
+      // Also allow clicking anywhere on video container to jump split-line
+      container.addEventListener('click', (e) => {
+        if (e.target.closest('#scope-overlay') || e.target.closest('button')) return;
+        updateWipePosition(e.clientX);
+      });
+    }
+
+    // Toggle Scope Mini Window
+    if (toggleScopesBtn && scopeOverlay) {
+      toggleScopesBtn.addEventListener('click', () => {
+        if (scopeOverlay.classList.contains('hidden')) {
+          scopeOverlay.classList.remove('hidden');
+          toggleScopesBtn.classList.add('bg-primary-container', 'text-on-primary-container');
+        } else {
+          scopeOverlay.classList.add('hidden');
+          toggleScopesBtn.classList.remove('bg-primary-container', 'text-on-primary-container');
+        }
+      });
+    }
+
+    // LUT Selection micro-interaction
+    lutCards.forEach(card => {
+      card.addEventListener('click', () => {
+        lutCards.forEach(c => {
+          c.classList.remove('bg-primary/10', 'text-primary', 'ring-1', 'ring-primary');
+          c.classList.add('bg-surface-container', 'text-on-surface-variant');
+        });
+        card.classList.remove('bg-surface-container', 'text-on-surface-variant');
+        card.classList.add('bg-primary/10', 'text-primary', 'ring-1', 'ring-primary');
+      });
+    });
+
+    // Reset button feedback
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => {
+        document.querySelectorAll('input[type="range"]').forEach(input => {
+          if (input.min === "-100") input.value = 0;
+          else if (input.id === 'lut-intensity-range') input.value = 100;
+          else input.value = 0;
+        });
+      });
+    }
+  })();
+</script></main><footer class="fixed bottom-0 left-0 right-0 z-50 h-20 px-space-lg flex items-center justify-between bg-surface-container-lowest/95 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]"><div class="flex items-center gap-space-sm"><button class="flex items-center gap-space-xs px-space-md py-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md" type="button"><span class="material-symbols-outlined text-[16px]">restart_alt</span><span>Reset to Default</span></button><button class="flex items-center gap-space-xs px-space-md py-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md" type="button"><span class="material-symbols-outlined text-[16px]">close</span><span>Discard</span></button><div class="h-4 w-[1px] bg-surface-variant mx-space-xs"></div><button class="flex items-center gap-space-xs px-space-md py-2 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md" type="button"><span class="material-symbols-outlined text-[16px]">compare</span><span>Compare (Hold to view Original)</span></button></div><div class="flex items-center gap-space-md"><div class="flex flex-col items-end mr-space-xs"><span class="font-label-sm text-label-sm text-on-surface-variant">Target: Same as Source (Pass-through)</span><span class="font-tech-data text-tech-data text-primary">Est. Processing: ~18s (NVENC)</span></div><button class="flex items-center gap-space-sm px-space-xl py-2.5 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-headline-sm text-headline-sm transition-all shadow-[0_0_16px_rgba(6,182,212,0.45)]" type="button"><span class="material-symbols-outlined text-[18px]">rocket_launch</span><span>Apply to Conversion Pipeline</span></button></div></footer></body></html>

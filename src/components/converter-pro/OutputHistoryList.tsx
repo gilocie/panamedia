@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Film, Music, Play, Pause, Send, FolderEdit, FolderOpen, Trash2 } from 'lucide-react';
+import { Film, Music, Play, Pause, Send, FolderEdit, FolderOpen, Trash2, AlertTriangle, X } from 'lucide-react';
 import { electron } from '../panamedia/types';
 
 interface OutputItem {
@@ -42,8 +42,18 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
   const isVideo = type === 'video';
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
+  const [pendingDeleteItems, setPendingDeleteItems] = useState<OutputItem[] | null>(null);
   const [deleteError, setDeleteError] = useState('');
   const [thumbnailErrors, setThumbnailErrors] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!pendingDeleteItems) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPendingDeleteItems(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [pendingDeleteItems]);
 
   useEffect(() => {
     const currentPaths = new Set(items.map((item) => item.path));
@@ -65,16 +75,27 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
     setDeleteError('');
   };
 
-  const handleDeleteSelected = async () => {
+  const handleDeleteSelected = () => {
     const targets = items.filter((item) => selectedPaths.has(item.path));
     if (targets.length === 0 || isDeleting) return;
-    const label = `${targets.length} selected file${targets.length === 1 ? '' : 's'}`;
-    if (!window.confirm(`Move ${label} to the Recycle Bin?`)) return;
     if (!electron) {
       setDeleteError('File deletion is only available in the Panamedia desktop app.');
       return;
     }
+    setDeleteError('');
+    setPendingDeleteItems(targets);
+  };
 
+  const handleConfirmDelete = async () => {
+    const targets = pendingDeleteItems;
+    if (!targets || isDeleting) return;
+    const bridge = electron;
+    if (!bridge) {
+      setPendingDeleteItems(null);
+      setDeleteError('File deletion is only available in the Panamedia desktop app.');
+      return;
+    }
+    setPendingDeleteItems(null);
     setIsDeleting(true);
     setDeleteError('');
     const deleted: string[] = [];
@@ -82,7 +103,7 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
     try {
       for (const item of targets) {
         try {
-          const result = await electron.ipcRenderer.invoke('trash-converter-output', item.path);
+          const result = await bridge.ipcRenderer.invoke('trash-converter-output', item.path);
           if (result?.success) deleted.push(item.path);
           else failures.push(`${item.name}: ${result?.error || 'Delete failed'}`);
         } catch (error) {
@@ -268,6 +289,174 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
       {deleteError && (
         <div role="alert" style={{ color: '#fca5a5', fontSize: '11px', margin: '0 0 8px' }}>
           {deleteError}
+        </div>
+      )}
+
+      {pendingDeleteItems && (
+        <div
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setPendingDeleteItems(null);
+          }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 12000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            background: 'rgba(3, 5, 12, 0.76)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)'
+          }}
+        >
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="output-delete-title"
+            aria-describedby="output-delete-description"
+            style={{
+              width: 'min(440px, 100%)',
+              overflow: 'hidden',
+              borderRadius: '16px',
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'linear-gradient(160deg, #191a25 0%, #101117 100%)',
+              boxShadow: '0 28px 90px rgba(0,0,0,0.65), 0 0 0 1px rgba(239,68,68,0.08)',
+              color: '#f8fafc'
+            }}
+          >
+            <div style={{ padding: '22px 22px 18px' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
+                <div style={{
+                  width: '44px',
+                  height: '44px',
+                  flexShrink: 0,
+                  display: 'grid',
+                  placeItems: 'center',
+                  borderRadius: '13px',
+                  color: '#fca5a5',
+                  background: 'linear-gradient(145deg, rgba(239,68,68,0.2), rgba(239,68,68,0.08))',
+                  border: '1px solid rgba(248,113,113,0.24)'
+                }}>
+                  <AlertTriangle size={20} />
+                </div>
+                <div style={{ minWidth: 0, flex: 1, paddingTop: '2px' }}>
+                  <h2 id="output-delete-title" style={{ margin: 0, fontSize: '17px', fontWeight: 750, letterSpacing: '-0.02em' }}>
+                    Move to Recycle Bin?
+                  </h2>
+                  <p id="output-delete-description" style={{ margin: '7px 0 0', color: 'rgba(226,232,240,0.72)', fontSize: '12px', lineHeight: 1.55 }}>
+                    {pendingDeleteItems.length === 1
+                      ? 'This file will be moved to the Recycle Bin. You can restore it later.'
+                      : `${pendingDeleteItems.length} files will be moved to the Recycle Bin. You can restore them later.`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPendingDeleteItems(null)}
+                  aria-label="Close confirmation"
+                  style={{
+                    display: 'grid',
+                    placeItems: 'center',
+                    width: '28px',
+                    height: '28px',
+                    margin: '-4px -6px 0 0',
+                    flexShrink: 0,
+                    color: 'rgba(203,213,225,0.65)',
+                    border: 0,
+                    borderRadius: '8px',
+                    background: 'transparent',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div style={{
+                marginTop: '18px',
+                padding: '11px 13px',
+                borderRadius: '10px',
+                border: '1px solid rgba(255,255,255,0.07)',
+                background: 'rgba(255,255,255,0.035)'
+              }}>
+                <div style={{ marginBottom: '6px', color: 'rgba(148,163,184,0.8)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                  {pendingDeleteItems.length} selected {pendingDeleteItems.length === 1 ? 'item' : 'items'}
+                </div>
+                {pendingDeleteItems.slice(0, 2).map((item) => (
+                  <div
+                    key={item.path}
+                    title={item.name}
+                    style={{
+                      overflow: 'hidden',
+                      color: 'rgba(241,245,249,0.9)',
+                      fontSize: '12px',
+                      lineHeight: 1.7,
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {item.name}
+                  </div>
+                ))}
+                {pendingDeleteItems.length > 2 && (
+                  <div style={{ marginTop: '2px', color: 'rgba(148,163,184,0.75)', fontSize: '11px' }}>
+                    and {pendingDeleteItems.length - 2} more
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '9px',
+              padding: '14px 22px',
+              borderTop: '1px solid rgba(255,255,255,0.07)',
+              background: 'rgba(0,0,0,0.16)'
+            }}>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setPendingDeleteItems(null)}
+                style={{
+                  minWidth: '94px',
+                  padding: '9px 15px',
+                  borderRadius: '9px',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  background: 'rgba(255,255,255,0.055)',
+                  color: '#e2e8f0',
+                  fontSize: '12px',
+                  fontWeight: 650,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '7px',
+                  minWidth: '164px',
+                  padding: '9px 15px',
+                  borderRadius: '9px',
+                  border: '1px solid rgba(248,113,113,0.45)',
+                  background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+                  boxShadow: '0 5px 16px rgba(220,38,38,0.22)',
+                  color: '#fff',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                <Trash2 size={14} />
+                Move to Recycle Bin
+              </button>
+            </div>
+          </section>
         </div>
       )}
 

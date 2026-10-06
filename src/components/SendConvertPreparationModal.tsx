@@ -545,6 +545,20 @@ export function SendConvertPreparationModal({
     || localQueue[selectedFileIdx]
     || (isConverting ? activeConvertingFile : '')
     || '';
+  const currentFileTools = toolSettings[normalizeQueuePath(currentFile)] || {};
+  const savedCutSettings = currentFileTools.cut;
+  const initialCutSettings = savedCutSettings
+    && typeof savedCutSettings === 'object'
+    && 'startSec' in savedCutSettings
+    && typeof savedCutSettings.startSec === 'number'
+    && 'endSec' in savedCutSettings
+    && typeof savedCutSettings.endSec === 'number'
+    ? {
+        startSec: savedCutSettings.startSec,
+        endSec: savedCutSettings.endSec
+      }
+    : undefined;
+  const configuredToolIds = new Set(Object.keys(currentFileTools));
   const handlePlayOutput = (item: { path: string; thumbnailPath?: string }) => {
     const shouldPause = playingOutputPath === item.path;
     setOutputPreview(item);
@@ -779,8 +793,9 @@ export function SendConvertPreparationModal({
     localQueue.forEach(f => {
       const mType = mediaTypes[f] || (isVideoFile(f) ? 'video' : 'audio');
       const fileTools = toolSettings[normalizeQueuePath(f)];
+      const hasVideoEdits = mType === 'video' && Boolean(fileTools && Object.keys(fileTools).length > 0);
       perFileOptions[f] = {
-        mode: mType === 'video' ? (autoCopy ? 'original' : 'convert') : 'extract_audio',
+        mode: mType === 'video' ? (autoCopy && !hasVideoEdits ? 'original' : 'convert') : 'extract_audio',
         // The GIF tool always produces an animated GIF,
         // whatever container the dock selector shows.
         format: fileTools && fileTools.gif
@@ -794,10 +809,15 @@ export function SendConvertPreparationModal({
     });
 
     const hasVideos = localQueue.some(f => (mediaTypes[f] || (isVideoFile(f) ? 'video' : 'audio')) === 'video');
+    const hasVideoEdits = localQueue.some(f => {
+      const isVideo = (mediaTypes[f] || (isVideoFile(f) ? 'video' : 'audio')) === 'video';
+      const fileTools = toolSettings[normalizeQueuePath(f)];
+      return isVideo && Boolean(fileTools && Object.keys(fileTools).length > 0);
+    });
     const defaultOutputPath = hasVideos ? videoOutputPath : audioOutputPath;
 
     onProceed({
-      mode: hasVideos ? (autoCopy ? 'original' : 'convert') : 'extract_audio',
+      mode: hasVideos ? (autoCopy && !hasVideoEdits ? 'original' : 'convert') : 'extract_audio',
       format: hasVideos ? selectedVideoFmt : selectedAudioFmt,
       bitrate: hasVideos ? videoQuality : audioBitrate,
       audioBitrate,
@@ -815,7 +835,7 @@ export function SendConvertPreparationModal({
     const mediaType = mediaTypes[filePath] || (isVideoFile(filePath) ? 'video' : 'audio');
     const tools = toolSettings[normalizeQueuePath(filePath)];
     const mode = mediaType === 'video'
-      ? (autoCopy ? 'original' : 'convert')
+      ? (autoCopy && !(tools && Object.keys(tools).length > 0) ? 'original' : 'convert')
       : 'extract_audio';
     const format = tools?.gif
       ? 'gif'
@@ -1112,6 +1132,7 @@ export function SendConvertPreparationModal({
         activeAudioPreset={activeAudioPreset}
         videoQuality={videoQuality}
         audioBitrate={audioBitrate}
+        configuredToolIds={configuredToolIds}
         isConverting={isConverting}
         isPaused={isPaused}
         onTogglePause={onTogglePauseConversion}
@@ -1142,8 +1163,11 @@ export function SendConvertPreparationModal({
       {/* ─── 5. DEDICATED CONVERSION FEATURE TOOLS ─── */}
       {activeTool?.id === 'cut' && (
         <CutTrimTool
+          key={normalizeQueuePath(currentFile)}
           fileName={currentFile}
-          duration={appPlayerState?.duration || 180}
+          duration={appPlayerState?.filePath === currentFile ? appPlayerState.duration : 0}
+          streamingPort={streamingPort}
+          initialSettings={initialCutSettings}
           onApply={(cutSettings) => {
             applyToolSettings(currentFile, 'cut', cutSettings);
           }}

@@ -40,7 +40,7 @@ async function convertAndSendToDrive(filePath, driveLetter, options = {}, onProg
   let targetFilename;
   if (mode === 'extract_audio') {
     targetFilename = `${baseName}.${format}`;
-  } else if (mode === 'convert_video') {
+  } else if (mode === 'convert' || mode === 'convert_video') {
     targetFilename = `${baseName}_converted.${format}`;
   } else {
     targetFilename = path.basename(filePath);
@@ -54,7 +54,7 @@ async function convertAndSendToDrive(filePath, driveLetter, options = {}, onProg
   }
 
   // Convert or extract directly to target drive
-  return convertMediaFile(filePath, destPath, { mode, format, bitrate }, onProgress);
+  return convertMediaFile(filePath, destPath, { ...options, mode, format, bitrate }, onProgress);
 }
 
 /**

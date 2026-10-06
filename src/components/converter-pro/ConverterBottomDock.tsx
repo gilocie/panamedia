@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { 
-  Settings, Play, Pause,
+  Settings, Play, Pause, Check,
   Scissors, Crop, MessageSquare, Sparkles, RotateCw, 
   Image as ImageIcon, FlipHorizontal, Minimize2, Zap, Volume2, Split
 } from 'lucide-react';
@@ -27,6 +27,7 @@ interface ConverterBottomDockProps {
   activeAudioPreset: AudioFormatPreset;
   videoQuality: string;
   audioBitrate: string;
+  configuredToolIds?: ReadonlySet<string>;
   isConverting?: boolean;
   isPaused?: boolean;
   onOpenFormatModal: (mode: 'video' | 'audio') => void;
@@ -41,6 +42,7 @@ export const ConverterBottomDock: React.FC<ConverterBottomDockProps> = ({
   activeAudioPreset,
   videoQuality,
   audioBitrate,
+  configuredToolIds = new Set<string>(),
   isConverting = false,
   isPaused = false,
   onOpenFormatModal,
@@ -138,8 +140,28 @@ export const ConverterBottomDock: React.FC<ConverterBottomDockProps> = ({
             }}
             title={`${tool.label}: ${tool.desc}`}
           >
-            <div style={{ color: tool.color }}>
+            <div style={{ position: 'relative', color: tool.color }}>
               {tool.icon}
+              {configuredToolIds.has(tool.id) && (
+                <span
+                  title={`Settings applied for ${tool.label}`}
+                  style={{
+                    position: 'absolute',
+                    top: '-6px',
+                    right: '-8px',
+                    display: 'grid',
+                    placeItems: 'center',
+                    width: '13px',
+                    height: '13px',
+                    borderRadius: '50%',
+                    color: '#bbf7d0',
+                    background: '#15803d',
+                    boxShadow: '0 0 8px rgba(34,197,94,0.35)'
+                  }}
+                >
+                  <Check size={9} strokeWidth={3} />
+                </span>
+              )}
             </div>
             <div style={{ fontSize: '11px', fontWeight: 700, color: '#fff' }}>
               {tool.label}

@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+
+<html class="dark h-full overflow-hidden" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<meta content="web_standard" name="shell-type"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+    @layer base {
+      html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+      body { overscroll-behavior: none; }
+    }
+    ::-webkit-scrollbar { display: none; }
+  </style>
+<script src="https://cdn.tailwindcss.com"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "secondary-fixed-dim": "#d0bcff",
+            "background": "#0f131d",
+            "inverse-surface": "#dfe2f1",
+            "surface-variant": "#313540",
+            "surface-container": "#1c1f2a",
+            "on-surface": "#dfe2f1",
+            "error-container": "#93000a",
+            "tertiary-container": "#ff79b4",
+            "inverse-primary": "#00687a",
+            "on-primary": "#003640",
+            "outline-variant": "#3d494c",
+            "on-secondary-container": "#c4abff",
+            "surface-container-low": "#171b26",
+            "on-surface-variant": "#bcc9cd",
+            "on-error": "#690005",
+            "on-background": "#dfe2f1",
+            "on-error-container": "#ffdad6",
+            "outline": "#869397",
+            "on-tertiary-fixed": "#3e0022",
+            "surface-container-highest": "#313540",
+            "secondary": "#d0bcff",
+            "on-secondary-fixed": "#23005c",
+            "secondary-container": "#571bc1",
+            "on-primary-container": "#00424f",
+            "primary": "#4cd7f6",
+            "primary-container": "#06b6d4",
+            "on-tertiary-container": "#780047",
+            "on-tertiary-fixed-variant": "#8c0053",
+            "surface-container-lowest": "#0a0e18",
+            "surface-bright": "#353944",
+            "surface-tint": "#4cd7f6",
+            "primary-fixed-dim": "#4cd7f6",
+            "on-primary-fixed-variant": "#004e5c",
+            "surface-container-high": "#262a35",
+            "error": "#ffb4ab",
+            "inverse-on-surface": "#2c303b",
+            "tertiary-fixed": "#ffd9e4",
+            "surface": "#0f131d",
+            "secondary-fixed": "#e9ddff",
+            "on-secondary-fixed-variant": "#5516be",
+            "surface-dim": "#0f131d",
+            "on-tertiary": "#640039",
+            "primary-fixed": "#acedff",
+            "tertiary": "#ffb0cd",
+            "tertiary-fixed-dim": "#ffb0cd",
+            "on-primary-fixed": "#001f26",
+            "on-secondary": "#3c0091"
+          },
+          borderRadius: {
+            DEFAULT: "0.125rem",
+            lg: "0.25rem",
+            xl: "0.5rem",
+            full: "0.75rem"
+          },
+          spacing: {
+            "space-sm": "0.5rem",
+            "space-md": "0.75rem",
+            "space-xl": "1.5rem",
+            "space-lg": "1rem",
+            "space-xs": "0.25rem",
+            margin: "1rem",
+            gutter: "0.75rem"
+          },
+          fontFamily: {
+            "label-md": ["Inter"],
+            "headline-sm": ["Inter"],
+            "label-sm": ["Inter"],
+            "headline-lg": ["Inter"],
+            "body-lg": ["Inter"],
+            "body-sm": ["Inter"],
+            "display-lg": ["Inter"],
+            "tech-data": ["JetBrains Mono"],
+            "body-md": ["Inter"],
+            "headline-md": ["Inter"],
+            "tech-timecode": ["JetBrains Mono"]
+          },
+          fontSize: {
+            "label-md": ["12px", { lineHeight: "16px", letterSpacing: "0.02em", fontWeight: "500" }],
+            "headline-sm": ["15px", { lineHeight: "22px", letterSpacing: "0em", fontWeight: "600" }],
+            "label-sm": ["11px", { lineHeight: "14px", letterSpacing: "0.04em", fontWeight: "600" }],
+            "headline-lg": ["24px", { lineHeight: "32px", letterSpacing: "-0.015em", fontWeight: "600" }],
+            "body-lg": ["14px", { lineHeight: "20px", letterSpacing: "0em", fontWeight: "400" }],
+            "body-sm": ["12px", { lineHeight: "16px", letterSpacing: "0.01em", fontWeight: "400" }],
+            "display-lg": ["32px", { lineHeight: "40px", letterSpacing: "-0.02em", fontWeight: "700" }],
+            "tech-data": ["11px", { lineHeight: "14px", letterSpacing: "0.02em", fontWeight: "500" }],
+            "body-md": ["13px", { lineHeight: "18px", letterSpacing: "0em", fontWeight: "400" }],
+            "headline-md": ["18px", { lineHeight: "26px", letterSpacing: "-0.01em", fontWeight: "600" }],
+            "tech-timecode": ["13px", { lineHeight: "18px", letterSpacing: "0.04em", fontWeight: "500" }]
+          }
+        }
+      }
+    };
+  </script>
+</head>
+<body class="bg-surface font-body-md text-body-md text-on-surface antialiased select-none h-full flex flex-col justify-between overflow-hidden">
+<!-- TOP APP HEADER & NAV -->
+<header class="flex-shrink-0 flex flex-col bg-surface-container-lowest/90 backdrop-blur-xl border-b border-surface-container-high/50 z-40">
+<!-- Window Titlebar -->
+<div class="h-10 px-space-md flex items-center justify-between bg-surface-container-lowest">
+<div class="flex items-center gap-space-md">
+<div class="w-5 h-5 rounded-lg bg-primary-container flex items-center justify-center">
+<span class="material-symbols-outlined text-[13px] text-on-primary-container">movie_edit</span>
+</div>
+<span class="font-label-sm text-label-sm tracking-wider uppercase text-on-surface font-semibold">Panamedia Converter Pro</span>
+<div class="h-3 w-[1px] bg-surface-variant mx-space-xs"></div>
+<div class="flex items-center gap-space-xs px-space-sm py-0.5 rounded bg-surface-container-low">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
+<span class="font-tech-data text-tech-data text-on-surface-variant">RTX 4090 ACTIVE • AI VOICE CLEAR</span>
+</div>
+</div>
+<div class="flex items-center">
+<div class="flex items-center gap-space-xs mr-space-md">
+<div class="w-7 h-7 rounded-full bg-primary flex items-center justify-center">
+<span class="material-symbols-outlined text-on-primary text-[16px]">person</span>
+</div>
+</div>
+<div class="flex items-center">
+<button aria-label="Minimize" class="h-8 w-10 flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" type="button">
+<span class="material-symbols-outlined text-[14px]">minimize</span>
+</button>
+<button aria-label="Maximize" class="h-8 w-10 flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" type="button">
+<span class="material-symbols-outlined text-[13px]">check_box_outline_blank</span>
+</button>
+<button aria-label="Close" class="h-8 w-10 flex items-center justify-center text-on-surface-variant hover:bg-error-container hover:text-on-error transition-colors" type="button">
+<span class="material-symbols-outlined text-[16px]">close</span>
+</button>
+</div>
+</div>
+</div>
+<!-- File Meta Bar -->
+<div class="h-12 px-space-lg flex items-center justify-between bg-surface-container-low border-b border-surface-container/50">
+<div class="flex items-center gap-space-md min-w-0 flex-1">
+<button class="flex items-center gap-space-xs px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors" type="button">
+<span class="material-symbols-outlined text-[15px]">arrow_back</span>
+<span class="font-label-sm text-label-sm">Queue</span>
+</button>
+<div class="flex items-center gap-space-md min-w-0">
+<div class="flex items-center gap-space-sm truncate">
+<span class="font-headline-sm text-[14px] text-on-surface truncate font-medium">Suffix - Mwandikondela ft. Ndirande Anglican Voices_1080p.mp4</span>
+<span class="px-space-xs py-0.5 rounded bg-surface-variant font-tech-data text-[10px] text-primary">PHONE RECORDING</span>
+</div>
+<div class="hidden md:flex items-center gap-2 text-on-surface-variant font-tech-data text-tech-data">
+<span>1080p</span><span>•</span><span>03:42</span><span>•</span><span>AAC Stereo</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-space-sm pl-space-md">
+<span class="px-2 py-1 rounded bg-primary-container/20 text-primary font-tech-data text-[11px] flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-primary"></span> Simple Audio Mode
+        </span>
+</div>
+</div>
+<!-- Functional Navigation Bar -->
+<div class="h-10 px-space-lg flex items-center bg-surface-container-lowest overflow-x-auto">
+<nav class="flex items-center gap-1 w-full">
+<a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors rounded-lg" href="#">Cut / Trim</a>
+<a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors rounded-lg" href="#">Crop &amp; Aspect</a>
+<a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors rounded-lg" href="#">Subtitles</a>
+<a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors rounded-lg" href="#">Visual Effects</a>
+<a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors rounded-lg" href="#">Rotate &amp; Level</a>
+<a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors rounded-lg" href="#">Watermark &amp; Logo</a>
+<a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors rounded-lg" href="#">Mirror &amp; Flip</a>
+<a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors rounded-lg" href="#">Smart Compress</a>
+<a class="px-space-md py-1 text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-sm text-label-sm transition-colors rounded-lg" href="#">GIF Creator</a>
+<a class="px-space-md py-1 bg-primary-container text-on-primary-container font-semibold rounded-lg font-label-sm text-label-sm transition-colors flex items-center gap-1.5" href="#">
+<span class="material-symbols-outlined text-[14px]">volume_up</span>
+          Denoise &amp; Audio
+        </a>
+</nav>
+</div>
+</header>
+<!-- MAIN VIEWPORT CONTENT (ZERO-SCROLL, FITS 100vh) -->
+<main class="flex-1 w-full px-space-lg py-space-sm min-h-0 overflow-hidden flex flex-col justify-center">
+<div class="grid grid-cols-12 gap-space-lg w-full h-full max-h-[calc(100vh-175px)] items-stretch">
+<!-- LEFT / CENTER: Big Video Preview Player & Waveform Visualizer (7 cols) -->
+<div class="col-span-12 lg:col-span-7 flex flex-col bg-surface-container-low rounded-xl border border-surface-container-high p-space-md shadow-xl justify-between overflow-hidden">
+<!-- Player Header -->
+<div class="flex items-center justify-between pb-space-xs border-b border-surface-container-high/40">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+<span class="font-headline-sm text-headline-sm text-on-surface">Video Sound Preview</span>
+</div>
+<div class="flex items-center gap-space-xs text-tech-data font-tech-data text-on-surface-variant">
+<span class="px-2 py-0.5 rounded bg-surface-container text-primary">Live Fix Applied</span>
+</div>
+</div>
+<!-- Video Frame Display Container -->
+<div class="relative flex-1 my-space-xs rounded-xl overflow-hidden bg-surface-container-lowest flex items-center justify-center border border-surface-container shadow-inner group">
+<img class="w-full h-full object-cover max-h-[300px] xl:max-h-[360px]" data-alt="High tech cinematic music video frame with dark neon teal backlights and dynamic shadows from the recording session footage in ultra clean 4k definition" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBiMippIyVJ_tvzqg31oDZvoE0-LjhONMWNn_GjDvoHqGtwcwDdNa8oZk8e-_Un-9ixd9th8OHmyVhISvxqNMkbyAnU2fmVOfyitbtwd9xA_U_25pzUeOJZo6gMnSAhPynsJXPKn4nDu8bu_mv-Df7qN995qbA5pG8s5gz-dNw4mnh0TJcNSwAmnPS5FL7Op5snEnQs3dMKJWeKBLuNl1qNh-RLjyMNG4gYI7FgqVjo"/>
+<!-- Dark Gradient Vignette for Readability -->
+<div class="absolute inset-0 bg-gradient-to-t from-surface-container-lowest/90 via-transparent to-surface-container-lowest/30"></div>
+<!-- Video Playing Status Badge -->
+<div class="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-lowest/85 backdrop-blur-md border border-white/10 text-on-surface">
+<span class="w-2 h-2 rounded-full bg-primary animate-ping"></span>
+<span class="font-label-sm text-[11px] font-medium">Auto-Syncing Voices</span>
+</div>
+<!-- Quick Instant A/B Test Button Centered Over Video or Prominent -->
+<div class="absolute bottom-3 left-3 right-3 flex items-center justify-between">
+<!-- Big Instant A/B Toggle -->
+<button class="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-surface-container-highest/90 hover:bg-primary hover:text-on-primary text-on-surface transition-all backdrop-blur-md border border-white/10 shadow-lg active:scale-95 group/btn" id="btnAbTest" title="Hold down or click to switch between noisy original and cleaned sound" type="button">
+<span class="material-symbols-outlined text-[18px] text-primary group-hover/btn:text-on-primary">headphones</span>
+<span class="font-headline-sm text-[13px] font-semibold">Hear Clean Audio (A/B Test)</span>
+<span class="text-[10px] px-1.5 py-0.5 rounded bg-primary-container/30 group-hover/btn:bg-on-primary/20 text-primary group-hover/btn:text-on-primary font-tech-data uppercase">Press &amp; Hold</span>
+</button>
+<!-- Video Timestamp Badge -->
+<div class="px-2.5 py-1 rounded-lg bg-surface-container-lowest/80 backdrop-blur-md font-tech-timecode text-[12px] text-on-surface border border-white/5">
+<span class="text-primary font-semibold">01:48</span> / 03:42
+            </div>
+</div>
+</div>
+<!-- Clean Friendly Sound Wave Visualizer & Transport -->
+<div class="bg-surface-container rounded-lg p-space-sm flex flex-col gap-2">
+<!-- Voice Audio Waveform Representation -->
+<div class="flex items-center justify-between text-on-surface-variant font-label-sm text-[11px]">
+<span class="flex items-center gap-1.5 text-on-surface font-medium">
+<span class="material-symbols-outlined text-primary text-[15px]">graphic_eq</span>
+              Speech Sound Wave
+            </span>
+<span class="text-primary font-tech-data">Background Noise Filter Active</span>
+</div>
+<!-- Soundwave Bars Canvas Mockup (Clean and Simple for Everyday Users) -->
+<div class="h-10 w-full bg-surface-container-lowest rounded-md px-3 py-1 flex items-center justify-between gap-1 overflow-hidden">
+<!-- Simulated dynamic sound bar levels -->
+<div class="w-1 bg-surface-variant rounded-full h-2"></div>
+<div class="w-1 bg-surface-variant rounded-full h-3"></div>
+<div class="w-1 bg-primary/70 rounded-full h-5"></div>
+<div class="w-1 bg-primary rounded-full h-7"></div>
+<div class="w-1 bg-primary rounded-full h-4"></div>
+<div class="w-1 bg-primary/80 rounded-full h-6"></div>
+<div class="w-1 bg-primary rounded-full h-8"></div>
+<div class="w-1 bg-primary-container rounded-full h-9"></div>
+<div class="w-1 bg-primary-container rounded-full h-7"></div>
+<div class="w-1 bg-primary rounded-full h-5"></div>
+<div class="w-1 bg-secondary rounded-full h-8"></div>
+<div class="w-1 bg-secondary rounded-full h-9"></div>
+<div class="w-1 bg-primary rounded-full h-6"></div>
+<div class="w-1 bg-primary rounded-full h-4"></div>
+<div class="w-1 bg-primary/60 rounded-full h-3"></div>
+<div class="w-1 bg-primary rounded-full h-6"></div>
+<div class="w-1 bg-primary rounded-full h-8"></div>
+<div class="w-1 bg-primary-container rounded-full h-9"></div>
+<div class="w-1 bg-primary rounded-full h-7"></div>
+<div class="w-1 bg-primary rounded-full h-5"></div>
+<div class="w-1 bg-secondary/80 rounded-full h-6"></div>
+<div class="w-1 bg-secondary rounded-full h-8"></div>
+<div class="w-1 bg-primary rounded-full h-7"></div>
+<div class="w-1 bg-primary/70 rounded-full h-4"></div>
+<div class="w-1 bg-surface-variant rounded-full h-2"></div>
+<div class="w-1 bg-surface-variant rounded-full h-3"></div>
+<div class="w-1 bg-primary/80 rounded-full h-5"></div>
+<div class="w-1 bg-primary rounded-full h-7"></div>
+<div class="w-1 bg-primary rounded-full h-6"></div>
+<div class="w-1 bg-surface-variant rounded-full h-2"></div>
+</div>
+<!-- Video Playback Scrub Line -->
+<div class="flex items-center gap-3">
+<button class="w-7 h-7 rounded-full bg-primary flex items-center justify-center text-on-primary hover:bg-primary-container transition-transform active:scale-95 flex-shrink-0" type="button">
+<span class="material-symbols-outlined text-[16px]">play_arrow</span>
+</button>
+<div class="relative flex-1 h-2 bg-surface-container-lowest rounded-full cursor-pointer overflow-hidden">
+<div class="h-full bg-gradient-to-r from-primary to-secondary w-[48%] rounded-full"></div>
+</div>
+<span class="font-tech-timecode text-tech-data text-on-surface-variant text-[11px] flex-shrink-0">01:48 / 03:42</span>
+</div>
+</div>
+</div>
+<!-- RIGHT: Ultra-Simple, Friendly Audio Controls for Everyday Users (5 cols) -->
+<div class="col-span-12 lg:col-span-5 flex flex-col justify-between gap-space-sm h-full overflow-hidden">
+<!-- CARD 1: Make Voices Louder -->
+<div class="bg-surface-container-low rounded-xl p-space-md border border-surface-container-high/60 shadow-lg flex flex-col gap-2.5">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<div class="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+<span class="material-symbols-outlined text-[19px]">volume_up</span>
+</div>
+<div>
+<h3 class="font-headline-sm text-[14px] text-on-surface leading-tight">Make Voices Louder</h3>
+<p class="font-body-sm text-[11px] text-on-surface-variant">Boost quiet phone recordings or whisper audio</p>
+</div>
+</div>
+<span class="font-tech-timecode text-[15px] font-bold text-primary bg-primary-container/15 px-2 py-0.5 rounded" id="volumePercentDisplay">150%</span>
+</div>
+<!-- Volume Slider -->
+<div class="flex flex-col gap-1 pt-1">
+<input class="w-full h-2 bg-surface-container rounded-lg appearance-none cursor-pointer accent-primary" id="volumeSlider" max="200" min="100" oninput="document.getElementById('volumePercentDisplay').innerText = this.value + '%'" type="range" value="150"/>
+<div class="flex justify-between text-on-surface-variant font-label-sm text-[10px] px-0.5">
+<span>100% (Normal)</span>
+<span class="text-primary font-medium">150% (Clear)</span>
+<span class="text-tertiary font-medium">200% (Double Volume)</span>
+</div>
+</div>
+<!-- Quick 1-Click Volume Boost Pills -->
+<div class="grid grid-cols-3 gap-1.5 pt-0.5">
+<button class="py-1 px-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface font-label-sm text-[11px] text-center transition-colors border border-surface-variant/40" onclick="document.getElementById('volumeSlider').value=125; document.getElementById('volumePercentDisplay').innerText='125%'" type="button">
+              +25% Louder
+            </button>
+<button class="py-1 px-1 rounded-lg bg-primary-container/20 text-primary font-label-sm text-[11px] text-center border border-primary/30 font-semibold" onclick="document.getElementById('volumeSlider').value=150; document.getElementById('volumePercentDisplay').innerText='150%'" type="button">
+              +50% Boost
+            </button>
+<button class="py-1 px-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface font-label-sm text-[11px] text-center transition-colors border border-surface-variant/40" onclick="document.getElementById('volumeSlider').value=200; document.getElementById('volumePercentDisplay').innerText='200%'" type="button">
+              Max Boost (+100%)
+            </button>
+</div>
+</div>
+<!-- CARD 2: Remove Background Noise -->
+<div class="bg-surface-container-low rounded-xl p-space-md border border-surface-container-high/60 shadow-lg flex flex-col gap-2.5">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<div class="w-8 h-8 rounded-lg bg-primary-container/20 text-primary flex items-center justify-center">
+<span class="material-symbols-outlined text-[19px]">noise_aware</span>
+</div>
+<div>
+<h3 class="font-headline-sm text-[14px] text-on-surface leading-tight">Remove Background Noise</h3>
+<p class="font-body-sm text-[11px] text-on-surface-variant">Cuts out fan noise, wind, street traffic, &amp; mic hiss</p>
+</div>
+</div>
+<!-- Toggle Switch -->
+<label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+<input checked="" class="sr-only peer" id="toggleDenoise" type="checkbox"/>
+<div class="w-11 h-6 bg-surface-variant peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+<!-- Noise Removal Strength Slider -->
+<div class="bg-surface-container rounded-lg p-space-sm flex flex-col gap-1.5">
+<div class="flex items-center justify-between text-on-surface-variant font-label-sm text-[11px]">
+<span class="text-on-surface">Noise Removal Strength</span>
+<span class="font-tech-data text-primary">Balanced (Recommended)</span>
+</div>
+<input class="w-full h-1.5 bg-surface-container-lowest rounded-lg appearance-none cursor-pointer accent-primary" max="100" min="0" type="range" value="65"/>
+<div class="flex justify-between text-on-surface-variant font-label-sm text-[10px]">
+<span>Gentle (Keep Ambience)</span>
+<span class="text-primary font-medium">Deep Clean (Voice Only)</span>
+</div>
+</div>
+</div>
+<!-- CARD 3: Make Voices Sound Clearer -->
+<div class="bg-surface-container-low rounded-xl p-space-md border border-surface-container-high/60 shadow-lg flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<div class="w-8 h-8 rounded-lg bg-secondary-container/20 text-secondary flex items-center justify-center">
+<span class="material-symbols-outlined text-[19px]">record_voice_over</span>
+</div>
+<div>
+<div class="flex items-center gap-1.5">
+<h3 class="font-headline-sm text-[14px] text-on-surface">Voice Enhancer</h3>
+<span class="px-1.5 py-0.2 rounded bg-primary-container/20 text-primary text-[9px] font-tech-data uppercase">Smart AI</span>
+</div>
+<p class="font-body-sm text-[11px] text-on-surface-variant">Adds clarity and brightness to speaking voices</p>
+</div>
+</div>
+<!-- Toggle Switch -->
+<label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+<input checked="" class="sr-only peer" id="toggleVoiceEnhance" type="checkbox"/>
+<div class="w-11 h-6 bg-surface-variant peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+<!-- CARD 4: Mute Video -->
+<div class="bg-surface-container-low rounded-xl p-space-md border border-surface-container-high/60 shadow-lg flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<div class="w-8 h-8 rounded-lg bg-surface-container text-on-surface-variant flex items-center justify-center">
+<span class="material-symbols-outlined text-[19px]">volume_off</span>
+</div>
+<div>
+<h3 class="font-headline-sm text-[14px] text-on-surface">Mute Video</h3>
+<p class="font-body-sm text-[11px] text-on-surface-variant">Remove audio track completely from video</p>
+</div>
+</div>
+<!-- Toggle Switch -->
+<label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+<input class="sr-only peer" id="toggleMute" type="checkbox"/>
+<div class="w-11 h-6 bg-surface-variant peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-error"></div>
+</label>
+</div>
+</div>
+</div>
+</main>
+<!-- BOTTOM ACTION BAR -->
+<footer class="flex-shrink-0 h-16 px-space-lg flex items-center justify-between bg-surface-container-lowest/95 backdrop-blur-xl border-t border-surface-container-high/60 z-40">
+<!-- Left actions -->
+<div class="flex items-center gap-space-sm">
+<button class="flex items-center gap-space-xs px-space-md py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md" type="button">
+<span class="material-symbols-outlined text-[16px]">restart_alt</span>
+<span>Reset to Original</span>
+</button>
+<button class="flex items-center gap-space-xs px-space-md py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md" type="button">
+<span class="material-symbols-outlined text-[16px]">close</span>
+<span>Discard</span>
+</button>
+</div>
+<!-- Right main trigger -->
+<div class="flex items-center gap-space-md">
+<div class="hidden sm:flex flex-col items-end mr-space-xs">
+<span class="font-label-sm text-[11px] text-on-surface-variant">Instant Phone Preset • Fast AI Render</span>
+<span class="font-tech-data text-tech-data text-primary">Est. Time: ~3 seconds</span>
+</div>
+<button class="flex items-center gap-space-sm px-space-xl py-2.5 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-headline-sm text-headline-sm transition-all shadow-[0_0_16px_rgba(76,215,246,0.4)] active:scale-95 font-semibold" type="button">
+<span class="material-symbols-outlined text-[18px]">check_circle</span>
+<span>Save Audio &amp; Apply</span>
+</button>
+</div>
+</footer>
+</body></html>

@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+
+<html class="dark h-full overflow-hidden" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Panamedia Converter Pro - Mirror &amp; Flip</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "background": "#0f131d",
+            "surface": "#0f131d",
+            "surface-dim": "#0f131d",
+            "surface-container-lowest": "#0a0e18",
+            "surface-container-low": "#171b26",
+            "surface-container": "#1c1f2a",
+            "surface-container-high": "#262a35",
+            "surface-container-highest": "#313540",
+            "surface-variant": "#313540",
+            "surface-bright": "#353944",
+            "primary": "#4cd7f6",
+            "primary-container": "#06b6d4",
+            "on-primary": "#003640",
+            "on-primary-container": "#00424f",
+            "secondary": "#d0bcff",
+            "secondary-container": "#571bc1",
+            "on-surface": "#dfe2f1",
+            "on-surface-variant": "#bcc9cd",
+            "outline": "#869397",
+            "outline-variant": "#3d494c",
+            "error": "#ffb4ab",
+            "error-container": "#93000a"
+          },
+          fontFamily: {
+            "body-sm": ["Inter"],
+            "body-md": ["Inter"],
+            "body-lg": ["Inter"],
+            "label-sm": ["Inter"],
+            "label-md": ["Inter"],
+            "headline-sm": ["Inter"],
+            "headline-md": ["Inter"],
+            "tech-data": ["JetBrains Mono"],
+            "tech-timecode": ["JetBrains Mono"]
+          }
+        }
+      }
+    };
+  </script>
+<style>
+    body { overscroll-behavior: none; }
+    ::-webkit-scrollbar { display: none; }
+  </style>
+</head>
+<body class="bg-surface font-body-md text-body-md text-on-surface antialiased select-none h-screen flex flex-col overflow-hidden">
+<!-- TOP APP HEADER -->
+<header class="flex-none flex flex-col bg-surface-container-lowest border-b border-surface-container-high/60 z-30">
+<!-- Window Titlebar -->
+<div class="h-10 px-4 flex items-center justify-between bg-surface-container-lowest">
+<div class="flex items-center gap-3">
+<div class="w-5 h-5 rounded bg-primary-container flex items-center justify-center">
+<span class="material-symbols-outlined text-[14px] text-on-primary-container">movie_edit</span>
+</div>
+<span class="text-xs font-semibold tracking-wider uppercase text-on-surface">Panamedia Converter Pro</span>
+<div class="h-3 w-[1px] bg-surface-variant mx-1"></div>
+<div class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-surface-container-low text-xs text-on-surface-variant font-tech-data">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
+<span>READY • QUEUE (3)</span>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded-full bg-primary/20 text-primary flex items-center justify-center">
+<span class="material-symbols-outlined text-[15px]">person</span>
+</div>
+<div class="flex items-center ml-2">
+<button class="h-7 w-8 flex items-center justify-center text-on-surface-variant hover:bg-surface-container" type="button"><span class="material-symbols-outlined text-[14px]">minimize</span></button>
+<button class="h-7 w-8 flex items-center justify-center text-on-surface-variant hover:bg-surface-container" type="button"><span class="material-symbols-outlined text-[13px]">check_box_outline_blank</span></button>
+<button class="h-7 w-8 flex items-center justify-center text-on-surface-variant hover:bg-error-container hover:text-white" type="button"><span class="material-symbols-outlined text-[15px]">close</span></button>
+</div>
+</div>
+</div>
+<!-- Active File Subheader -->
+<div class="h-12 px-4 flex items-center justify-between bg-surface-container-low border-t border-surface-container-high/40">
+<div class="flex items-center gap-3 min-w-0">
+<button class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors text-xs font-medium" type="button">
+<span class="material-symbols-outlined text-[15px]">arrow_back</span>
+<span>Queue</span>
+</button>
+<div class="flex items-center gap-2 min-w-0">
+<span class="font-semibold text-sm text-on-surface truncate">Suffix - Mwandikondela ft. Ndirande Anglican Voices_1080p.mp4</span>
+<span class="text-xs text-on-surface-variant font-tech-data hidden sm:inline">• 1080p60 • 03:42.18</span>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface text-xs font-medium" type="button">
+<span class="material-symbols-outlined text-[15px]">tune</span>
+<span>Global Settings</span>
+</button>
+</div>
+</div>
+<!-- Tool Tabs -->
+<div class="h-10 px-4 flex items-center bg-surface-container-lowest overflow-x-auto border-t border-surface-container-high/40">
+<nav class="flex items-center gap-1 w-full text-xs">
+<a class="px-3 py-1 rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" href="#">Cut / Trim</a>
+<a class="px-3 py-1 rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" href="#">Crop &amp; Aspect</a>
+<a class="px-3 py-1 rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" href="#">Subtitles</a>
+<a class="px-3 py-1 rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" href="#">Visual Effects</a>
+<a class="px-3 py-1 rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" href="#">Rotate &amp; Level</a>
+<a class="px-3 py-1 rounded-md bg-primary-container text-on-primary-container font-semibold shadow-sm" href="#">Mirror &amp; Flip</a>
+<a class="px-3 py-1 rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" href="#">Smart Compress</a>
+<a class="px-3 py-1 rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" href="#">GIF Creator</a>
+</nav>
+</div>
+</header>
+<!-- MAIN APP WORKSPACE: Zero-scroll flex container -->
+<main class="flex-1 flex overflow-hidden p-4 gap-4 bg-surface">
+<!-- CENTER PREVIEW AREA -->
+<div class="flex-1 flex flex-col gap-3 min-w-0 h-full">
+<!-- Video Screen Card -->
+<div class="flex-1 bg-surface-container-lowest rounded-xl overflow-hidden relative flex items-center justify-center border border-surface-container-high shadow-2xl group">
+<!-- Live Video Element with Flip transform -->
+<div class="relative w-full h-full flex items-center justify-center overflow-hidden bg-black/60">
+<img alt="Preview video frame" class="max-w-full max-h-full object-contain transition-transform duration-200" id="preview-video" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD2NSR8g-gMV_9PAdDoA9LAVcNR_Z4zBn1g7TRZWybNmBh76w4VTAC-e622m0V_4VsYa6i2Hti49ZUZAoQ0okAkOGm5s80Q_ZZAyVli0ry5qH8ZlVuhNvFXVR7Xj9KcPkBdDPOX1Mzhe4YMrG9VKErji31d4a_bPi9QbkA4Notjiy7L7iV9InNLsydi1eKD2yzfHRbcKlYtNScrBFqqLMSSWGGuToiqHJM_MZK93hmE" style="transform: scaleX(-1);"/>
+<!-- Symmetrical Split Guide (Kaleidoscope mode) -->
+<div class="hidden absolute inset-0 pointer-events-none flex" id="kaleidoscope-overlay">
+<div class="w-1/2 h-full border-r-2 border-primary/70 shadow-[0_0_15px_rgba(76,215,246,0.6)]"></div>
+</div>
+</div>
+<!-- Mode Indicator Badge -->
+<div class="absolute top-3 left-3 flex items-center gap-2">
+<span class="px-2.5 py-1 rounded-lg bg-surface-container-lowest/80 backdrop-blur-md border border-white/10 text-xs font-medium text-primary flex items-center gap-1.5 shadow-lg" id="preview-badge">
+<span class="material-symbols-outlined text-[15px]">flip</span>
+<span>Mirrored Preview</span>
+</span>
+<span class="hidden px-2 py-0.5 rounded bg-amber-500/20 border border-amber-400/30 text-amber-300 text-xs font-semibold animate-pulse" id="original-active-pill">
+            SHOWING ORIGINAL
+          </span>
+</div>
+<!-- Hold to See Original Toggle (Floating Quick Action) -->
+<div class="absolute top-3 right-3 z-20">
+<button class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-high/90 hover:bg-surface-bright active:bg-primary active:text-on-primary text-on-surface backdrop-blur-md border border-white/10 text-xs font-medium shadow-lg transition-all" id="hold-original-btn" title="Press and hold to compare with source" type="button">
+<span class="material-symbols-outlined text-[16px]">visibility</span>
+<span>Hold to See Original</span>
+</button>
+</div>
+</div>
+<!-- Compact Casual Playback Bar -->
+<div class="flex-none bg-surface-container-low rounded-xl px-4 py-2.5 flex items-center gap-3 border border-surface-container-high/40 shadow-sm">
+<button class="w-8 h-8 rounded-lg bg-primary text-on-primary flex items-center justify-center hover:bg-primary-container transition-colors shadow" id="play-pause-btn" type="button">
+<span class="material-symbols-outlined text-[18px]">play_arrow</span>
+</button>
+<span class="text-xs font-tech-timecode text-on-surface font-semibold">01:34.42</span>
+<div class="flex-1 relative flex items-center cursor-pointer group py-2">
+<div class="w-full h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
+<div class="h-full bg-primary rounded-full w-[42%] group-hover:bg-primary-container transition-all"></div>
+</div>
+<div class="absolute left-[42%] w-3.5 h-3.5 -ml-1.5 rounded-full bg-primary shadow-md border-2 border-surface-container-low scale-100 group-hover:scale-125 transition-transform"></div>
+</div>
+<span class="text-xs font-tech-timecode text-on-surface-variant">03:42.18</span>
+<div class="h-4 w-px bg-surface-container-highest mx-1"></div>
+<button class="w-7 h-7 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container flex items-center justify-center" title="Mute/Unmute" type="button">
+<span class="material-symbols-outlined text-[17px]">volume_up</span>
+</button>
+</div>
+</div>
+<!-- RIGHT CONTROL PANEL: Everyday Friendly Options -->
+<div class="w-80 lg:w-96 flex-none bg-surface-container-low rounded-xl border border-surface-container-high/60 flex flex-col p-4 overflow-hidden shadow-xl justify-between">
+<div class="flex flex-col gap-4 overflow-y-auto pr-1">
+<!-- Section Title -->
+<div class="flex items-center justify-between border-b border-surface-container-high/50 pb-2.5">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[20px]">flip</span>
+<h2 class="text-sm font-bold text-on-surface tracking-tight">Mirror &amp; Flip Direction</h2>
+</div>
+<span class="text-[11px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full">One-click</span>
+</div>
+<!-- 3 Big Visual Action Cards -->
+<div class="flex flex-col gap-2.5">
+<!-- Card 1: Selfie Horizontal (Default Active) -->
+<button class="flip-option-btn w-full text-left p-3 rounded-xl bg-surface-container-high border-2 border-primary transition-all flex items-start gap-3 shadow-md group relative" data-flip="horizontal" type="button">
+<div class="w-10 h-10 rounded-lg bg-primary text-on-primary flex items-center justify-center flex-none group-hover:scale-105 transition-transform">
+<span class="material-symbols-outlined text-[22px]">swap_horiz</span>
+</div>
+<div class="flex-1 min-w-0 pr-6">
+<div class="text-xs font-bold text-on-surface flex items-center gap-1.5">
+<span>Flip Selfie (Horizontal)</span>
+</div>
+<p class="text-[11px] text-on-surface-variant mt-0.5 leading-relaxed">
+                Fixes backwards selfie camera videos and reversed text on shirts.
+              </p>
+</div>
+<span class="check-icon absolute top-3 right-3 material-symbols-outlined text-primary text-[20px]">
+              check_circle
+            </span>
+</button>
+<!-- Card 2: Vertical Upside Down -->
+<button class="flip-option-btn w-full text-left p-3 rounded-xl bg-surface-container border border-surface-container-highest hover:bg-surface-container-high transition-all flex items-start gap-3 group relative" data-flip="vertical" type="button">
+<div class="w-10 h-10 rounded-lg bg-surface-variant text-on-surface-variant group-hover:text-primary flex items-center justify-center flex-none transition-colors">
+<span class="material-symbols-outlined text-[22px]">swap_vert</span>
+</div>
+<div class="flex-1 min-w-0 pr-6">
+<div class="text-xs font-bold text-on-surface">Flip Upside Down (Vertical)</div>
+<p class="text-[11px] text-on-surface-variant mt-0.5 leading-relaxed">
+                Fixes videos recorded with the phone held upside down.
+              </p>
+</div>
+<span class="check-icon hidden absolute top-3 right-3 material-symbols-outlined text-primary text-[20px]">
+              check_circle
+            </span>
+</button>
+<!-- Card 3: Dual Mirror -->
+<button class="flip-option-btn w-full text-left p-3 rounded-xl bg-surface-container border border-surface-container-highest hover:bg-surface-container-high transition-all flex items-start gap-3 group relative" data-flip="both" type="button">
+<div class="w-10 h-10 rounded-lg bg-surface-variant text-on-surface-variant group-hover:text-primary flex items-center justify-center flex-none transition-colors">
+<span class="material-symbols-outlined text-[22px]">screen_rotation</span>
+</div>
+<div class="flex-1 min-w-0 pr-6">
+<div class="text-xs font-bold text-on-surface">Dual Mirror (Both)</div>
+<p class="text-[11px] text-on-surface-variant mt-0.5 leading-relaxed">
+                Flips both sideways and upside down (180° rotation fix).
+              </p>
+</div>
+<span class="check-icon hidden absolute top-3 right-3 material-symbols-outlined text-primary text-[20px]">
+              check_circle
+            </span>
+</button>
+</div>
+<div class="h-px bg-surface-container-high/60 my-1"></div>
+<!-- Easy Audio Direction Toggle Card -->
+<label class="p-3 rounded-xl bg-surface-container hover:bg-surface-container-high transition-colors flex items-start gap-3 cursor-pointer border border-surface-container-highest/60">
+<div class="w-8 h-8 rounded-lg bg-secondary/15 text-secondary flex items-center justify-center flex-none mt-0.5">
+<span class="material-symbols-outlined text-[18px]">headphones</span>
+</div>
+<div class="flex-1 min-w-0">
+<span class="text-xs font-bold text-on-surface block">Fix Audio Direction</span>
+<span class="text-[11px] text-on-surface-variant leading-relaxed block mt-0.5">
+              Swaps left and right audio channels so sound matches flipped picture.
+            </span>
+</div>
+<input checked="" class="w-4 h-4 rounded text-primary focus:ring-primary focus:ring-offset-surface bg-surface-variant border-surface-container-highest mt-1 cursor-pointer" id="audio-toggle" type="checkbox"/>
+</label>
+<!-- Fun Bonus: Kaleidoscope Split Mirror -->
+<label class="p-3 rounded-xl bg-surface-container hover:bg-surface-container-high transition-colors flex items-start gap-3 cursor-pointer border border-surface-container-highest/60">
+<div class="w-8 h-8 rounded-lg bg-pink-500/15 text-pink-400 flex items-center justify-center flex-none mt-0.5">
+<span class="material-symbols-outlined text-[18px]">auto_fix_high</span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center gap-1.5">
+<span class="text-xs font-bold text-on-surface">Kaleidoscope / Fun Split</span>
+<span class="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.2 rounded bg-pink-500/20 text-pink-300">FX</span>
+</div>
+<span class="text-[11px] text-on-surface-variant leading-relaxed block mt-0.5">
+              Creates a symmetrical mirror reflection across the center.
+            </span>
+</div>
+<input class="w-4 h-4 rounded text-pink-400 focus:ring-pink-400 bg-surface-variant border-surface-container-highest mt-1 cursor-pointer" id="kaleidoscope-toggle" type="checkbox"/>
+</label>
+</div>
+<!-- Reassuring Casual Help Note -->
+<div class="mt-3 p-2.5 rounded-lg bg-surface-container-lowest/70 border border-surface-container-high text-[11px] text-on-surface-variant flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[17px] flex-none">verified</span>
+<span>Original video file stays completely untouched until you export.</span>
+</div>
+</div>
+</main>
+<!-- BOTTOM ACTION BAR -->
+<footer class="flex-none h-16 px-6 bg-surface-container-lowest border-t border-surface-container-high flex items-center justify-between z-30">
+<div class="flex items-center gap-3">
+<button class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors text-xs font-semibold" id="reset-btn" type="button">
+<span class="material-symbols-outlined text-[16px]">restart_alt</span>
+<span>Reset to Original</span>
+</button>
+<button class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors text-xs font-semibold" type="button">
+<span class="material-symbols-outlined text-[16px]">close</span>
+<span>Discard</span>
+</button>
+</div>
+<div class="flex items-center gap-4">
+<div class="text-right hidden sm:block">
+<div class="text-xs font-medium text-on-surface">Super-fast Lossless Output</div>
+<div class="text-[11px] text-primary font-tech-data">Est. duration: ~1 second</div>
+</div>
+<button class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-bold text-sm shadow-[0_0_18px_rgba(76,215,246,0.35)] hover:shadow-[0_0_24px_rgba(76,215,246,0.55)] transition-all" type="button">
+<span class="material-symbols-outlined text-[18px]">check</span>
+<span>Apply &amp; Save Video</span>
+</button>
+</div>
+</footer>
+<!-- SIMPLE INTERACTION LOGIC -->
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const previewVideo = document.getElementById('preview-video');
+      const previewBadge = document.getElementById('preview-badge');
+      const originalPill = document.getElementById('original-active-pill');
+      const holdBtn = document.getElementById('hold-original-btn');
+      const resetBtn = document.getElementById('reset-btn');
+      const flipButtons = document.querySelectorAll('.flip-option-btn');
+      const playPauseBtn = document.getElementById('play-pause-btn');
+      const kaleidoscopeToggle = document.getElementById('kaleidoscope-toggle');
+      const kaleidoscopeOverlay = document.getElementById('kaleidoscope-overlay');
+
+      let currentFlip = 'horizontal'; // 'horizontal' | 'vertical' | 'both' | 'none'
+
+      function getTransformString(flipType) {
+        if (flipType === 'horizontal') return 'scaleX(-1)';
+        if (flipType === 'vertical') return 'scaleY(-1)';
+        if (flipType === 'both') return 'scale(-1, -1)';
+        return 'none';
+      }
+
+      function updateFlipUI(selectedType) {
+        currentFlip = selectedType;
+        previewVideo.style.transform = getTransformString(selectedType);
+
+        flipButtons.forEach(btn => {
+          const type = btn.getAttribute('data-flip');
+          const checkIcon = btn.querySelector('.check-icon');
+          const iconBox = btn.querySelector('div:first-child');
+
+          if (type === selectedType) {
+            btn.classList.add('border-primary', 'bg-surface-container-high', 'border-2');
+            btn.classList.remove('border-surface-container-highest', 'bg-surface-container', 'border');
+            checkIcon.classList.remove('hidden');
+            iconBox.className = 'w-10 h-10 rounded-lg bg-primary text-on-primary flex items-center justify-center flex-none transition-transform group-hover:scale-105';
+          } else {
+            btn.classList.remove('border-primary', 'bg-surface-container-high', 'border-2');
+            btn.classList.add('border-surface-container-highest', 'bg-surface-container', 'border');
+            checkIcon.classList.add('hidden');
+            iconBox.className = 'w-10 h-10 rounded-lg bg-surface-variant text-on-surface-variant group-hover:text-primary flex items-center justify-center flex-none transition-colors';
+          }
+        });
+
+        // Update badge text
+        if (selectedType === 'horizontal') {
+          previewBadge.innerHTML = '<span class="material-symbols-outlined text-[15px]">swap_horiz</span><span>Selfie Mirrored</span>';
+        } else if (selectedType === 'vertical') {
+          previewBadge.innerHTML = '<span class="material-symbols-outlined text-[15px]">swap_vert</span><span>Upside-Down Flipped</span>';
+        } else if (selectedType === 'both') {
+          previewBadge.innerHTML = '<span class="material-symbols-outlined text-[15px]">screen_rotation</span><span>Dual Mirrored (180°)</span>';
+        } else {
+          previewBadge.innerHTML = '<span class="material-symbols-outlined text-[15px]">image</span><span>Original View</span>';
+        }
+      }
+
+      flipButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const type = btn.getAttribute('data-flip');
+          updateFlipUI(type);
+        });
+      });
+
+      // "Hold to see Original" handlers
+      function showOriginal() {
+        previewVideo.style.transform = 'none';
+        originalPill.classList.remove('hidden');
+      }
+
+      function restoreFlipped() {
+        previewVideo.style.transform = getTransformString(currentFlip);
+        originalPill.classList.add('hidden');
+      }
+
+      holdBtn.addEventListener('mousedown', showOriginal);
+      window.addEventListener('mouseup', restoreFlipped);
+      holdBtn.addEventListener('touchstart', (e) => { e.preventDefault(); showOriginal(); });
+      window.addEventListener('touchend', restoreFlipped);
+
+      // Reset Button
+      resetBtn.addEventListener('click', () => {
+        updateFlipUI('none');
+        if (kaleidoscopeToggle) {
+          kaleidoscopeToggle.checked = false;
+          kaleidoscopeOverlay.classList.add('hidden');
+        }
+      });
+
+      // Kaleidoscope Toggle
+      if (kaleidoscopeToggle) {
+        kaleidoscopeToggle.addEventListener('change', (e) => {
+          if (e.target.checked) {
+            kaleidoscopeOverlay.classList.remove('hidden');
+          } else {
+            kaleidoscopeOverlay.classList.add('hidden');
+          }
+        });
+      }
+
+      // Play/Pause button state
+      let playing = false;
+      playPauseBtn.addEventListener('click', () => {
+        playing = !playing;
+        playPauseBtn.querySelector('.material-symbols-outlined').textContent = playing ? 'pause' : 'play_arrow';
+      });
+    });
+  </script>
+</body></html>

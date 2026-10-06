@@ -297,6 +297,12 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
   }
 
   const duration = await probeDuration(inputPath);
+  const cut = options.tools && options.tools.cut;
+  if (cut && (!Number.isFinite(cut.startSec) || !Number.isFinite(cut.endSec) ||
+      cut.startSec < 0 || cut.endSec <= cut.startSec)) {
+    throw new Error('Invalid cut range.');
+  }
+  const progressDuration = cut ? Math.max(0.1, cut.endSec - cut.startSec) : duration;
   const mode = options.mode || 'extract_audio';
   const format = (options.format || (mode === 'extract_audio' ? 'mp3' : 'mp4')).toLowerCase();
   const bitrate = options.bitrate || (mode === 'extract_audio' ? '320k' : '1080p');
@@ -311,7 +317,12 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
     fs.mkdirSync(outDir, { recursive: true });
   }
 
-  const args = ['-y', '-i', inputPath];
+  const args = ['-y'];
+  if (cut) {
+    if (cut.startSec > 0) args.push('-ss', String(cut.startSec));
+    args.push('-to', String(cut.endSec));
+  }
+  args.push('-i', inputPath);
 
   // Set thread limitation to prevent 100% CPU lockup
   args.push('-threads', threads.toString());
@@ -397,9 +408,9 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
 
       // Primary: time-based progress when duration is known
       const timeMatch = str.match(/time=(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/);
-      if (timeMatch && duration > 0) {
+      if (timeMatch && progressDuration > 0) {
         const currentTime = parseTimeString(timeMatch[1]);
-        const pct = Math.min(0.99, Math.max(0.05, currentTime / duration));
+        const pct = Math.min(0.99, Math.max(0.05, currentTime / progressDuration));
         if (pct > lastKnownProgress) {
           lastKnownProgress = pct;
           onProgress({ progress: pct, status: 'converting' });
@@ -409,9 +420,9 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
 
       // Fallback: parse FFmpeg "out_time_us" microsecond counter (emitted by -progress pipe)
       const outTimeMatch = str.match(/out_time_us=(\d+)/);
-      if (outTimeMatch && duration > 0) {
+      if (outTimeMatch && progressDuration > 0) {
         const currentTime = parseInt(outTimeMatch[1], 10) / 1e6;
-        const pct = Math.min(0.99, Math.max(0.05, currentTime / duration));
+        const pct = Math.min(0.99, Math.max(0.05, currentTime / progressDuration));
         if (pct > lastKnownProgress) {
           lastKnownProgress = pct;
           onProgress({ progress: pct, status: 'converting' });

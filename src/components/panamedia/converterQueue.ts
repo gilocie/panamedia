@@ -51,11 +51,27 @@ function writeStorage(items: string[]): void {
 
 type Listener = (items: string[]) => void;
 const listeners = new Set<Listener>();
+let storageListenerAttached = false;
+
+function handleStorageChange(event: StorageEvent): void {
+  if (event.key !== STORAGE_KEY && event.key !== null) return;
+  notify(readStorage());
+}
 
 /** Subscribe to queue changes. Returns an unsubscribe function. */
 export function subscribeQueue(fn: Listener): () => void {
   listeners.add(fn);
-  return () => listeners.delete(fn);
+  if (!storageListenerAttached && typeof window !== 'undefined') {
+    window.addEventListener('storage', handleStorageChange);
+    storageListenerAttached = true;
+  }
+  return () => {
+    listeners.delete(fn);
+    if (listeners.size === 0 && storageListenerAttached && typeof window !== 'undefined') {
+      window.removeEventListener('storage', handleStorageChange);
+      storageListenerAttached = false;
+    }
+  };
 }
 
 function notify(items: string[]): void {

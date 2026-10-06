@@ -307,7 +307,8 @@ export function useMediaLibrary({
   // Every 30 minutes, validate all in-memory playlist items against the filesystem.
   // Silently removes files that no longer exist on disk, keeping the playlist clean.
   useEffect(() => {
-    if (!electron) return;
+    const bridge = electron;
+    if (!bridge) return;
     const timer = setInterval(async () => {
       const vids = syncedVideosRef.current;
       const auds = syncedAudiosRef.current;
@@ -316,7 +317,7 @@ export function useMediaLibrary({
       console.info(`[Player Library] Running 30-min auto-validation for ${allItems.length} items...`);
       const allPaths = allItems.map(i => i.path).filter(Boolean);
       try {
-        const result = await electron.ipcRenderer.invoke('validate-library-files', allPaths);
+        const result = await bridge.ipcRenderer.invoke('validate-library-files', allPaths);
         if (!result || result.removed.length === 0) return;
         const removedSet = new Set<string>(result.removed.map((p: string) => p.toLowerCase().replace(/[\/]/g, '/')));
         const isGone = (item: MediaItem) => removedSet.has(item.path.toLowerCase().replace(/[\/]/g, '/'));
