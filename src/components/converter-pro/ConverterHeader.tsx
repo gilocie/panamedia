@@ -27,8 +27,8 @@ export const ConverterHeader: React.FC<ConverterHeaderProps> = ({
 }) => {
   return (
     <div style={{
-      height: '26px',
-      padding: '0 12px',
+      height: '52px',
+      padding: '0 18px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',

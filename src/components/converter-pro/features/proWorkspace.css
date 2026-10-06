@@ -256,10 +256,10 @@
 .pro-media-bar__dot { color: var(--pw-text-faint); }
 
 /* Host wrapper — fixed full-bleed inside the converter modal.
-   Everything below the titlebar (26px after 50% reduction) is the studio. */
+   Everything below the titlebar (52px) is the studio. */
 .pro-studio-host {
   position: absolute;
-  top: 26px;
+  top: 52px;
   right: 0;
   bottom: 0;
   left: 0;
@@ -283,6 +283,7 @@
   overflow-x: auto;
   scrollbar-width: none;
   flex-shrink: 0;
+  min-height: 0;
 }
 
 .pro-tabs::-webkit-scrollbar { display: none; }
@@ -293,13 +294,13 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 36px;
+  min-height: 18px;
   padding: 0 10px;
   border: 0;
   border-bottom: 2px solid transparent;
   color: var(--pw-text-dim);
   background: transparent;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 550;
   white-space: nowrap;
   cursor: pointer;
