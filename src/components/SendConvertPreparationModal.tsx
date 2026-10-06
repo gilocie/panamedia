@@ -1218,12 +1218,12 @@ export function SendConvertPreparationModal({
         onClose={() => setShowFormatModal(false)}
       />
 
-      {/* ─── 5. TOOL WORKSPACE ──────────────────────────────────────────
-          One full-bleed studio hosts every tool. The media bar and the tab
-          strip sit above the tool itself, so switching tools keeps the same
-          targeted clip in frame and the settings accumulate per tool. */}
+      {/* ─── 5a. MEDIA BAR ──────────────────────────────────────────────
+          Sits in the 52–98px gap between the converter header and the tool
+          studio. Positioned separately so the studio (position:absolute) can
+          cover the main modal content without also hiding the media bar. */}
       {activeTool && TOOL_STUDIO_IDS.includes(activeTool.id) && (
-        <div className="pro-studio-host">
+        <div className="pro-media-host">
           <ProMediaBar
             fileName={currentFile}
             meta={{
@@ -1233,7 +1233,14 @@ export function SendConvertPreparationModal({
             }}
             onBack={closeStudio}
           />
+        </div>
+      )}
 
+      {/* ─── 5b. TOOL STUDIO ────────────────────────────────────────────
+          Fills from 98px (below media bar) to bottom. The inner pro-studio
+          uses position:absolute;inset:0 to cover the main modal content. */}
+      {activeTool && TOOL_STUDIO_IDS.includes(activeTool.id) && (
+        <div className="pro-studio-host">
           <ProToolStudioProvider
             tabs={studioTabs}
             activeId={activeTool.id}

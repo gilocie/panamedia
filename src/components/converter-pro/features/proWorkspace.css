@@ -52,13 +52,12 @@
   --pw-text-faint: #6b6f92;
   --pw-mono: ui-monospace, 'Cascadia Mono', 'JetBrains Mono', 'Consolas', monospace;
 
-  /* Flows below ProMediaBar in the flex column of pro-studio-host */
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
+  /* Fixed full-height layout — covers main modal content below 98px */
+  position: absolute;
+  inset: 0;
   overflow: hidden;
   display: grid;
-  /* rows: tabs(auto) · upper body(1fr) · optional timeline(auto) · footer(auto) */
+  /* rows: tabs(auto) · body(1fr) · timeline(auto) · footer(auto) */
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   gap: 0;
   background:
@@ -248,11 +247,20 @@
 
 .pro-media-bar__dot { color: var(--pw-text-faint); }
 
-/* Host wrapper — fixed full-bleed inside the converter modal.
-   Everything below the titlebar (52px) is the studio. */
-.pro-studio-host {
+/* Media bar host — sits in the 52–98px gap above the tool studio */
+.pro-media-host {
   position: absolute;
   top: 52px;
+  right: 0;
+  left: 0;
+  z-index: 41;
+  height: 46px;
+}
+
+/* Tool studio host — fills from 98px (below media bar) to bottom */
+.pro-studio-host {
+  position: absolute;
+  top: 98px;
   right: 0;
   bottom: 0;
   left: 0;
