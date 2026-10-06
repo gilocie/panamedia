@@ -81,10 +81,10 @@
   to   { opacity: 1; transform: scale(1); }
 }
 
-/* ── Upper body: canvas (left ~52%) + inspector (right ~48%) ── */
+/* ── Upper body: canvas (left ~40%) + inspector (right ~60%) ── */
 .pro-studio__body {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(300px, 1fr);
+  grid-template-columns: minmax(0, 0.85fr) minmax(320px, 1.3fr);
   gap: 8px;
   min-height: 0;
   overflow: hidden;
