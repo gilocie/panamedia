@@ -320,10 +320,11 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
         </span>
       </div>
 
-      {/* 1. Preview Display Frame (Upper Green Box) */}
+      {/* 1. Preview Display Frame */}
       <div style={{
         width: '100%',
-        height: '142px',
+        aspectRatio: '16/9',
+        minHeight: '120px',
         backgroundImage: `linear-gradient(rgba(9, 9, 14, 0.72), rgba(9, 9, 14, 0.72)), url(${playerBg})`,
         backgroundSize: 'cover',
         backgroundPosition: 'center',
@@ -354,6 +355,7 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
           <video
             ref={(element) => { mediaRef.current = element; }}
             src={`http://127.0.0.1:${activePort}/stream?path=${encodeURIComponent(currentFile)}`}
+            crossOrigin="anonymous"
             style={{
               width: '100%',
               height: '100%',

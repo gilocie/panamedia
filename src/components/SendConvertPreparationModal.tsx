@@ -6,6 +6,8 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import './converter-pro/features/featureTools.css';
+import './converter-pro/features/proWorkspace.css';
 import { electron } from './panamedia/types';
 import {
   getQueue,
@@ -30,12 +32,16 @@ import {
   PreviewMonitor,
   ExportSettingsPanel,
   ConverterBottomDock,
+  MEDIA_TOOLS,
   FormatSettingsModal,
   CutTrimTool,
   CropTool,
   SubtitleTool,
   EffectTool,
   RotateTool,
+  MirrorTool,
+  ProToolStudioProvider,
+  ProMediaBar,
   WatermarkTool,
   CompressTool,
   GifTool,
@@ -559,6 +565,58 @@ export function SendConvertPreparationModal({
       }
     : undefined;
   const configuredToolIds = new Set(Object.keys(currentFileTools));
+
+  // Duration for the targeted item. The player's figure is authoritative when
+  // it is the same file; the tools fall back to probing the stream themselves
+  // when it is zero (see CutTrimTool's onLoadedMetadata).
+  const currentDuration =
+    appPlayerState?.filePath === currentFile ? appPlayerState.duration || 0 : 0;
+
+  /* Tab captions match the reference studio's strip; the dock keeps its
+     shorter labels. */
+  const STUDIO_TAB_LABELS: Record<string, string> = {
+    cut: 'Cut / Trim',
+    crop: 'Crop & Aspect',
+    subtitle: 'Subtitles',
+    effect: 'Visual Effects',
+    rotate: 'Rotate & Level',
+    watermark: 'Watermark & Logo',
+    mirror: 'Mirror & Flip',
+    compress: 'Smart Compress',
+    gif: 'GIF Creator',
+    denoise: 'Denoise & Audio',
+    split: 'Split File'
+  };
+
+  /* ── Tool workspace wiring ────────────────────────────────────────────
+     The tools render as one full-bleed studio with a tab strip, so they read
+     as views inside Converter Pro rather than dialogs stacked on top of it.
+     The media is always the Convert tab's targeted queue item — the studio
+     never prompts for a file, it is handed `currentFile` from here. */
+  const TOOL_STUDIO_IDS = [
+    'cut', 'crop', 'subtitle', 'effect', 'rotate',
+    'watermark', 'mirror', 'compress', 'gif', 'denoise', 'split'
+  ];
+
+  const studioTabs = MEDIA_TOOLS
+    .filter(tool => TOOL_STUDIO_IDS.includes(tool.id))
+    .map(tool => ({
+      id: tool.id,
+      label: STUDIO_TAB_LABELS[tool.id] ?? tool.label,
+      accent: tool.color,
+      icon: tool.icon
+    }));
+
+  const openStudioTool = (id: string) => {
+    const match = MEDIA_TOOLS.find(tool => tool.id === id);
+    if (match) setActiveTool(match);
+  };
+
+  const closeStudio = () => {
+    setActiveTool(null);
+    if (onActiveMainTabChange) onActiveMainTabChange('convert');
+  };
+
   const handlePlayOutput = (item: { path: string; thumbnailPath?: string }) => {
     const shouldPause = playingOutputPath === item.path;
     setOutputPreview(item);
@@ -931,7 +989,7 @@ export function SendConvertPreparationModal({
         isExpanded={isExpanded}
         useHwAccel={useHwAccel}
         onToggleExpand={handleToggleExpand}
-        onMinimize={handleMinimizeModal}
+        onMinimize={onClose || onBack || (() => {})}
         onBack={isConverting ? handleMinimizeModal : (onClose || onBack || (() => {}))}
         onClose={isConverting ? handleMinimizeModal : (onClose || onBack || (() => {}))}
       />
@@ -1160,129 +1218,171 @@ export function SendConvertPreparationModal({
         onClose={() => setShowFormatModal(false)}
       />
 
-      {/* ─── 5. DEDICATED CONVERSION FEATURE TOOLS ─── */}
-      {activeTool?.id === 'cut' && (
-        <CutTrimTool
-          key={normalizeQueuePath(currentFile)}
-          fileName={currentFile}
-          duration={appPlayerState?.filePath === currentFile ? appPlayerState.duration : 0}
-          streamingPort={streamingPort}
-          initialSettings={initialCutSettings}
-          onApply={(cutSettings) => {
-            applyToolSettings(currentFile, 'cut', cutSettings);
-          }}
-          onClose={() => setActiveTool(null)}
-        />
+      {/* ─── 5. TOOL WORKSPACE ──────────────────────────────────────────
+          One full-bleed studio hosts every tool. The media bar and the tab
+          strip sit above the tool itself, so switching tools keeps the same
+          targeted clip in frame and the settings accumulate per tool. */}
+      {activeTool && TOOL_STUDIO_IDS.includes(activeTool.id) && (
+        <div className="pro-studio-host">
+          <ProMediaBar
+            fileName={currentFile}
+            meta={{
+              resolution: isVideoFile(currentFile) ? 'SOURCE' : undefined,
+              duration: currentDuration > 0 ? formatSeconds(currentDuration) : undefined,
+              status: 'READY'
+            }}
+            onBack={closeStudio}
+          />
+
+          <ProToolStudioProvider
+            tabs={studioTabs}
+            activeId={activeTool.id}
+            onSelect={openStudioTool}
+          >
+            {activeTool.id === 'cut' && (
+              <CutTrimTool
+                key={`cut-${normalizeQueuePath(currentFile)}`}
+                fileName={currentFile}
+                duration={currentDuration}
+                streamingPort={streamingPort}
+                initialSettings={initialCutSettings}
+                onApply={(cutSettings) => {
+                  applyToolSettings(currentFile, 'cut', cutSettings);
+                }}
+                onClose={closeStudio}
+              />
+            )}
+
+            {activeTool.id === 'crop' && (
+              <CropTool
+                fileName={currentFile}
+                streamingPort={streamingPort}
+              duration={currentDuration}
+                onApply={(cropSettings) => {
+                  applyToolSettings(currentFile, 'crop', cropSettings);
+                }}
+                onClose={closeStudio}
+              />
+            )}
+
+            {activeTool.id === 'subtitle' && (
+              <SubtitleTool
+                fileName={currentFile}
+                streamingPort={streamingPort}
+              duration={currentDuration}
+                onApply={(subSettings) => {
+                  applyToolSettings(currentFile, 'subtitle', subSettings);
+                }}
+                onClose={closeStudio}
+              />
+            )}
+
+            {activeTool.id === 'effect' && (
+              <EffectTool
+                fileName={currentFile}
+                streamingPort={streamingPort}
+              duration={currentDuration}
+                onApply={(effectSettings) => {
+                  applyToolSettings(currentFile, 'effect', effectSettings);
+                }}
+                onClose={closeStudio}
+              />
+            )}
+
+            {activeTool.id === 'rotate' && (
+              <RotateTool
+                fileName={currentFile}
+                streamingPort={streamingPort}
+              duration={currentDuration}
+                onApply={(rotateSettings) => {
+                  applyToolSettings(currentFile, 'rotate', rotateSettings);
+                }}
+                onClose={closeStudio}
+              />
+            )}
+
+            {activeTool.id === 'watermark' && (
+              <WatermarkTool
+                fileName={currentFile}
+                streamingPort={streamingPort}
+              duration={currentDuration}
+                onApply={(wmSettings) => {
+                  applyToolSettings(currentFile, 'watermark', wmSettings);
+                }}
+                onClose={closeStudio}
+              />
+            )}
+
+            {activeTool.id === 'compress' && (
+              <CompressTool
+                fileName={currentFile}
+                streamingPort={streamingPort}
+              duration={currentDuration}
+                onApply={(compSettings) => {
+                  applyToolSettings(currentFile, 'compress', compSettings);
+                }}
+                onClose={closeStudio}
+              />
+            )}
+
+            {/* Mirror & Flip has its own studio panel, but writes into the
+                same `rotate` bag so the engine keeps one hflip/vflip path. */}
+            {activeTool.id === 'mirror' && (
+              <MirrorTool
+                fileName={currentFile}
+                streamingPort={streamingPort}
+              duration={currentDuration}
+                onApply={({ flipH, flipV }) => {
+                  const existing = (currentFileTools.rotate ?? {}) as Record<string, unknown>;
+                  applyToolSettings(currentFile, 'rotate', { ...existing, angle: 0, flipH, flipV });
+                }}
+                onClose={closeStudio}
+              />
+            )}
+
+            {activeTool.id === 'gif' && (
+              <GifTool
+                fileName={currentFile}
+                streamingPort={streamingPort}
+              duration={currentDuration}
+                onApply={(gifSettings) => {
+                  applyToolSettings(currentFile, 'gif', gifSettings);
+                }}
+                onClose={closeStudio}
+              />
+            )}
+
+            {activeTool.id === 'denoise' && (
+              <DenoiseTool
+                fileName={currentFile}
+                streamingPort={streamingPort}
+              duration={currentDuration}
+                onApply={(denoiseSettings) => {
+                  applyToolSettings(currentFile, 'denoise', denoiseSettings);
+                }}
+                onClose={closeStudio}
+              />
+            )}
+
+            {activeTool.id === 'split' && (
+              <SplitTool
+                fileName={currentFile}
+                duration={currentDuration}
+                onApply={(splitSettings) => {
+                  applyToolSettings(currentFile, 'split', splitSettings);
+                }}
+                onClose={closeStudio}
+              />
+            )}
+          </ProToolStudioProvider>
+        </div>
       )}
 
-      {activeTool?.id === 'crop' && (
-        <CropTool
-          fileName={currentFile}
-          onApply={(cropSettings) => {
-            applyToolSettings(currentFile, 'crop', cropSettings);
-          }}
-          onClose={() => setActiveTool(null)}
-        />
-      )}
-
-      {activeTool?.id === 'subtitle' && (
-        <SubtitleTool
-          fileName={currentFile}
-          onApply={(subSettings) => {
-            applyToolSettings(currentFile, 'subtitle', subSettings);
-          }}
-          onClose={() => setActiveTool(null)}
-        />
-      )}
-
-      {activeTool?.id === 'effect' && (
-        <EffectTool
-          fileName={currentFile}
-          onApply={(effectSettings) => {
-            applyToolSettings(currentFile, 'effect', effectSettings);
-          }}
-          onClose={() => setActiveTool(null)}
-        />
-      )}
-
-      {activeTool?.id === 'rotate' && (
-        <RotateTool
-          fileName={currentFile}
-          onApply={(rotateSettings) => {
-            applyToolSettings(currentFile, 'rotate', rotateSettings);
-          }}
-          onClose={() => setActiveTool(null)}
-        />
-      )}
-
-      {activeTool?.id === 'watermark' && (
-        <WatermarkTool
-          fileName={currentFile}
-          onApply={(wmSettings) => {
-            applyToolSettings(currentFile, 'watermark', wmSettings);
-          }}
-          onClose={() => setActiveTool(null)}
-        />
-      )}
-
-      {activeTool?.id === 'compress' && (
-        <CompressTool
-          fileName={currentFile}
-          onApply={(compSettings) => {
-            applyToolSettings(currentFile, 'compress', compSettings);
-          }}
-          onClose={() => setActiveTool(null)}
-        />
-      )}
-
-      {/* Mirror & Flip is the flip half of the Rotate tool, so
-          both share one settings panel and one engine path. */}
-      {activeTool?.id === 'mirror' && (
-        <RotateTool
-          fileName={currentFile}
-          onApply={(rotateSettings) => {
-            applyToolSettings(currentFile, 'rotate', rotateSettings);
-          }}
-          onClose={() => setActiveTool(null)}
-        />
-      )}
-
-      {activeTool?.id === 'gif' && (
-        <GifTool
-          fileName={currentFile}
-          onApply={(gifSettings) => {
-            applyToolSettings(currentFile, 'gif', gifSettings);
-          }}
-          onClose={() => setActiveTool(null)}
-        />
-      )}
-
-      {activeTool?.id === 'denoise' && (
-        <DenoiseTool
-          fileName={currentFile}
-          onApply={(denoiseSettings) => {
-            applyToolSettings(currentFile, 'denoise', denoiseSettings);
-          }}
-          onClose={() => setActiveTool(null)}
-        />
-      )}
-
-      {activeTool?.id === 'split' && (
-        <SplitTool
-          fileName={currentFile}
-          duration={appPlayerState?.duration || 0}
-          onApply={(splitSettings) => {
-            applyToolSettings(currentFile, 'split', splitSettings);
-          }}
-          onClose={() => setActiveTool(null)}
-        />
-      )}
-
-      {activeTool && !['cut', 'crop', 'subtitle', 'effect', 'rotate', 'watermark', 'compress', 'mirror', 'gif', 'denoise', 'split'].includes(activeTool.id) && (
+      {activeTool && !TOOL_STUDIO_IDS.includes(activeTool.id) && (
         <ToolInfoModal
           tool={activeTool}
           fileName={currentFile}
-          onClose={() => setActiveTool(null)}
+          onClose={closeStudio}
         />
       )}
     </div>
