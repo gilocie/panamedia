@@ -189,10 +189,15 @@ export const ProToolShell: React.FC<ProToolShellProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
 
-  // Register Apply button in the tab strip header slot.
+  // Register the Apply button in the tab-strip header slot.
+  // IMPORTANT: depend on studio?.setHeaderSlot (a stable useState setter),
+  // NOT on studio itself (which is a new object reference on every render,
+  // which would cause an infinite loop: setSlot -> re-render -> new studio
+  // -> effect re-runs -> setSlot -> re-render -> ...).
+  const setSlot = studio?.setHeaderSlot;
   useEffect(() => {
-    if (!studio) return;
-    studio.setHeaderSlot(
+    if (!setSlot) return;
+    setSlot(
       <button
         type="button"
         className="pro-studio__apply"
@@ -204,9 +209,9 @@ export const ProToolShell: React.FC<ProToolShellProps> = ({
         {footerActionLabel}
       </button>
     );
-    return () => studio.setHeaderSlot(null);
+    return () => setSlot(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studio, onApply, applyDisabled, footerActionLabel]);
+  }, [setSlot, onApply, applyDisabled, footerActionLabel]);
 
   // Partition the body into its three zones.
   const zones = React.useMemo(() => {

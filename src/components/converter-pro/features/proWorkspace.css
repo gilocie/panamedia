@@ -449,8 +449,9 @@
 .pro-monitor {
   width: 100%;
   aspect-ratio: 16 / 9;
-  /* No flex:1 — let aspect-ratio drive the height naturally so the video
-     stays proportional and doesn't overflow its canvas column. */
+  flex: 1 1 auto;
+  /* max-height keeps it proportional — video fills height, width stays 16:9 */
+  max-height: 100%;
   border: 1px solid var(--pw-line);
   border-radius: 8px;
   overflow: hidden;
