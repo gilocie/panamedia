@@ -997,7 +997,7 @@ export function SendConvertPreparationModal({
       {/* Phase G: speak up before starting rather than failing during.
           Advisory only -- the engine still refuses a destination it knows is
           unusable, and a tight-but-workable disk is allowed to proceed. */}
-      {(capacityNote || onBattery) && !isConverting && (
+      {(capacityNote || onBattery) && !isConverting && !(activeTool && TOOL_STUDIO_IDS.includes(activeTool.id)) && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: '10px',
           padding: '8px 16px', fontSize: '11.5px',
@@ -1014,11 +1014,11 @@ export function SendConvertPreparationModal({
         </div>
       )}
 
-      {/* ─── 2. MAIN CENTER WORKSPACE (Split Left 65% / Right 35%) ─── */}
+      {/* ─── 2. MAIN CENTER WORKSPACE ─── hidden while a tool is open */}
       <div style={{
         flex: 1,
         minHeight: 0,
-        display: 'flex',
+        display: activeTool && TOOL_STUDIO_IDS.includes(activeTool.id) ? 'none' : 'flex',
         background: 'rgba(0, 0, 0, 0.25)',
         borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
       }}>
@@ -1183,7 +1183,8 @@ export function SendConvertPreparationModal({
         </div>
       </div>
 
-      {/* ─── 3. BOTTOM DOCK (Target Format, Media Tools Carousel & Circular RUN) ─── */}
+      {/* ─── 3. BOTTOM DOCK ─── hidden while a tool is open */}
+      {!(activeTool && TOOL_STUDIO_IDS.includes(activeTool.id)) && (
       <ConverterBottomDock
         formatModalMode={formatModalMode}
         activeVideoPreset={activeVideoPreset}
@@ -1201,6 +1202,7 @@ export function SendConvertPreparationModal({
         onSelectTool={setActiveTool}
         onRunConvert={handleProceed}
       />
+      )}
 
       {/* ─── 4. FORMAT SETTINGS DIALOG MODAL ─── */}
       <FormatSettingsModal
