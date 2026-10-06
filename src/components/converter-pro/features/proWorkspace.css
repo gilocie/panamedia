@@ -111,9 +111,16 @@
 .pro-studio__canvas::-webkit-scrollbar,
 .pro-studio__inspector::-webkit-scrollbar { display: none; }
 
-/* Tool identity row — hidden: tabs strip already identifies the active tool */
+/* Tool identity row (compact) — shown at top of every tool content area */
 .pro-studio__toolhead {
-  display: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 4px 0 6px;
+  border-bottom: 1px solid var(--pw-line);
+  margin-bottom: 2px;
 }
 
 .pro-studio__toolhead [data-tool-icon] {
