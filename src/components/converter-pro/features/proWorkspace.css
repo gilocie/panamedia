@@ -52,13 +52,14 @@
   --pw-text-faint: #6b6f92;
   --pw-mono: ui-monospace, 'Cascadia Mono', 'JetBrains Mono', 'Consolas', monospace;
 
-  /* Fixed full-height layout — NO scroll on the shell */
-  position: absolute;
-  inset: 0;
+  /* Flows below ProMediaBar in the flex column of pro-studio-host */
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
   display: grid;
-  /* rows: upper body · optional timeline · compact command bar */
-  grid-template-rows: minmax(0, 1fr) auto auto;
+  /* rows: tabs(auto) · upper body(1fr) · optional timeline(auto) · footer(auto) */
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   gap: 0;
   background:
     radial-gradient(900px 380px at 20% -12%, rgba(99,102,241,0.10), transparent 60%),
@@ -73,7 +74,7 @@
 
 /* Wide (inspector-less) variant: body fills height, no timeline row */
 .pro-studio--wide {
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 @keyframes pw-in {
@@ -81,10 +82,10 @@
   to   { opacity: 1; transform: scale(1); }
 }
 
-/* ── Upper body: canvas (left 62%) + inspector (right 38%) ── */
+/* ── Upper body: canvas (left ~52%) + inspector (right ~48%) ── */
 .pro-studio__body {
   display: grid;
-  grid-template-columns: minmax(0, 1.65fr) minmax(290px, 1fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(300px, 1fr);
   gap: 8px;
   min-height: 0;
   overflow: hidden;
