@@ -110,8 +110,20 @@ export const ProMediaBar: React.FC<ProMediaBarProps> = ({
 
 /* ─── Tool tab strip ───────────────────────────────────────────────── */
 
-const ProTabStrip: React.FC<{ ctx: StudioCtx }> = ({ ctx }) => (
+const ProTabStrip: React.FC<{ ctx: StudioCtx; onBack?: () => void }> = ({ ctx, onBack }) => (
   <nav className="pro-tabs" role="tablist" aria-label="Converter Pro tools">
+    {/* ← Queue: discard tool and return to converter queue */}
+    {onBack && (
+      <button
+        type="button"
+        className="pro-tabs__back"
+        onClick={onBack}
+        title="Discard and return to queue"
+      >
+        <ArrowLeft size={12} />
+        <span>Queue</span>
+      </button>
+    )}
     {ctx.tabs.map(tab => {
       const selected = tab.id === ctx.activeId;
       return (
@@ -153,6 +165,8 @@ interface ProToolShellProps {
    * Anything not wrapped defaults to the canvas zone.
    */
   children: React.ReactNode;
+  /** Optional header rendered at the very top of the inspector column. */
+  inspectorHeader?: React.ReactNode;
   /** Command bar. */
   footerLeft?: React.ReactNode;
   footerMeta?: React.ReactNode;
@@ -176,7 +190,8 @@ export const ProToolShell: React.FC<ProToolShellProps> = ({
   footerActionIcon,
   onApply,
   applyDisabled,
-  onClose
+  onClose,
+  inspectorHeader
 }) => {
   const studio = useContext(StudioContext);
 
@@ -243,7 +258,7 @@ export const ProToolShell: React.FC<ProToolShellProps> = ({
       aria-modal="true"
       aria-label={title}
     >
-      {studio ? <ProTabStrip ctx={studio} /> : null}
+      {studio ? <ProTabStrip ctx={studio} onBack={onClose} /> : null}
 
       {/* ── Upper zones ── */}
       <div className="pro-studio__body">
@@ -268,7 +283,16 @@ export const ProToolShell: React.FC<ProToolShellProps> = ({
           {zones.canvas}
         </div>
 
-        {hasInspector && <div className="pro-studio__inspector">{zones.inspector}</div>}
+        {hasInspector && (
+          <div className="pro-studio__inspector">
+            {inspectorHeader && (
+              <div className="pro-studio__inspector-header">
+                {inspectorHeader}
+              </div>
+            )}
+            {zones.inspector}
+          </div>
+        )}
       </div>
 
       {/* ── Full-width timeline stage (compact, flex-shrink:0 keeps footer visible) ── */}

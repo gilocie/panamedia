@@ -41,7 +41,6 @@ import {
   RotateTool,
   MirrorTool,
   ProToolStudioProvider,
-  ProMediaBar,
   WatermarkTool,
   CompressTool,
   GifTool,
@@ -1220,23 +1219,9 @@ export function SendConvertPreparationModal({
         onClose={() => setShowFormatModal(false)}
       />
 
-      {/* ─── 5a. MEDIA BAR ──────────────────────────────────────────────
-          Sits in the 52–98px gap between the converter header and the tool
-          studio. Positioned separately so the studio (position:absolute) can
-          cover the main modal content without also hiding the media bar. */}
-      {activeTool && TOOL_STUDIO_IDS.includes(activeTool.id) && (
-        <div className="pro-media-host">
-          <ProMediaBar
-            fileName={currentFile}
-            meta={{
-              resolution: isVideoFile(currentFile) ? 'SOURCE' : undefined,
-              duration: currentDuration > 0 ? formatSeconds(currentDuration) : undefined,
-              status: 'READY'
-            }}
-            onBack={closeStudio}
-          />
-        </div>
-      )}
+      {/* ─── 5a. MEDIA BAR ─── removed: filename/status now lives in the
+          inspector column header of each tool (ProToolShell inspectorHeader).
+          ← Queue is now a button in ConverterHeader (main title bar). */}
 
       {/* ─── 5b. TOOL STUDIO ────────────────────────────────────────────
           Fills from 98px (below media bar) to bottom. The inner pro-studio

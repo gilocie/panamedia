@@ -66,6 +66,7 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
   const [previewFailed, setPreviewFailed] = useState(false);
   const [zoom, setZoom] = useState(1); // 0.25x – 4x
   const [isMuted, setIsMuted] = useState(false);
+  const [volume, setVolume] = useState(1.0); // 0.0 – 1.0
 
   const totalDuration = mediaDuration > 0 ? mediaDuration : duration;
   const usableDuration = Math.max(0, totalDuration);
@@ -229,16 +230,35 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
       subtitle={fileName}
       icon={<Scissors size={18} />}
       accent={ACCENT}
-      badges={
-        <>
-          <span className="pw-badge">
-            <i className="pw-badge__dot" /> DIRECT STREAM PREVIEW
+      inspectorHeader={
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '6px 10px',
+          borderBottom: '1px solid var(--pw-line)',
+          background: 'rgba(255,255,255,0.025)',
+          minWidth: 0
+        }}>
+          <span style={{
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: 'var(--pw-text)',
+            flex: 1,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap'
+          }}>
+            {fileName.split(/[/\\]/).pop()}
           </span>
-          <span className="pw-badge pw-badge--flat">REC.709 · 1920x1080</span>
-        </>
+          <span className="pw-badge" style={{ flexShrink: 0 }}>READY</span>
+          {fileName.match(/\.(mp4|mkv|mov|avi|webm|flv|ts)$/i) && (
+            <span className="pw-badge pw-badge--flat" style={{ flexShrink: 0 }}>SOURCE</span>
+          )}
+        </div>
       }
       onClose={onClose}
-      footerActionLabel="Apply to Conversion Pipeline"
+      footerActionLabel="Apply"
       footerActionIcon={<Check size={14} />}
       applyDisabled={clipDuration <= 0}
       onApply={handleApply}
@@ -346,18 +366,7 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
                   boxShadow: `0 0 12px ${HOT}`
                 }}
               />
-              <div
-                aria-hidden="true"
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  bottom: 0,
-                  left: `${pct(playhead)}%`,
-                  width: 2,
-                  background: '#fff',
-                  opacity: 0.85
-                }}
-              />
+              {/* Playhead hairline removed — position shown in monitor chip */}
             </>
           )}
           <span className="pro-canvas__chip pro-canvas__chip--br">
@@ -391,21 +400,44 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
               <SkipForward size={11} />
             </button>
           </div>
-          <div className="pro-row" style={{ gap: 5 }}>
+          <div className="pro-row" style={{ gap: 5, alignItems: 'center' }}>
             <button
               type="button"
               className="pw-icon-btn"
               aria-label={isMuted ? 'Unmute' : 'Mute'}
               onClick={() => {
-                setIsMuted(m => !m);
-                if (videoRef.current) videoRef.current.muted = !isMuted;
+                const next = !isMuted;
+                setIsMuted(next);
+                if (videoRef.current) videoRef.current.muted = next;
               }}
               title={isMuted ? 'Click to unmute' : 'Click to mute'}
-              style={{ opacity: isMuted ? 1 : 0.45 }}
+              style={{ opacity: isMuted ? 1 : 0.6, flexShrink: 0 }}
             >
               <Volume2 size={11} style={{ color: isMuted ? '#f87171' : 'var(--pw-text-dim)' }} />
             </button>
-            {isMuted && <span className="pw-data" style={{ fontSize: 9, color: '#f87171' }}>MUTED</span>}
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={isMuted ? 0 : volume}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                setVolume(v);
+                if (videoRef.current) {
+                  videoRef.current.volume = v;
+                  videoRef.current.muted = v === 0;
+                }
+                setIsMuted(v === 0);
+              }}
+              style={{
+                width: 64,
+                accentColor: ACCENT,
+                cursor: 'pointer'
+              }}
+              title={`Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
+            />
+            {isMuted && <span className="pw-data" style={{ fontSize: 9, color: '#f87171', flexShrink: 0 }}>MUTED</span>}
           </div>
         </div>
       </section>
