@@ -285,9 +285,7 @@ namespace Panamedia {
 
         try {
             std::vector<char> buffer(4096);
-            std::cerr << "[HTTPServer] Calling recv on client socket: " << client << std::endl;
             int bytesReceived = recv(client, buffer.data(), buffer.size() - 1, 0);
-            std::cerr << "[HTTPServer] recv returned: " << bytesReceived << " on socket: " << client << std::endl;
             if (bytesReceived > 0) {
                 buffer[bytesReceived] = '\0';
                 std::string request(buffer.data());
@@ -295,7 +293,6 @@ namespace Panamedia {
                 std::stringstream ss(request);
                 std::string method, url, protocol;
                 ss >> method >> url >> protocol;
-                std::cerr << "[HTTPServer] handleClient: " << method << " " << url << std::endl;
 
                 if (method == "GET" || method == "HEAD") {
                     size_t fileParamPos = url.find("file=");

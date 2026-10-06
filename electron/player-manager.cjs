@@ -209,7 +209,7 @@ function openPlayerWindow(filePath, filename, options = {}) {
       }
       setTimeout(() => {
         if (!playerWin.isDestroyed()) {
-          playerWin.webContents.send('player-remote-command', 'restore', st.currentTime, st.playing);
+          try { playerWin.webContents.send('player-remote-command', 'restore', st.currentTime, st.playing); } catch (e) {}
         }
       }, 50);
     }
@@ -236,7 +236,7 @@ function showAndFloatPlayerWindow() {
     win.focus();
     setTimeout(() => {
       if (win && !win.isDestroyed()) {
-        win.setAlwaysOnTop(false);
+        try { win.setAlwaysOnTop(false); } catch (e) {}
       }
     }, 400);
     const st = playerStates.get(win.id);
@@ -381,13 +381,15 @@ function setupIpcHandlers() {
 
       setTimeout(() => {
         if (!targetWin.isDestroyed()) {
-          targetWin.webContents.send('player-remote-command', 'restore', {
-            currentTime: st.currentTime,
-            filePath: st.filePath,
-            filename: st.filename,
-            shouldResume: true
-          });
-          targetWin.webContents.send('player-remote-command', 'restore', st.currentTime, true);
+          try {
+            targetWin.webContents.send('player-remote-command', 'restore', {
+              currentTime: st.currentTime,
+              filePath: st.filePath,
+              filename: st.filename,
+              shouldResume: true
+            });
+            targetWin.webContents.send('player-remote-command', 'restore', st.currentTime, true);
+          } catch (e) {}
         }
       }, 50);
 
