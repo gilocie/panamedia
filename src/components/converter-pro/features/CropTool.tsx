@@ -1,229 +1,266 @@
+import { Filmstrip } from './Filmstrip';
 import React, { useState } from 'react';
-import { Crop, X, Check, RotateCcw } from 'lucide-react';
+import {
+  AlignCenter,
+  Check,
+  Crop,
+  Grid3x3,
+  Magnet,
+  Maximize,
+  Ratio,
+  RefreshCw,
+  Scan
+} from 'lucide-react';
+import { MediaToolPreview } from './MediaToolPreview';
+import {
+  ProInspector,
+  ProPanel,
+  ProSlider,
+  ProTimeline,
+  ProToolShell,
+  ProTrack
+} from './ProToolShell';
 
 interface CropToolProps {
   fileName: string;
+  streamingPort?: number;
+  /** Clip length, used to spread the timeline filmstrip across the clip. */
+  duration?: number;
   onApply: (cropSettings: { aspectRatio: string; zoom: number }) => void;
   onClose: () => void;
 }
 
+/* Reference: convertor_pro_features_ui/crop_aspect_ratio/code.html
+   Left column = interactive canvas + scrubber + alignment tiles.
+   Right column = aspect preset bento, pixel dimensions, matte treatment. */
+const RATIOS = [
+  { id: 'original', label: 'Original', desc: 'Keep source ratio', icon: <Crop size={15} /> },
+  { id: '16:9', label: '16:9 Landscape', desc: 'Widescreen TV & YouTube', icon: <Ratio size={15} /> },
+  { id: '4:3', label: '4:3 Standard', desc: 'Classic TV & Standard', icon: <Crop size={15} /> },
+  { id: '1:1', label: '1:1 Square', desc: 'Square / Social Feed', icon: <Crop size={15} /> },
+  { id: '9:16', label: '9:16 Vertical', desc: 'TikTok, Shorts, Reels', icon: <Crop size={15} /> }
+];
+
+const ACCENT = '#818cf8';
+
 export const CropTool: React.FC<CropToolProps> = ({
   fileName,
+  streamingPort,
+  duration = 0,
   onApply,
   onClose
 }) => {
   const [aspectRatio, setAspectRatio] = useState<string>('16:9');
   const [zoom, setZoom] = useState<number>(100);
+  const [showGuides, setShowGuides] = useState(true);
+  const [magnet, setMagnet] = useState(true);
 
-  const RATIOS = [
-    { id: 'original', label: 'Original', desc: 'Keep source ratio' },
-    { id: '16:9', label: '16:9', desc: 'Widescreen TV & YouTube' },
-    { id: '4:3', label: '4:3', desc: 'Classic TV & Standard' },
-    { id: '1:1', label: '1:1', desc: 'Square / Social Feed' },
-    { id: '9:16', label: '9:16', desc: 'Vertical / TikTok & Shorts' },
-  ];
+  const active = RATIOS.find(r => r.id === aspectRatio) ?? RATIOS[1];
+  // Zoom drives a live transform on the preview so the crop box reads true.
+  const previewScale = 1 + (zoom - 100) / 260;
+
+  const reset = () => {
+    setAspectRatio('16:9');
+    setZoom(100);
+  };
 
   return (
-    <div 
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 100,
-        background: 'rgba(0, 0, 0, 0.82)',
-        backdropFilter: 'blur(8px)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '20px'
-      }}
-      onClick={onClose}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          width: '540px',
-          maxWidth: '96vw',
-          background: 'linear-gradient(180deg, #161828 0%, #0d0e18 100%)',
-          border: '1px solid rgba(129, 140, 248, 0.4)',
-          borderRadius: '16px',
-          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.9), 0 0 35px rgba(129, 140, 248, 0.25)',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden'
-        }}
-      >
-        {/* Header */}
-        <div style={{
-          padding: '16px 20px',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          background: 'rgba(255, 255, 255, 0.02)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '8px',
-              background: 'linear-gradient(135deg, #4f46e5, #818cf8)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff'
-            }}>
-              <Crop size={18} />
-            </div>
-            <div>
-              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#fff' }}>
-                Crop & Aspect Ratio
-              </h3>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                {fileName.split(/[\\/]/).pop()}
-              </div>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              width: '28px',
-              height: '28px',
-              borderRadius: '50%',
-              background: 'rgba(255, 255, 255, 0.06)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              color: 'rgba(255, 255, 255, 0.7)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer'
-            }}
-          >
-            <X size={14} />
+    <ProToolShell
+      title="Crop & Aspect Ratio Editor"
+      subtitle={fileName}
+      icon={<Crop size={18} />}
+      accent={ACCENT}
+      badges={<span className="pw-badge pw-badge--flat">ACTIVE CLIP</span>}
+      onClose={onClose}
+      footerLeft={
+        <>
+          <button type="button" className="pw-btn" onClick={reset}>
+            <RefreshCw size={13} /> Reset to Default
           </button>
-        </div>
-
-        {/* Content */}
-        <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-          <div>
-            <div style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(255, 255, 255, 0.6)', textTransform: 'uppercase', marginBottom: '8px' }}>
-              Select Aspect Ratio Frame
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px' }}>
-              {RATIOS.map(r => {
-                const isSelected = aspectRatio === r.id;
-                return (
-                  <div
-                    key={r.id}
-                    onClick={() => setAspectRatio(r.id)}
-                    style={{
-                      padding: '10px 12px',
-                      borderRadius: '8px',
-                      background: isSelected ? 'rgba(129, 140, 248, 0.25)' : 'rgba(255, 255, 255, 0.03)',
-                      border: isSelected ? '1.5px solid #818cf8' : '1px solid rgba(255, 255, 255, 0.08)',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    <div style={{ fontSize: '13px', fontWeight: 800, color: isSelected ? '#c7d2fe' : '#fff' }}>
-                      {r.label}
-                    </div>
-                    <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                      {r.desc}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+          <button type="button" className="pw-btn" onClick={onClose}>
+            Discard
+          </button>
+        </>
+      }
+      footerMeta={
+        <>
+          <span className="pw-eyebrow">Target: {active.label}</span>
+          <span className="pw-data" style={{ color: ACCENT }}>
+            {zoom}% optical zoom · {active.desc}
+          </span>
+        </>
+      }
+      footerActionLabel="Apply to Conversion Pipeline"
+      footerActionIcon={<Check size={14} />}
+      onApply={() => {
+        onApply({ aspectRatio, zoom });
+        onClose();
+      }}
+    >
+      {/* ── Canvas column ── */}
+      <div className="pro-panel pro-panel--canvas">
+        <div className="pro-panel__head">
+          <div className="pro-panel__title">
+            <Crop size={16} />
+            <span>Framing Preview</span>
           </div>
-
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'rgba(255,255,255,0.7)', marginBottom: '8px' }}>
-              <span>Frame Zoom Scale</span>
-              <span style={{ fontWeight: 700, color: '#818cf8' }}>{zoom}%</span>
-            </div>
-            <input
-              type="range"
-              min={100}
-              max={200}
-              value={zoom}
-              onChange={e => setZoom(Number(e.target.value))}
-              style={{ width: '100%', accentColor: '#818cf8', cursor: 'pointer' }}
-            />
-          </div>
-
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div className="pro-row" style={{ gap: 6 }}>
             <button
               type="button"
-              onClick={() => { setAspectRatio('16:9'); setZoom(100); }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                padding: '6px 12px',
-                borderRadius: '6px',
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                color: '#cbd5e1',
-                fontSize: '11px',
-                cursor: 'pointer'
-              }}
+              className={`pw-btn pw-btn--quiet${showGuides ? ' pw-btn--on' : ''}`}
+              aria-pressed={showGuides}
+              onClick={() => setShowGuides(v => !v)}
             >
-              <RotateCcw size={12} /> Reset to Default
+              <Grid3x3 size={13} /> Rule of 3rds
+            </button>
+            <button
+              type="button"
+              className={`pw-btn pw-btn--quiet${magnet ? ' pw-btn--on' : ''}`}
+              aria-pressed={magnet}
+              onClick={() => setMagnet(v => !v)}
+            >
+              <Magnet size={13} /> Magnet Snap
             </button>
           </div>
         </div>
 
-        {/* Footer */}
-        <div style={{
-          padding: '14px 20px',
-          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          background: 'rgba(0, 0, 0, 0.2)'
-        }}>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              padding: '7px 16px',
-              borderRadius: '8px',
-              background: 'rgba(255,255,255,0.06)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              color: '#fff',
-              fontSize: '12px',
-              cursor: 'pointer'
-            }}
-          >
-            Cancel
+        <MediaToolPreview
+          fileName={fileName}
+          streamingPort={streamingPort}
+          note={`${active.label} · ${showGuides ? 'guides on' : 'guides off'}`}
+          cropAspectRatio={aspectRatio === 'original' ? undefined : aspectRatio.replace(':', ' / ')}
+          imageStyle={{ transform: `scale(${previewScale})` }}
+          style={{ minHeight: 250, maxHeight: 340 }}
+          overlay={
+            <>
+              <span className="pro-canvas__chip pro-canvas__chip--tr">
+                <Ratio size={12} style={{ color: ACCENT }} /> SRC 16:9 NATIVE
+              </span>
+              {!showGuides && <span className="pro-canvas__chip pro-canvas__chip--bl">GUIDES OFF</span>}
+            </>
+          }
+        />
+
+        <div className="pw-tile-grid pw-tile-grid--5">
+          <button type="button" className="pw-tile pw-tile--action">
+            <AlignCenter size={17} />
+            Center Horiz
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              onApply({ aspectRatio, zoom });
-              onClose();
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '7px 20px',
-              borderRadius: '8px',
-              background: 'linear-gradient(135deg, #4f46e5, #818cf8)',
-              border: 'none',
-              color: '#fff',
-              fontWeight: 700,
-              fontSize: '12px',
-              cursor: 'pointer',
-              boxShadow: '0 4px 15px rgba(129, 140, 248, 0.35)'
-            }}
-          >
-            <Check size={14} /> Apply Crop
+          <button type="button" className="pw-tile pw-tile--action">
+            <AlignCenter size={17} style={{ transform: 'rotate(90deg)' }} />
+            Center Vert
+          </button>
+          <button type="button" className="pw-tile pw-tile--action" onClick={() => setAspectRatio('16:9')}>
+            <Ratio size={17} />
+            Fit to Frame
+          </button>
+          <button type="button" className="pw-tile pw-tile--action" onClick={() => setZoom(200)}>
+            <Scan size={17} />
+            Fill Canvas
+          </button>
+          <button type="button" className="pw-tile pw-tile--action" onClick={reset}>
+            <RefreshCw size={17} />
+            Reset Box
           </button>
         </div>
       </div>
-    </div>
+
+      <ProTimeline>
+        <section className="pro-timeline">
+          <div className="pro-timeline__head">
+            <div className="pro-panel__title">
+              <Maximize size={15} />
+              <span>Frame Scale &amp; Composition</span>
+            </div>
+            <div className="pro-row" style={{ gap: 5 }}>
+              <span className="pw-eyebrow">Scale</span>
+              {[100, 150, 200].map(v => (
+                <button
+                  key={v}
+                  type="button"
+                  className={`pw-btn pw-btn--quiet${zoom === v ? ' pw-btn--on' : ''}`}
+                  aria-pressed={zoom === v}
+                  onClick={() => setZoom(v)}
+                >
+                  {v}%
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="pro-timeline__tracks">
+            <div className="pro-tracklane">
+              <span className="pro-tracklane__label">V1</span>
+              <div className="pro-tracklane__body">
+                <Filmstrip fileName={fileName} streamingPort={streamingPort} duration={duration} frames={12} />
+              </div>
+            </div>
+          </div>
+          <ProTrack from={0} to={100} head={((zoom - 100) / 100) * 100} />
+          <div className="pw-scale">
+            <span>100% (native)</span>
+            <span>150%</span>
+            <span>200% max</span>
+          </div>
+        </section>
+      </ProTimeline>
+
+
+
+      <ProInspector>
+        <ProPanel
+          title="Target Aspect Ratio"
+          icon={<Ratio size={15} />}
+          action={<span className="pw-badge">PRESET SELECTOR</span>}
+        >
+          <div className="pw-tile-grid">
+            {RATIOS.map(r => (
+              <button
+                key={r.id}
+                type="button"
+                className="pw-option"
+                aria-pressed={aspectRatio === r.id}
+                onClick={() => setAspectRatio(r.id)}
+              >
+                <span className="pw-option__label">
+                  {r.icon}
+                  <span className="pw-option__stack">
+                    <span>{r.label}</span>
+                    <small>{r.desc}</small>
+                  </span>
+                </span>
+                {aspectRatio === r.id ? <span className="pw-option__mark">✓</span> : null}
+              </button>
+            ))}
+          </div>
+        </ProPanel>
+
+        <ProPanel
+          title="Frame Scale"
+          icon={<Maximize size={15} />}
+          action={<span className="pw-badge pw-badge--flat">ZOOM</span>}
+        >
+          <ProSlider
+            label="Optical zoom level"
+            readout={<span className="pw-data" style={{ color: ACCENT }}>{zoom}%</span>}
+            value={zoom}
+            min={100}
+            max={200}
+            step={5}
+            onChange={setZoom}
+            scale={['100% (native)', '150%', '200% max']}
+          />
+        </ProPanel>
+
+        <div className="pro-note">
+          Zoom crops inward around the frame centre. Values below 100% are ignored — the engine never
+          downscales the picture from this control.
+          <br /><br />
+          Matte padding, freeform aspect ratios and face-tracking reframing are not part of this
+          pipeline yet, so only the ratio and optical zoom are sent to the encoder.
+        </div>
+    
+      </ProInspector>
+
+    </ProToolShell>
   );
 };

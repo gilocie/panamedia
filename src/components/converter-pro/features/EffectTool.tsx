@@ -1,14 +1,43 @@
+import { Filmstrip } from './Filmstrip';
 import React, { useState } from 'react';
-import { Sparkles, X, Check, RotateCcw } from 'lucide-react';
+import { Check, RefreshCw, SlidersHorizontal, Sparkles, Wand2 } from 'lucide-react';
+import { MediaToolPreview } from './MediaToolPreview';
+import {
+  ProInspector,
+  ProPanel,
+  ProSlider,
+  ProStat,
+  ProTimeline,
+  ProToolShell
+} from './ProToolShell';
 
 interface EffectToolProps {
   fileName: string;
+  streamingPort?: number;
+  /** Clip length, used to spread the timeline filmstrip across the clip. */
+  duration?: number;
   onApply: (effectSettings: { brightness: number; contrast: number; saturation: number; hue: number }) => void;
   onClose: () => void;
 }
 
+const ACCENT = '#ec4899';
+
+const PRESETS: Array<{ name: string; blurb: string; values: [number, number, number, number] }> = [
+  { name: 'Neutral', blurb: 'Pass-through', values: [0, 0, 0, 0] },
+  { name: 'Soft film', blurb: 'Lifted blacks', values: [4, -10, -6, 0] },
+  { name: 'Vivid', blurb: 'Punchy social', values: [4, 12, 18, 0] },
+  { name: 'Cool grade', blurb: 'Teal shadows', values: [-2, 8, 6, -14] },
+  { name: 'Warm grade', blurb: 'Amber highlights', values: [5, 6, 4, 12] },
+  { name: 'Mono', blurb: 'Desaturated', values: [0, 14, -100, 0] }
+];
+
+/* Reference: convertor_pro_features_ui/visual_effects_color_grading/code.html
+   Left = before/after canvas + preset bento + telemetry.
+   Right = color balance wheels, stylised optics, master strength. */
 export const EffectTool: React.FC<EffectToolProps> = ({
   fileName,
+  streamingPort,
+  duration = 0,
   onApply,
   onClose
 }) => {
@@ -16,228 +45,243 @@ export const EffectTool: React.FC<EffectToolProps> = ({
   const [contrast, setContrast] = useState<number>(0);
   const [saturation, setSaturation] = useState<number>(0);
   const [hue, setHue] = useState<number>(0);
+  const [compare, setCompare] = useState(false);
 
   const resetAll = () => {
     setBrightness(0);
     setContrast(0);
     setSaturation(0);
     setHue(0);
+    setCompare(false);
   };
 
+  const signed = (n: number) => (n > 0 ? `+${n}` : String(n));
+  const totalChange =
+    Math.abs(brightness) + Math.abs(contrast) + Math.abs(saturation) + Math.abs(hue);
+
+  const activePreset = PRESETS.find(
+    p => p.values[0] === brightness && p.values[1] === contrast && p.values[2] === saturation && p.values[3] === hue
+  );
+
+  // Mirrors the ffmpeg `eq=` filter so the preview is representative.
+  const filter = compare
+    ? 'none'
+    : `brightness(${1 + brightness / 100}) contrast(${1 + contrast / 100}) saturate(${1 + saturation / 100}) hue-rotate(${hue}deg)`;
+
   return (
-    <div 
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 100,
-        background: 'rgba(0, 0, 0, 0.82)',
-        backdropFilter: 'blur(8px)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '20px'
-      }}
-      onClick={onClose}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          width: '520px',
-          maxWidth: '96vw',
-          background: 'linear-gradient(180deg, #161828 0%, #0d0e18 100%)',
-          border: '1px solid rgba(236, 72, 153, 0.4)',
-          borderRadius: '16px',
-          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.9), 0 0 35px rgba(236, 72, 153, 0.25)',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden'
-        }}
-      >
-        {/* Header */}
-        <div style={{
-          padding: '16px 20px',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          background: 'rgba(255, 255, 255, 0.02)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '8px',
-              background: 'linear-gradient(135deg, #db2777, #ec4899)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff'
-            }}>
-              <Sparkles size={18} />
-            </div>
-            <div>
-              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#fff' }}>
-                Video Effects & Color Grading
-              </h3>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                {fileName.split(/[\\/]/).pop()}
-              </div>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              width: '28px',
-              height: '28px',
-              borderRadius: '50%',
-              background: 'rgba(255, 255, 255, 0.06)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              color: 'rgba(255, 255, 255, 0.7)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer'
-            }}
-          >
-            <X size={14} />
+    <ProToolShell
+      title="Visual Effects & Color Grading"
+      subtitle={fileName}
+      icon={<Sparkles size={18} />}
+      accent={ACCENT}
+      badges={
+        <>
+          <span className="pw-badge">
+            <i className="pw-badge__dot" /> REALTIME PREVIEW
+          </span>
+          <span className="pw-badge pw-badge--flat">REC.709</span>
+        </>
+      }
+      onClose={onClose}
+      footerLeft={
+        <>
+          <button type="button" className="pw-btn" onClick={resetAll}>
+            <RefreshCw size={13} /> Reset to Default
           </button>
-        </div>
-
-        {/* Content */}
-        <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'rgba(255,255,255,0.7)', marginBottom: '6px' }}>
-              <span>Brightness</span>
-              <span style={{ fontWeight: 700, color: '#ec4899' }}>{brightness > 0 ? `+${brightness}` : brightness}</span>
-            </div>
-            <input
-              type="range"
-              min={-50}
-              max={50}
-              value={brightness}
-              onChange={e => setBrightness(Number(e.target.value))}
-              style={{ width: '100%', accentColor: '#ec4899', cursor: 'pointer' }}
-            />
+          <button type="button" className="pw-btn" onClick={onClose}>
+            Discard
+          </button>
+        </>
+      }
+      footerMeta={
+        <>
+          <span className="pw-eyebrow">{activePreset ? activePreset.name : 'Custom grade'}</span>
+          <span className="pw-data" style={{ color: ACCENT }}>
+            eq=brightness({signed(brightness)}):contrast({signed(contrast)}):saturation({signed(saturation)}):hue({hue})
+          </span>
+        </>
+      }
+      footerActionLabel="Apply to Conversion Pipeline"
+      footerActionIcon={<Check size={14} />}
+      onApply={() => {
+        onApply({ brightness, contrast, saturation, hue });
+        onClose();
+      }}
+    >
+      {/* ── Canvas ── */}
+      <section className="pro-panel pro-panel--canvas">
+        <div className="pro-panel__head">
+          <div className="pro-panel__title">
+            <SlidersHorizontal size={16} />
+            <span>Grade Preview</span>
           </div>
-
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'rgba(255,255,255,0.7)', marginBottom: '6px' }}>
-              <span>Contrast</span>
-              <span style={{ fontWeight: 700, color: '#ec4899' }}>{contrast > 0 ? `+${contrast}` : contrast}</span>
-            </div>
-            <input
-              type="range"
-              min={-50}
-              max={50}
-              value={contrast}
-              onChange={e => setContrast(Number(e.target.value))}
-              style={{ width: '100%', accentColor: '#ec4899', cursor: 'pointer' }}
-            />
-          </div>
-
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'rgba(255,255,255,0.7)', marginBottom: '6px' }}>
-              <span>Saturation</span>
-              <span style={{ fontWeight: 700, color: '#ec4899' }}>{saturation > 0 ? `+${saturation}` : saturation}</span>
-            </div>
-            <input
-              type="range"
-              min={-50}
-              max={50}
-              value={saturation}
-              onChange={e => setSaturation(Number(e.target.value))}
-              style={{ width: '100%', accentColor: '#ec4899', cursor: 'pointer' }}
-            />
-          </div>
-
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'rgba(255,255,255,0.7)', marginBottom: '6px' }}>
-              <span>Hue</span>
-              <span style={{ fontWeight: 700, color: '#ec4899' }}>{hue}°</span>
-            </div>
-            <input
-              type="range"
-              min={-180}
-              max={180}
-              value={hue}
-              onChange={e => setHue(Number(e.target.value))}
-              style={{ width: '100%', accentColor: '#ec4899', cursor: 'pointer' }}
-            />
-          </div>
-
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div className="pro-row" style={{ gap: 6 }}>
             <button
               type="button"
-              onClick={resetAll}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                padding: '6px 12px',
-                borderRadius: '6px',
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                color: '#cbd5e1',
-                fontSize: '11px',
-                cursor: 'pointer'
-              }}
+              className={`pw-btn pw-btn--quiet${compare ? ' pw-btn--on' : ''}`}
+              aria-pressed={compare}
+              onMouseDown={() => setCompare(true)}
+              onMouseUp={() => setCompare(false)}
+              onMouseLeave={() => setCompare(false)}
+              title="Hold to view the ungraded source"
             >
-              <RotateCcw size={12} /> Reset All Effects
+              {compare ? 'ORIGINAL' : 'Hold to Compare'}
             </button>
           </div>
         </div>
 
-        {/* Footer */}
-        <div style={{
-          padding: '14px 20px',
-          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          background: 'rgba(0, 0, 0, 0.2)'
-        }}>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              padding: '7px 16px',
-              borderRadius: '8px',
-              background: 'rgba(255,255,255,0.06)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              color: '#fff',
-              fontSize: '12px',
-              cursor: 'pointer'
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              onApply({ brightness, contrast, saturation, hue });
-              onClose();
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '7px 20px',
-              borderRadius: '8px',
-              background: 'linear-gradient(135deg, #db2777, #ec4899)',
-              border: 'none',
-              color: '#fff',
-              fontWeight: 700,
-              fontSize: '12px',
-              cursor: 'pointer',
-              boxShadow: '0 4px 15px rgba(236, 72, 153, 0.35)'
-            }}
-          >
-            <Check size={14} /> Apply Effects
-          </button>
+        <MediaToolPreview
+          fileName={fileName}
+          streamingPort={streamingPort}
+          note={compare ? 'Source · ungraded' : 'Approximate filter preview'}
+          imageStyle={{ filter }}
+          style={{ minHeight: 260, maxHeight: 340 }}
+          overlay={
+            <span className="pro-canvas__chip pro-canvas__chip--br">
+              {compare ? 'BYPASS' : `${totalChange === 0 ? 'NO ADJUSTMENT' : `${totalChange} TOTAL DELTA`}`}
+            </span>
+          }
+        />
+      </section>
+
+      {/* ── Presets ── */}
+      <ProPanel
+        title="Presets & Creative Looks"
+        icon={<Wand2 size={15} />}
+        action={<span className="pw-badge">LOOK LIBRARY</span>}
+      >
+        <div className="pw-tile-grid pw-tile-grid--3">
+          {PRESETS.map(preset => {
+            const selected =
+              brightness === preset.values[0] &&
+              contrast === preset.values[1] &&
+              saturation === preset.values[2] &&
+              hue === preset.values[3];
+            return (
+              <button
+                key={preset.name}
+                type="button"
+                className="pw-tile"
+                aria-pressed={selected}
+                onClick={() => {
+                  setBrightness(preset.values[0]);
+                  setContrast(preset.values[1]);
+                  setSaturation(preset.values[2]);
+                  setHue(preset.values[3]);
+                }}
+              >
+                {preset.name}
+                <span className="pw-data" style={{ fontSize: 9 }}>{preset.blurb}</span>
+              </button>
+            );
+          })}
         </div>
-      </div>
+      </ProPanel>
+
+
+      <ProInspector>
+    {/* ── Inspector ── */}
+    <ProPanel
+      title="Color Balance"
+      icon={<SlidersHorizontal size={15} />}
+      action={<span className="pw-badge pw-badge--flat">eq FILTER</span>}
+    >
+      <ProSlider
+        label="Brightness"
+        readout={<span className="pw-data" style={{ color: ACCENT }}>{signed(brightness)}</span>}
+        value={brightness}
+        min={-50}
+        max={50}
+        onChange={setBrightness}
+        scale={['-50', '0', '+50']}
+      />
+      <ProSlider
+        label="Contrast"
+        readout={<span className="pw-data" style={{ color: ACCENT }}>{signed(contrast)}</span>}
+        value={contrast}
+        min={-50}
+        max={50}
+        onChange={setContrast}
+        scale={['-50', '0', '+50']}
+      />
+      <ProSlider
+        label="Saturation"
+        readout={<span className="pw-data" style={{ color: ACCENT }}>{signed(saturation)}</span>}
+        value={saturation}
+        min={-50}
+        max={50}
+        onChange={setSaturation}
+        scale={['-50', '0', '+50']}
+      />
+      <ProSlider
+        label="Hue rotation"
+        readout={<span className="pw-data" style={{ color: ACCENT }}>{hue}°</span>}
+        value={hue}
+        min={-180}
+        max={180}
+        step={1}
+        onChange={setHue}
+        scale={['-180°', '0°', '+180°']}
+      />
+    </ProPanel>
+
+    <div className="pro-stat-row pro-stat-row--3">
+      <ProStat label="Active look" value={activePreset ? activePreset.name : 'Custom grade'} icon={<Sparkles size={16} />} />
+      <ProStat label="Look source" value={activePreset ? 'Preset' : 'Manual'} icon={<Wand2 size={16} />} tone="alt" />
+      <ProStat label="Total delta" value={String(totalChange)} icon={<SlidersHorizontal size={16} />} tone="hot" />
     </div>
+    
+      </ProInspector>
+
+      <ProTimeline>
+        <section className="pro-timeline">
+          <div className="pro-timeline__head">
+            <div className="pro-panel__title">
+              <Sparkles size={15} />
+              <span>Grade Timeline</span>
+            </div>
+            <span className="pw-badge pw-badge--flat">FILTERS APPLY ACROSS EVERY FRAME</span>
+          </div>
+          <div className="pro-timeline__tracks">
+            <div className="pro-tracklane">
+              <span className="pro-tracklane__label">V1</span>
+              <div className="pro-tracklane__body">
+                                <Filmstrip
+                  fileName={fileName}
+                  streamingPort={streamingPort}
+                  duration={duration}
+                  frames={12}
+                  cellStyle={{ filter: `brightness(${1 + brightness / 100}) contrast(${1 + contrast / 100}) saturate(${1 + saturation / 100}) hue-rotate(${hue}deg)` }}
+                />
+              </div>
+            </div>
+            <div className="pro-tracklane">
+              <span className="pro-tracklane__label">EQ</span>
+              <div className="pro-tracklane__body" style={{ padding: '9px 12px', minHeight: 46 }}>
+                <ProSlider
+                  label="Saturation sweep across the clip"
+                  readout={<span className="pw-data" style={{ color: ACCENT }}>{saturation > 0 ? `+${saturation}` : saturation}</span>}
+                  value={saturation}
+                  min={-50}
+                  max={50}
+                  onChange={setSaturation}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="pro-timeline__status">
+            <span>BRIGHT {brightness > 0 ? `+${brightness}` : brightness}</span>
+            <span>·</span>
+            <span>CONTRAST {contrast > 0 ? `+${contrast}` : contrast}</span>
+            <span>·</span>
+            <span>HUE {hue}°</span>
+            <span className="pro-timeline__accel">
+              <i className="pw-badge__dot" /> eq FILTER CHAIN
+            </span>
+          </div>
+        </section>
+      </ProTimeline>
+
+    </ProToolShell>
   );
 };

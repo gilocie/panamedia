@@ -9,8 +9,13 @@ export * from './ConverterBottomDock';
 export * from './FormatSettingsModal';
 
 // Features
+export * from './features/ProToolShell';
+export * from './features/MediaToolPreview';
+export * from './features/Filmstrip';
+export * from './features/useTimelineDrag';
 export * from './features/CutTrimTool';
 export * from './features/CropTool';
+export * from './features/MirrorTool';
 export * from './features/SubtitleTool';
 export * from './features/EffectTool';
 export * from './features/RotateTool';

@@ -1,21 +1,54 @@
+import { Filmstrip } from './Filmstrip';
 import React, { useState } from 'react';
-import { MessageSquare, X, Check, Upload } from 'lucide-react';
+import { Check, Languages, MessageSquare, RefreshCw, Type, Upload } from 'lucide-react';
 import { electron } from '../../panamedia/types';
+import { MediaToolPreview } from './MediaToolPreview';
+import {
+  ProInspector,
+  ProPanel,
+  ProSlider,
+  ProStat,
+  ProSwitch,
+  ProTimeline,
+  ProToolShell,
+  ProTrack
+} from './ProToolShell';
 
 interface SubtitleToolProps {
   fileName: string;
+  streamingPort?: number;
+  /** Clip length, used to spread the timeline filmstrip across the clip. */
+  duration?: number;
   onApply: (subSettings: { subPath: string; burnIn: boolean; encoding: string }) => void;
   onClose: () => void;
 }
 
+const ACCENT = '#c084fc';
+
+const ENCODINGS = [
+  { id: 'UTF-8', label: 'UTF-8', hint: 'Universal' },
+  { id: 'UTF-16', label: 'UTF-16', hint: 'Wide char' },
+  { id: 'ISO-8859-1', label: 'ISO-8859-1', hint: 'Western EU' },
+  { id: 'Windows-1252', label: 'Windows-1252', hint: 'ANSI' }
+];
+
+const SUPPORTED = ['SRT', 'VTT', 'ASS', 'SSA', 'SUB'];
+
+/* Reference: convertor_pro_features_ui/subtitles_closed_captions/code.html
+   Left = caption preview over the frame + cue list ledger.
+   Right = import, render mode, typography & encoding. */
 export const SubtitleTool: React.FC<SubtitleToolProps> = ({
   fileName,
+  streamingPort,
+  duration = 0,
   onApply,
   onClose
 }) => {
   const [subPath, setSubPath] = useState<string>('');
   const [burnIn, setBurnIn] = useState<boolean>(true);
   const [encoding, setEncoding] = useState<string>('UTF-8');
+  const [fontSize, setFontSize] = useState<number>(24);
+  const [marginV, setMarginV] = useState<number>(8);
 
   const handleBrowseSub = async () => {
     if (!electron) return;
@@ -32,230 +65,275 @@ export const SubtitleTool: React.FC<SubtitleToolProps> = ({
     }
   };
 
+  const reset = () => {
+    setBurnIn(true);
+    setEncoding('UTF-8');
+    setFontSize(24);
+    setMarginV(8);
+  };
+
+  const basename = (subPath.split(/[\\/]/).pop()) || '';
+  const ext = basename.includes('.') ? basename.split('.').pop()!.toUpperCase() : '';
+  const isReady = Boolean(subPath) && Boolean(basename);
+
   return (
-    <div 
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 100,
-        background: 'rgba(0, 0, 0, 0.82)',
-        backdropFilter: 'blur(8px)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '20px'
+    <ProToolShell
+      title="Subtitle & Closed Caption Studio"
+      subtitle={fileName}
+      icon={<MessageSquare size={18} />}
+      accent={ACCENT}
+      badges={
+        <>
+          <span className="pw-badge">
+            <i className="pw-badge__dot" /> {burnIn ? 'BURN-IN' : 'EMBEDDED TRACK'}
+          </span>
+          <span className="pw-badge pw-badge--flat">{encoding}</span>
+        </>
+      }
+      onClose={onClose}
+      footerLeft={
+        <>
+          <button type="button" className="pw-btn" onClick={reset}>
+            <RefreshCw size={13} /> Reset to Default
+          </button>
+          <button type="button" className="pw-btn" onClick={onClose}>
+            Discard
+          </button>
+        </>
+      }
+      footerMeta={
+        <>
+          <span className="pw-eyebrow">{basename || 'No cue file selected'}</span>
+          <span className="pw-data" style={{ color: ACCENT }}>
+            {burnIn ? 'Hardcoded into pixels' : 'Muxed as a soft subtitle track'}
+          </span>
+        </>
+      }
+      footerActionLabel="Apply to Conversion Pipeline"
+      footerActionIcon={<Check size={14} />}
+      applyDisabled={!isReady}
+      onApply={() => {
+        onApply({ subPath, burnIn, encoding });
+        onClose();
       }}
-      onClick={onClose}
     >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          width: '540px',
-          maxWidth: '96vw',
-          background: 'linear-gradient(180deg, #161828 0%, #0d0e18 100%)',
-          border: '1px solid rgba(192, 132, 252, 0.4)',
-          borderRadius: '16px',
-          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.9), 0 0 35px rgba(192, 132, 252, 0.25)',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden'
-        }}
-      >
-        {/* Header */}
-        <div style={{
-          padding: '16px 20px',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          background: 'rgba(255, 255, 255, 0.02)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '8px',
-              background: 'linear-gradient(135deg, #9333ea, #c084fc)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff'
-            }}>
-              <MessageSquare size={18} />
-            </div>
-            <div>
-              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#fff' }}>
-                Embed / Burn Subtitles
-              </h3>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                {fileName.split(/[\\/]/).pop()}
-              </div>
-            </div>
+      {/* ── Caption preview canvas ── */}
+      <section className="pro-panel pro-panel--canvas">
+        <div className="pro-panel__head">
+          <div className="pro-panel__title">
+            <Languages size={16} />
+            <span>Caption Preview</span>
           </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              width: '28px',
-              height: '28px',
-              borderRadius: '50%',
-              background: 'rgba(255, 255, 255, 0.06)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              color: 'rgba(255, 255, 255, 0.7)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer'
-            }}
-          >
-            <X size={14} />
-          </button>
-        </div>
-
-        {/* Content */}
-        <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-          <div>
-            <div style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(255, 255, 255, 0.6)', textTransform: 'uppercase', marginBottom: '8px' }}>
-              Subtitle File (.srt, .vtt, .ass)
-            </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <input
-                type="text"
-                placeholder="Choose .srt or .vtt subtitle file..."
-                value={subPath}
-                onChange={e => setSubPath(e.target.value)}
-                style={{
-                  flex: 1,
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.12)',
-                  borderRadius: '8px',
-                  padding: '8px 12px',
-                  fontSize: '12px',
-                  color: '#fff',
-                  outline: 'none'
-                }}
-              />
-              <button
-                type="button"
-                onClick={handleBrowseSub}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '8px 14px',
-                  borderRadius: '8px',
-                  background: 'rgba(192, 132, 252, 0.2)',
-                  border: '1px solid rgba(192, 132, 252, 0.4)',
-                  color: '#e9d5ff',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  cursor: 'pointer'
-                }}
-              >
-                <Upload size={14} /> Browse
-              </button>
-            </div>
-          </div>
-
-          <div style={{
-            background: 'rgba(255, 255, 255, 0.03)',
-            borderRadius: '10px',
-            border: '1px solid rgba(255, 255, 255, 0.06)',
-            padding: '14px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px'
-          }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={burnIn}
-                onChange={e => setBurnIn(e.target.checked)}
-                style={{ accentColor: '#c084fc', width: '16px', height: '16px' }}
-              />
-              <div>
-                <div style={{ fontSize: '12px', fontWeight: 700, color: '#fff' }}>
-                  Hardcode / Burn Subtitles into Video Frame
-                </div>
-                <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>
-                  Guarantees subtitles display on all car players, old TVs, and mobile screens.
-                </div>
-              </div>
-            </label>
-
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-              <span style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.7)' }}>Character Encoding:</span>
-              <select
-                value={encoding}
-                onChange={e => setEncoding(e.target.value)}
-                style={{
-                  background: '#1a1b2d',
-                  border: '1px solid rgba(255,255,255,0.15)',
-                  color: '#fff',
-                  borderRadius: '6px',
-                  padding: '4px 8px',
-                  fontSize: '11px'
-                }}
-              >
-                <option value="UTF-8">UTF-8 (Universal)</option>
-                <option value="UTF-16">UTF-16</option>
-                <option value="ISO-8859-1">ISO-8859-1 (Western European)</option>
-                <option value="Windows-1252">Windows-1252 (ANSI)</option>
-              </select>
-            </div>
+          <div className="pro-row" style={{ gap: 6 }}>
+            <span className="pw-badge pw-badge--flat">{SUPPORTED.join(' · ')}</span>
           </div>
         </div>
 
-        {/* Footer */}
-        <div style={{
-          padding: '14px 20px',
-          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          background: 'rgba(0, 0, 0, 0.2)'
-        }}>
-          <button
-            type="button"
-            onClick={onClose}
+        <div style={{ position: 'relative' }}>
+          <MediaToolPreview
+            fileName={fileName}
+            streamingPort={streamingPort}
+            note="Caption framing preview"
+            style={{ minHeight: 260, maxHeight: 330 }}
+          />
+          {/* Stand-in caption, positioned/scaled by the typography controls so
+              the preview communicates what the burn-in will look like. */}
+          <div
+            aria-hidden="true"
             style={{
-              padding: '7px 16px',
-              borderRadius: '8px',
-              background: 'rgba(255,255,255,0.06)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              color: '#fff',
-              fontSize: '12px',
-              cursor: 'pointer'
+              position: 'absolute',
+              left: '8%',
+              right: '8%',
+              bottom: `${8 + marginV}%`,
+              textAlign: 'center',
+              pointerEvents: 'none'
             }}
           >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              onApply({ subPath, burnIn, encoding });
-              onClose();
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '7px 20px',
-              borderRadius: '8px',
-              background: 'linear-gradient(135deg, #9333ea, #c084fc)',
-              border: 'none',
-              color: '#fff',
-              fontWeight: 700,
-              fontSize: '12px',
-              cursor: 'pointer',
-              boxShadow: '0 4px 15px rgba(192, 132, 252, 0.35)'
-            }}
-          >
-            <Check size={14} /> Apply Subtitles
+            <span
+              style={{
+                display: 'inline-block',
+                maxWidth: '100%',
+                padding: '3px 10px',
+                borderRadius: 4,
+                color: '#fff',
+                background: 'rgba(0,0,0,0.55)',
+                fontSize: Math.max(9, Math.round((fontSize / 24) * 13)),
+                fontWeight: 600,
+                lineHeight: 1.35,
+                textShadow: '0 1px 3px #000'
+              }}
+            >
+              {isReady ? 'Subtitle cue preview line' : 'No subtitle file loaded'}
+            </span>
+          </div>
+        </div>
+
+        <div className="pro-transport">
+          <div className="pro-transport__readout">
+            <span style={{ color: ACCENT }}>{fontSize}px</span>
+            <small>CAPTION SIZE</small>
+          </div>
+          <ProTrack from={8} to={Math.max(12, 8 + marginV * 2)} slim />
+          <span className="pw-data" style={{ color: 'var(--pw-text-faint)' }}>SAFE AREA</span>
+        </div>
+      </section>
+
+
+      <ProInspector>
+    {/* ── Inspector ── */}
+    <ProPanel
+      title="Import Subtitle File"
+      icon={<Upload size={15} />}
+    >
+      <div className="pw-field">
+        <span className="pw-label">Cue file path</span>
+        <div className="pro-row" style={{ gap: 7 }}>
+          <input
+            className="pw-input"
+            type="text"
+            placeholder="Choose .srt or .vtt subtitle file…"
+            value={subPath}
+            onChange={e => setSubPath(e.target.value)}
+            aria-label="Subtitle file path"
+          />
+          <button type="button" className="pw-btn" onClick={handleBrowseSub} style={{ flexShrink: 0 }}>
+            <Upload size={13} /> Browse
           </button>
         </div>
       </div>
+      <div className="pro-row pro-row--wrap" style={{ gap: 5 }}>
+        {SUPPORTED.map(extName => (
+          <span key={extName} className="pw-badge pw-badge--flat">.{extName.toLowerCase()}</span>
+        ))}
+      </div>
+    </ProPanel>
+
+    <ProPanel
+      title="Typography & Rendering"
+      icon={<Type size={15} />}
+    >
+      <div className="pw-check" data-on={burnIn}>
+        <input
+          type="checkbox"
+          checked={burnIn}
+          onChange={e => setBurnIn(e.target.checked)}
+          aria-label="Burn subtitles into the picture"
+        />
+        <span className="pro-stack-tight">
+          <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--pw-text)' }}>
+            Hardcode / burn subtitles into the video frame
+          </span>
+          <span style={{ fontSize: 10.5, color: 'var(--pw-text-faint)', lineHeight: 1.45 }}>
+            Burned into the picture so they stay visible in players with no subtitle-track support.
+            Unchecked embeds a soft track instead.
+          </span>
+        </span>
+        <ProSwitch on={burnIn} onChange={setBurnIn} label="Burn in" />
+      </div>
+
+      <div className="pw-field">
+        <span className="pw-label">Character encoding</span>
+        <select
+          value={encoding}
+          onChange={e => setEncoding(e.target.value)}
+          aria-label="Character encoding"
+        >
+          {ENCODINGS.map(item => (
+            <option key={item.id} value={item.id}>{item.label} ({item.hint})</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="pw-field">
+        <div className="pw-field__top">
+          <span className="pw-label">Preview caption size</span>
+          <span className="pw-data" style={{ color: ACCENT }}>{fontSize}px</span>
+        </div>
+        <input
+          className="pw-slider"
+          type="range"
+          min={14}
+          max={40}
+          step={1}
+          value={fontSize}
+          onChange={e => setFontSize(Number(e.target.value))}
+          aria-label="Caption size"
+        />
+      </div>
+
+      <div className="pw-field">
+        <div className="pw-field__top">
+          <span className="pw-label">Preview bottom margin</span>
+          <span className="pw-data" style={{ color: ACCENT }}>{marginV}%</span>
+        </div>
+        <input
+          className="pw-slider"
+          type="range"
+          min={2}
+          max={24}
+          step={1}
+          value={marginV}
+          onChange={e => setMarginV(Number(e.target.value))}
+          aria-label="Caption bottom margin"
+        />
+      </div>
+    </ProPanel>
+
+    <div className="pro-stat-row pro-stat-row--2">
+      <ProStat label="Render mode" value={burnIn ? 'Burn-in' : 'Soft track'} icon={<Type size={16} />} />
+      <ProStat label="Cue format" value={ext || '—'} icon={<Languages size={16} />} tone="alt" />
     </div>
+    
+      </ProInspector>
+
+
+      <ProTimeline>
+        <section className="pro-timeline">
+          <div className="pro-timeline__head">
+            <div className="pro-panel__title">
+              <MessageSquare size={15} />
+              <span>Cue Timeline</span>
+            </div>
+            <div className="pro-row" style={{ gap: 8 }}>
+              <span className="pw-badge">{isReady ? 'LOADED' : 'EMPTY'}</span>
+              <span className="pw-badge pw-badge--flat">{encoding}</span>
+            </div>
+          </div>
+          <div className="pro-timeline__tracks">
+            <div className="pro-tracklane">
+              <span className="pro-tracklane__label">V1</span>
+              <div className="pro-tracklane__body">
+                <Filmstrip fileName={fileName} streamingPort={streamingPort} duration={duration} frames={12} />
+              </div>
+            </div>
+            <div className="pro-tracklane">
+              <span className="pro-tracklane__label">CC</span>
+              <div className="pro-tracklane__body" style={{ padding: '9px 12px', minHeight: 44 }}>
+                <ProSlider
+                  label="Preview caption size across the clip"
+                  readout={<span className="pw-data" style={{ color: ACCENT }}>{fontSize}px</span>}
+                  value={fontSize}
+                  min={14}
+                  max={40}
+                  step={1}
+                  onChange={setFontSize}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="pro-timeline__status">
+            <span>{basename || 'NO CUE FILE'}</span>
+            <span>·</span>
+            <span>{burnIn ? 'BURN-IN' : 'SOFT TRACK'}</span>
+            <span>·</span>
+            <span>MARGIN {marginV}%</span>
+            <span className="pro-timeline__accel">
+              <i className="pw-badge__dot" /> {SUPPORTED.length} CUE FORMATS
+            </span>
+          </div>
+        </section>
+      </ProTimeline>
+
+    </ProToolShell>
   );
 };

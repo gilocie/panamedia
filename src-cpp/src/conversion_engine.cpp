@@ -167,6 +167,30 @@ namespace Panamedia {
         return out;
     }
 
+    static std::pair<std::string, std::string> watermarkPosition(
+        const std::string& position, bool text) {
+        const std::string right = text ? "main_w-text_w-10" : "main_w-overlay_w-10";
+        const std::string bottom = text ? "main_h-text_h-10" : "main_h-overlay_h-10";
+        if (position == "top-left") return { "10", "10" };
+        if (position == "top-right") return { right, "10" };
+        if (position == "bottom-left") return { "10", bottom };
+        return { right, bottom };
+    }
+
+    static double normalizedOpacity(const json& watermark) {
+        double opacity = watermark.value("opacity", 80.0);
+        if (opacity > 1.0) opacity /= 100.0;
+        return std::max(0.0, std::min(1.0, opacity));
+    }
+
+    static bool hasImageWatermark(const json& tools) {
+        if (!tools.is_object() || !tools.contains("watermark") ||
+            !tools["watermark"].is_object()) return false;
+        const json& watermark = tools["watermark"];
+        return watermark.value("type", std::string("image")) == "image" &&
+               !watermark.value("imagePath", std::string()).empty();
+    }
+
 // Builds the ordered -vf filter chain from the tool settings.
 //
 // Order matters: geometry first (crop/scale), then orientation, then colour,
@@ -181,23 +205,27 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
         const json& c = tools["crop"];
         std::string ar = c.value("aspectRatio", std::string(""));
         double zoom = c.value("zoom", 1.0);
-        if (ar == "16:9") {
-            chain.push_back("scale=ih*16/9:ih");
-            chain.push_back("crop=iw:ih");
-        } else if (ar == "4:3") {
-            chain.push_back("scale=ih*4/3:ih");
-            chain.push_back("crop=iw:ih");
-        } else if (ar == "1:1") {
-            chain.push_back("scale='min(iw,ih)':'min(iw,ih)'");
-            chain.push_back("crop=iw:ih");
-        } else if (ar == "9:16") {
-            chain.push_back("scale=iw:'ih*9/16'");
-            chain.push_back("crop=iw:ih");
-        }
-        if (zoom > 1.001) {
-            // Zoom in around the centre.
-            chain.push_back("scale=iw*" + std::to_string(zoom) + ":ih*" + std::to_string(zoom));
-            chain.push_back("crop=iw/" + std::to_string(zoom) + ":ih/" + std::to_string(zoom));
+        if (zoom > 10.0) zoom /= 100.0;
+        zoom = std::max(1.0, std::min(4.0, zoom));
+        double targetRatio = 0.0;
+        if (ar == "16:9") targetRatio = 16.0 / 9.0;
+        else if (ar == "4:3") targetRatio = 4.0 / 3.0;
+        else if (ar == "1:1") targetRatio = 1.0;
+        else if (ar == "9:16") targetRatio = 9.0 / 16.0;
+
+        std::ostringstream zoomExpr;
+        zoomExpr << zoom;
+        const std::string z = zoomExpr.str();
+        if (targetRatio > 0.0) {
+            std::ostringstream ratioExpr;
+            ratioExpr << targetRatio;
+            const std::string ratio = ratioExpr.str();
+            chain.push_back("crop=w='min(iw,ih*" + ratio + ")/" + z +
+                            "':h='min(ih,iw/" + ratio + ")/" + z +
+                            "':x='(iw-ow)/2':y='(ih-oh)/2'");
+        } else if (zoom > 1.001) {
+            chain.push_back("crop=w='iw/" + z + "':h='ih/" + z +
+                            "':x='(iw-ow)/2':y='(ih-oh)/2'");
         }
     }
 
@@ -215,10 +243,13 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
     // Colour adjustments
     if (tools.contains("effect") && tools["effect"].is_object()) {
         const json& e = tools["effect"];
-        double b = e.value("brightness", 0.0);
-        double ct = e.value("contrast", 1.0);
-        double sa = e.value("saturation", 1.0);
-        double hu = e.value("hue", 0.0);
+        const auto percentage = [](double value) {
+            return std::max(-0.5, std::min(0.5, value / 100.0));
+        };
+        double b = percentage(e.value("brightness", 0.0));
+        double ct = 1.0 + percentage(e.value("contrast", 0.0));
+        double sa = 1.0 + percentage(e.value("saturation", 0.0));
+        double hu = std::max(-180.0, std::min(180.0, e.value("hue", 0.0)));
         auto num = [](double v) {
             std::ostringstream ss;
             ss << v;
@@ -241,35 +272,22 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
     if (tools.contains("watermark") && tools["watermark"].is_object()) {
         const json& w = tools["watermark"];
         std::string type = w.value("type", std::string("image"));
-        double opacity = w.value("opacity", 1.0);
+        double opacity = normalizedOpacity(w);
         std::string pos = w.value("position", std::string("bottom-right"));
-        std::string posExpr;
-        if (pos == "top-left") posExpr = "10:10";
-        else if (pos == "top-right") posExpr = "main_w-overlay_w-10:10";
-        else if (pos == "bottom-left") posExpr = "10:main_h-overlay_h-10";
-        else posExpr = "main_w-overlay_w-10:main_h-overlay_h-10";
 
-        if (type == "image") {
-            std::string img = w.value("imagePath", std::string());
-            if (!img.empty()) {
-                // Staged under a plain name for the same reason as
-                // subtitles: the movie filter reads a filename, and a
-                // real Windows path cannot be escaped reliably.
-                chain.push_back("movie=" + stagedFilterName(img, "logo") +
-                                ",scale=120:-1,format=rgba,colorchannelmixer=aa=" +
-                                std::to_string(opacity));
-                chain.push_back("overlay=" + posExpr);
-            }
-        } else {
+        if (type == "text") {
             std::string text = w.value("text", std::string());
             if (!text.empty()) {
                 std::string esc;
                 for (char ch : text) {
-                    if (ch == ':' || ch == '\\' || ch == '\'' || ch == '%') esc += '\\';
+                    if (ch == ':' || ch == '\\' || ch == '\'' || ch == '%' ||
+                        ch == ',' || ch == ';' || ch == '[' || ch == ']') esc += '\\';
                     esc += ch;
                 }
+                const auto coordinates = watermarkPosition(pos, true);
                 chain.push_back("drawtext=text='" + esc + "':fontcolor=white@" +
-                                std::to_string(opacity) + ":fontsize=36:x=" + posExpr);
+                                std::to_string(opacity) + ":fontsize=36:x=" +
+                                coordinates.first + ":y=" + coordinates.second);
             }
         }
     }
@@ -291,7 +309,13 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
         if (s.value("burnIn", false)) {
             std::string sp = s.value("subPath", std::string());
             if (!sp.empty()) {
-                chain.push_back("subtitles=" + stagedFilterName(sp, "sub"));
+                std::string subtitleFilter = "subtitles=" + stagedFilterName(sp, "sub");
+                std::string encoding = s.value("encoding", std::string("UTF-8"));
+                if (encoding == "UTF-16" || encoding == "ISO-8859-1" ||
+                    encoding == "Windows-1252") {
+                    subtitleFilter += ":charenc=" + encoding;
+                }
+                chain.push_back(subtitleFilter);
             }
         }
     }
@@ -397,6 +421,12 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
         if (!subTool.empty() && !subTool.value("burnIn", false)) {
             std::string sp = subTool.value("subPath", std::string());
             if (!sp.empty() && (format == "mp4" || format == "mov" || format == "mkv")) {
+                std::string encoding = subTool.value("encoding", std::string("UTF-8"));
+                if (encoding == "UTF-16" || encoding == "ISO-8859-1" ||
+                    encoding == "Windows-1252") {
+                    a.push_back("-sub_charenc");
+                    a.push_back(encoding);
+                }
                 a.push_back("-i");
                 a.push_back(ConversionSupport::longPathIfNeeded(sp));
                 softSub = true;
@@ -422,6 +452,22 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
         }
         a.push_back("-threads");
         a.push_back(std::to_string(threadBudget));
+        a.push_back("-filter_threads");
+        a.push_back(std::to_string(threadBudget));
+        a.push_back("-filter_complex_threads");
+        a.push_back(std::to_string(threadBudget));
+
+        const bool imageWatermark = hasImageWatermark(tools);
+        std::string vf;
+        if (mode != "extract_audio") {
+            if (bitrate == "1080p" || bitrate == "720p" || bitrate == "480p") {
+                int target = bitrate == "1080p" ? 1080 : (bitrate == "720p" ? 720 : 480);
+                vf = "scale=-2:'min(" + std::to_string(target) + ",ih)'";
+            }
+            std::string toolVf = buildFilterChain(tools, true);
+            if (!toolVf.empty()) vf = vf.empty() ? toolVf : (vf + "," + toolVf);
+            if (deinterlace) vf = vf.empty() ? "yadif" : ("yadif," + vf);
+        }
 
         if (mode == "extract_audio") {
             a.push_back("-vn");
@@ -454,11 +500,28 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
             if (fps < 1) fps = 1;
             if (fps > 60) fps = 60;
             if (width < 64) width = 64;
-            std::string fc = "fps=" + std::to_string(fps) +
-                             ",scale=" + std::to_string(width) + ":-1:flags=lanczos" +
-                             ",split[a][b];[a]palettegen[p];[b][p]paletteuse";
+            std::string fc = "[0:v]";
+            if (!vf.empty()) fc += vf + ",";
+            fc += "fps=" + std::to_string(fps) +
+                  ",scale=" + std::to_string(width) + ":-1:flags=lanczos[gifbase];";
+            std::string paletteInput = "[gifbase]";
+            if (imageWatermark) {
+                const json& watermark = tools["watermark"];
+                const auto position = watermarkPosition(
+                    watermark.value("position", std::string("bottom-right")), false);
+                fc += "movie=" + stagedFilterName(
+                          watermark.value("imagePath", std::string()), "logo") +
+                      ",scale=120:-1,format=rgba,colorchannelmixer=aa=" +
+                      std::to_string(normalizedOpacity(watermark)) +
+                      "[wm];[gifbase][wm]overlay=" + position.first + ":" +
+                      position.second + "[gifmarked];";
+                paletteInput = "[gifmarked]";
+            }
+            fc += paletteInput + "split[a][b];[a]palettegen[p];[b][p]paletteuse[gifout]";
             a.push_back("-filter_complex");
             a.push_back(fc);
+            a.push_back("-map");
+            a.push_back("[gifout]");
             a.push_back("-loop");
             a.push_back("0");
             // GIF carries no audio track.
@@ -533,19 +596,25 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
             // Resolution target from the quality selector. min()
             // against the source height means a smaller source is
             // never upscaled.
-            std::string vf;
-            if (bitrate == "1080p" || bitrate == "720p" || bitrate == "480p") {
-                int target = bitrate == "1080p" ? 1080 : (bitrate == "720p" ? 720 : 480);
-                vf = "scale=-2:'min(" + std::to_string(target) + ",ih)'";
+            // Image overlays require a two-input filter graph. Keep the
+            // ordinary filter path as -vf when no image logo was selected.
+            if (imageWatermark) {
+                const json& watermark = tools["watermark"];
+                const auto position = watermarkPosition(
+                    watermark.value("position", std::string("bottom-right")), false);
+                std::string base = vf.empty() ? "null" : vf;
+                std::string graph = "[0:v]" + base + "[base];movie=" +
+                    stagedFilterName(watermark.value("imagePath", std::string()), "logo") +
+                    ",scale=120:-1,format=rgba,colorchannelmixer=aa=" +
+                    std::to_string(normalizedOpacity(watermark)) +
+                    "[wm];[base][wm]overlay=" + position.first + ":" +
+                    position.second + "[vout]";
+                a.push_back("-filter_complex");
+                a.push_back(graph);
+            } else if (!vf.empty()) {
+                a.push_back("-vf");
+                a.push_back(vf);
             }
-            // Tool filters compose after the scale so crop and rotate
-            // operate on the sized frame; deinterlace runs first, on
-            // the original picture. Emitting a second -vf would make
-            // ffmpeg silently ignore the first.
-            std::string toolVf = buildFilterChain(tools, true);
-            if (!toolVf.empty()) vf = vf.empty() ? toolVf : (vf + "," + toolVf);
-            if (deinterlace) vf = vf.empty() ? "yadif" : ("yadif," + vf);
-            if (!vf.empty()) { a.push_back("-vf"); a.push_back(vf); }
 
             // Explicit stream mapping.
             //
@@ -555,8 +624,9 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
             // moment the user picks audio tracks, because a `-map` switches
             // off the automatic rules entirely. Getting this wrong is silent:
             // the file converts fine and the embedded subtitles are just gone.
-            if (softSub || hasAudioPick) {
-                a.push_back("-map"); a.push_back("0:v:0");
+            if (softSub || hasAudioPick || imageWatermark) {
+                a.push_back("-map");
+                a.push_back(imageWatermark ? "[vout]" : "0:v:0");
 
                 if (hasAudioPick) {
                     for (size_t k = 0; k < audioTrackIdx.size(); ++k) {
@@ -576,7 +646,7 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
                     // A second input carries the external subtitle file.
                     a.push_back("-map"); a.push_back("1:s:0?");
                     a.push_back("-c:s"); a.push_back(format == "mkv" ? "ass" : "mov_text");
-                } else if (hasAudioPick) {
+                } else if (hasAudioPick || imageWatermark) {
                     // No external subtitle, so the source's own have to be
                     // asked for by hand to keep the automatic behaviour.
                     a.push_back("-map"); a.push_back("0:s?");
@@ -808,8 +878,7 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
             const json& w = tools["watermark"];
             if (w.value("type", std::string("image")) == "image") {
                 std::string img = w.value("imagePath", std::string());
-                std::error_code ec;
-                if (!img.empty() && fs::exists(fs::u8path(img), ec)) logoSrc = img;
+                if (!img.empty()) logoSrc = img;
             }
         }
         if (subSrc.empty() && logoSrc.empty()) return "";
@@ -817,7 +886,9 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
 #ifdef _WIN32
         wchar_t localAppData[MAX_PATH + 1];
         ZeroMemory(localAppData, sizeof(localAppData));
-        if (!GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH)) return "";
+        if (!GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH)) {
+            return "Cannot locate the local staging folder for subtitles or watermark images";
+        }
 
         // The job id reaches this process from the renderer, so it is
         // reduced to characters that are always safe in a folder name.
@@ -856,8 +927,58 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
         job->stageDir = root.u8string();
         return "";
 #else
-        return "";
+        return "Subtitle and watermark staging is only available on Windows";
 #endif
+    }
+
+    static std::string validateJobOptions(const std::string& optionsJson) {
+        json opts;
+        try {
+            opts = json::parse(optionsJson.empty() ? "{}" : optionsJson);
+        } catch (...) {
+            return "Invalid conversion options";
+        }
+
+        const std::string mode = opts.value("mode", std::string("extract_audio"));
+        std::string format = opts.value(
+            "format", mode == "extract_audio" ? "mp3" : "mp4");
+        std::transform(format.begin(), format.end(), format.begin(),
+            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        const json tools = opts.contains("tools") && opts["tools"].is_object()
+            ? opts["tools"] : json::object();
+
+        if (mode == "extract_audio") {
+            static const char* videoOnlyTools[] = {
+                "crop", "effect", "rotate", "watermark", "subtitle",
+                "compress", "gif"
+            };
+            for (const char* name : videoOnlyTools) {
+                if (tools.contains(name)) {
+                    return std::string("The ") + name +
+                        " tool applies to video, not audio extraction.";
+                }
+            }
+            if (tools.contains("denoise") && tools["denoise"].is_object() &&
+                tools["denoise"].value("videoDenoise", false)) {
+                return "Video denoise cannot be applied during audio extraction.";
+            }
+        }
+
+        if (tools.contains("gif") && mode != "extract_audio" && format != "gif") {
+            return "GIF creation requires GIF as the output format.";
+        }
+
+        if (tools.contains("subtitle") && tools["subtitle"].is_object()) {
+            const json& subtitle = tools["subtitle"];
+            const std::string subPath = subtitle.value("subPath", std::string());
+            const bool burnIn = subtitle.value("burnIn", false);
+            if (!subPath.empty() && !burnIn &&
+                format != "mp4" && format != "mov" && format != "mkv") {
+                return "Soft subtitle tracks require MP4, MOV, or MKV output. Choose burn-in or a supported format.";
+            }
+        }
+
+        return "";
     }
 
     static void cleanupFilterStaging(const std::shared_ptr<Job>& job) {
@@ -873,6 +994,12 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
         std::error_code ec;
         if (job->inputPath.empty() || !fs::exists(job->inputPath, ec)) {
             finalizeJob(job, "failed", 0.0, "Source file does not exist: " + job->inputPath);
+            return;
+        }
+
+        if (std::string optionsError = validateJobOptions(job->optionsJson);
+            !optionsError.empty()) {
+            finalizeJob(job, "failed", 0.0, optionsError);
             return;
         }
 

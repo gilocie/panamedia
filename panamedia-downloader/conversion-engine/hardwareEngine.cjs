@@ -462,6 +462,15 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
 async function executeOptimizedConversion(inputPath, outputPath, options = {}, onProgress = () => {}) {
   const viaCore = await executeOptimizedConversionViaCore(inputPath, outputPath, options, onProgress);
   if (viaCore) return viaCore;
+  const tools = options && options.tools;
+  const unsupportedTools = tools && typeof tools === 'object'
+    ? Object.keys(tools).filter((name) => name !== 'cut')
+    : [];
+  if (unsupportedTools.length > 0) {
+    throw new Error(
+      `The native C++ conversion engine is unavailable; these edits were not applied: ${unsupportedTools.join(', ')}.`
+    );
+  }
   console.log('[Engine] C++ conversion unavailable, using Node fallback:', inputPath);
   return executeOptimizedConversionLocal(inputPath, outputPath, options, onProgress);
 }
