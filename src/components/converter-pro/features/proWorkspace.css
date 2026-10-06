@@ -319,6 +319,15 @@
 
 .pro-tab--active svg { color: var(--tab-accent); }
 
+/* Right-side action slot in the tab strip (Apply button) */
+.pro-tabs__action {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  flex-shrink: 0;
+}
+
 /* ─── 1d. Legacy dialog tokens (kept so nothing else regresses) ────── */
 
 .converter-feature-dialog {
@@ -440,8 +449,8 @@
 .pro-monitor {
   width: 100%;
   aspect-ratio: 16 / 9;
-  flex: 1 1 auto;
-  max-height: none;
+  /* No flex:1 — let aspect-ratio drive the height naturally so the video
+     stays proportional and doesn't overflow its canvas column. */
   border: 1px solid var(--pw-line);
   border-radius: 8px;
   overflow: hidden;
@@ -1159,6 +1168,10 @@ body.is-timeline-dragging {
 
 .pw-tile-grid--3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pw-tile-grid--4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .pw-tile-grid--5 {

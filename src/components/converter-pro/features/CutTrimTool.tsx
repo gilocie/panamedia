@@ -1,13 +1,12 @@
 import React, { useRef, useState } from "react";
 import {
-  Check,
-  FastForward,
-  Pause,
-  Play,
-  RefreshCw,
   Scissors,
   SkipBack,
   SkipForward,
+  FastForward,
+  Pause,
+  Play,
+  Check,
   Timer,
   Volume2
 } from "lucide-react";
@@ -224,22 +223,6 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
         </>
       }
       onClose={onClose}
-      footerLeft={
-        <>
-          <button type="button" className="pw-btn" onClick={resetRange}>
-            <RefreshCw size={13} /> Reset to Default
-          </button>
-          <button type="button" className="pw-btn" onClick={onClose}>
-            Discard
-          </button>
-        </>
-      }
-      footerMeta={
-        <>
-          <span className="pw-eyebrow">Keeps {formatTrimTime(clipDuration)} of {formatTrimTime(usableDuration)}</span>
-          <span className="pw-data" style={{ color: ACCENT }}>{selectionPct}% of source retained</span>
-        </>
-      }
       footerActionLabel="Apply to Conversion Pipeline"
       footerActionIcon={<Check size={14} />}
       applyDisabled={clipDuration <= 0}
@@ -469,9 +452,8 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
       <ProPanel
         title="Quick Presets"
         icon={<Scissors size={13} />}
-        action={<button type="button" className="pw-btn pw-btn--quiet" onClick={resetRange} style={{ fontSize: 9 }}>Reset Selection</button>}
       >
-        <div className="pw-tile-grid pw-tile-grid--3">
+        <div className="pw-tile-grid pw-tile-grid--4">
           <button type="button" className="pw-tile" onClick={() => applyPreset('first30')} disabled={usableDuration <= 0} style={{ padding: '5px 4px' }}>
             First 30s
           </button>
@@ -480,6 +462,9 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
           </button>
           <button type="button" className="pw-tile" onClick={() => applyPreset('middle')} disabled={usableDuration <= 0} style={{ padding: '5px 4px' }}>
             Clip Middle
+          </button>
+          <button type="button" className="pw-tile pw-tile--reset" onClick={resetRange} style={{ padding: '5px 4px' }}>
+            Reset
           </button>
         </div>
       </ProPanel>

@@ -985,7 +985,7 @@ export function SendConvertPreparationModal({
       {/* ─── 1. TOP TITLEBAR (Converter Header with Window Controls) ─── */}
       <ConverterHeader
         queueCount={localQueue.length}
-        showDone={activeMainTab === 'convert' && localQueue.length > 0}
+        showDone={activeMainTab === 'convert' && localQueue.length > 0 && !(activeTool && TOOL_STUDIO_IDS.includes(activeTool.id))}
         isExpanded={isExpanded}
         useHwAccel={useHwAccel}
         onToggleExpand={handleToggleExpand}
