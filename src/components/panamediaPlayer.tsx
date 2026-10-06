@@ -182,6 +182,8 @@ function tn({ filePath: e, title: t }) {
   let [y, b] = (0, _.useState)(!1),
     [x, S] = (0, _.useState)(!1),
     [C, w] = (0, _.useState)(0),
+    [restoreSeq, setRestoreSeq] = (0, _.useState)(0),
+    pendingRestoreRef = (0, _.useRef)<{ targetTime: number; shouldResume: boolean } | null>(null),
     [T, ee] = (0, _.useState)(
       () => e || localStorage.getItem(`player_lastPlayedPath`) || ``,
     ),
@@ -233,16 +235,22 @@ function tn({ filePath: e, title: t }) {
         K.ipcRenderer
           .invoke(`check-media-info`, T)
           .then((_raw) => {
-            const t = _raw as { success?: boolean; duration?: number; needsTranscode?: boolean } | null;
-            e &&
-              (t && t.success
-                ? (ne({
-                    checking: !1,
-                    duration: t.duration || 0,
-                    needsTranscode: !!(t.needsTranscode || A(T)),
-                  }),
-                  t.duration && t.duration > 0 && a(t.duration))
-                : ne({ checking: !1, duration: 0, needsTranscode: A(T) }));
+            const t = _raw as { success?: boolean; duration?: number; needsTranscode?: boolean; error?: string } | null;
+            if (!e) return;
+            if (t && t.success) {
+              ne({
+                checking: !1,
+                duration: t.duration || 0,
+                needsTranscode: !!(t.needsTranscode || A(T)),
+              });
+              t.duration && t.duration > 0 && a(t.duration);
+            } else {
+              ne({ checking: !1, duration: 0, needsTranscode: A(T) });
+              // Store missing-file status so a later effect can act on it
+              if (t?.error === 'File not found') {
+                localStorage.setItem('player_pendingAutoRemove', T);
+              }
+            }
           })
           .catch(() => {
             e && ne({ checking: !1, duration: 0, needsTranscode: A(T) });
@@ -260,6 +268,22 @@ function tn({ filePath: e, title: t }) {
       return () => clearTimeout(e);
     }, [T, y, te.needsTranscode, M]));
   let ie = (0, _.useRef)(!0);
+  (0, _.useEffect)(() => {
+    if (e && e !== T) {
+      ee(e);
+      if (t) D(t);
+      a(0);
+      s(0);
+      b(!1);
+      setTimeout(() => {
+        if (q.current) {
+          q.current.currentTime = 0;
+          q.current.load();
+          q.current.play().catch(() => {});
+        }
+      }, 50);
+    }
+  }, [e, t]);
   (0, _.useEffect)(() => {
     T &&
       (localStorage.setItem(`player_lastPlayedPath`, T),
@@ -593,18 +617,29 @@ function tn({ filePath: e, title: t }) {
     Bt = _.useRef<HTMLCanvasElement | null>(null),
     Vt = _.useRef<any>(null),
     Ht = _.useRef<any>(null),
-    [Ut, qt] = (0, _.useState)(52321);
+    [Ut, qt] = (0, _.useState)(52322);
   (0, _.useEffect)(() => {
-    K &&
-      K.ipcRenderer.invoke(`get-streaming-port`).then((e) => {
-        e && qt(e as number);
-      });
+    if (!K) return;
+    // Fetch the port on mount — always returns 52322 default now so the
+    // streaming URL is never empty on first render.
+    K.ipcRenderer.invoke(`get-streaming-port`).then((e: number) => {
+      if (e && typeof e === 'number') qt(e);
+    });
+    // When the C++ engine confirms its actual listening port, update immediately
+    // so the media URL rebuilds and the video element gets a valid src.
+    const onPortReady = (_evt: any, port: number) => {
+      if (port && typeof port === 'number') qt(port);
+    };
+    K.ipcRenderer.on('streaming-port-ready', onPortReady);
+    return () => {
+      K?.ipcRenderer.removeListener('streaming-port-ready', onPortReady);
+    };
   }, []);
   let Jt =
       T && !St
         ? y || re
-          ? `http://localhost:${Ut}/transcode?path=${encodeURIComponent(T)}&start=${F}&quality=${Be}`
-          : `http://localhost:${Ut}/stream?path=${encodeURIComponent(T)}`
+          ? `http://127.0.0.1:${Ut}/transcode?path=${encodeURIComponent(T)}&start=${F}&quality=${Be}${restoreSeq ? `&_r=${restoreSeq}` : ``}`
+          : `http://127.0.0.1:${Ut}/stream?path=${encodeURIComponent(T)}${restoreSeq ? `&_r=${restoreSeq}` : ``}`
         : ``,
     [Yt, Xt] = (0, _.useState)<{ hasError?: boolean; message?: string; filePath?: string } | null>(null);
   (0, _.useEffect)(() => {
@@ -667,7 +702,7 @@ function tn({ filePath: e, title: t }) {
           display: `block`,
         },
     rn = T
-      ? `http://localhost:${Ut}/thumbnail?path=${encodeURIComponent(T)}`
+      ? `http://127.0.0.1:${Ut}/thumbnail?path=${encodeURIComponent(T)}`
       : null,
     {
       eqFiltersRef: an,
@@ -697,6 +732,7 @@ function tn({ filePath: e, title: t }) {
       playerSyncedDirs: hn,
       downloads: gn,
       handleSyncClick: _n,
+      removeMediaItem: removeMediaFromLibrary,
     } = Wt({
       currentPath: T,
       downloadDir: O,
@@ -907,6 +943,82 @@ function tn({ filePath: e, title: t }) {
       },
       [y, re, i],
     ),
+    restorePlayback = (0, _.useCallback)(
+      (time: number, shouldResume: boolean, mediaData?: { filePath?: string; filename?: string }) => {
+        const video = q.current;
+        if (!video) return;
+
+        if (mediaData?.filePath && mediaData.filePath !== T) {
+          ee(mediaData.filePath);
+          if (mediaData.filename) D(mediaData.filename);
+        }
+
+        const duration = i > 0 ? i : Number.POSITIVE_INFINITY;
+        const targetTime = Math.max(0, Math.min(duration, time));
+        const usesTranscode = y || re;
+
+        s(targetTime);
+
+        if (usesTranscode) {
+          I(targetTime);
+          pendingRestoreRef.current = { targetTime, shouldResume };
+          setRestoreSeq((n) => n + 1);
+          setTimeout(() => {
+            if (q.current) {
+              q.current.load();
+              if (shouldResume) {
+                r(!0);
+                q.current.play().catch(() => {});
+              }
+            }
+          }, 40);
+          return;
+        }
+
+        // For direct streams: keep the existing stream connection intact!
+        // Resume any suspended AudioContext first
+        const ctx = (window as any).__panaAudioContext;
+        if (ctx && ctx.state === 'suspended') {
+          ctx.resume().catch(() => {});
+        }
+
+        const applyDirectResume = () => {
+          if (!q.current) return;
+          try {
+            if (Number.isFinite(targetTime) && targetTime >= 0) {
+              if (Math.abs(q.current.currentTime - targetTime) > 0.3) {
+                q.current.currentTime = targetTime;
+              }
+            }
+          } catch (e) {}
+
+          if (shouldResume) {
+            r(!0);
+            const playPromise = q.current.play();
+            if (playPromise !== undefined) {
+              playPromise.catch(() => {
+                if (q.current) {
+                  q.current.play().catch(() => {});
+                }
+              });
+            }
+          }
+        };
+
+        if (video.readyState >= 1) {
+          applyDirectResume();
+        } else {
+          const onCanPlay = () => {
+            video.removeEventListener('canplay', onCanPlay);
+            applyDirectResume();
+          };
+          video.addEventListener('canplay', onCanPlay, { once: true });
+          try { video.load(); } catch (e) {}
+          setTimeout(applyDirectResume, 350);
+        }
+      },
+      [y, re, i],
+    ),
     Cn = (0, _.useCallback)(() => {
       if (!q.current?.error || q.current?.seeking) {
         return;
@@ -1099,22 +1211,11 @@ function tn({ filePath: e, title: t }) {
     handleRemoveMissingMedia = (targetPath: string) => {
       if (!targetPath) return;
       const norm = targetPath.toLowerCase().replace(/[\\/]/g, '/');
-      try {
-        const vRaw = localStorage.getItem('player_syncedVideos');
-        if (vRaw) {
-          const vList = JSON.parse(vRaw);
-          const newVList = vList.filter((item: any) => (item?.path || item).toLowerCase().replace(/[\\/]/g, '/') !== norm);
-          localStorage.setItem('player_syncedVideos', JSON.stringify(newVList));
-        }
-      } catch (e) {}
-      try {
-        const aRaw = localStorage.getItem('player_syncedAudios');
-        if (aRaw) {
-          const aList = JSON.parse(aRaw);
-          const newAList = aList.filter((item: any) => (item?.path || item).toLowerCase().replace(/[\\/]/g, '/') !== norm);
-          localStorage.setItem('player_syncedAudios', JSON.stringify(newAList));
-        }
-      } catch (e) {}
+
+      // Remove from React state via the hook (triggers re-render + localStorage via useEffect)
+      removeMediaFromLibrary(targetPath);
+
+      // Also clean up favourites & archive in-memory state
       try {
         const favRaw = localStorage.getItem('player_favourites');
         if (favRaw) {
@@ -1133,9 +1234,13 @@ function tn({ filePath: e, title: t }) {
           nt(newArcList);
         }
       } catch (e) {}
+
+      // Notify main process to remove from its index too
       if (K) {
         K.ipcRenderer.invoke('remove-media-path', targetPath).catch(() => {});
       }
+
+      // Dismiss error and advance to next track
       Xt(null);
       Dn();
     },
@@ -1346,6 +1451,62 @@ function tn({ filePath: e, title: t }) {
       );
     }, []),
     (0, _.useEffect)(() => {
+      const handleVisibility = () => {
+        if (document.visibilityState !== 'visible') return;
+        const video = q.current;
+        if (!video || !video.src) return;
+        // Resume playback if the video was playing when hidden
+        if (n && video.paused) {
+          video.play().catch(() => {});
+        }
+        // Resume any suspended AudioContext
+        const ctx = (window as any).__panaAudioContext;
+        if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+      };
+      document.addEventListener('visibilitychange', handleVisibility);
+      return () => document.removeEventListener('visibilitychange', handleVisibility);
+    }, [n]),
+    (0, _.useEffect)(() => {
+      if (!restoreSeq || !pendingRestoreRef.current) return;
+      const video = q.current;
+      if (!video) return;
+
+      let applied = false;
+      const applyRestore = () => {
+        if (applied) return;
+        applied = true;
+        const pending = pendingRestoreRef.current;
+        pendingRestoreRef.current = null;
+        if (!pending) return;
+
+        const { targetTime, shouldResume } = pending;
+        if (targetTime > 0) {
+          try {
+            video.currentTime = targetTime;
+          } catch (e) {}
+        }
+        if (shouldResume) {
+          r(!0);
+          video.play().catch(() => {});
+        }
+      };
+
+      video.addEventListener('canplay', applyRestore, { once: true });
+      video.addEventListener('loadeddata', applyRestore, { once: true });
+      video.addEventListener('playing', applyRestore, { once: true });
+
+      const timer = setTimeout(() => {
+        if (!applied) applyRestore();
+      }, 1500);
+
+      return () => {
+        video.removeEventListener('canplay', applyRestore);
+        video.removeEventListener('loadeddata', applyRestore);
+        video.removeEventListener('playing', applyRestore);
+        clearTimeout(timer);
+      };
+    }, [restoreSeq]),
+    (0, _.useEffect)(() => {
       if (`mediaSession` in navigator)
         try {
           ((navigator.mediaSession.metadata = new MediaMetadata({
@@ -1396,6 +1557,7 @@ function tn({ filePath: e, title: t }) {
       invertScroll: fe,
       isMediaLocked: St,
       wakeControls: zn,
+      restorePlayback,
     }),
     (0, _.useEffect)(() => {
       K &&
@@ -1438,6 +1600,43 @@ function tn({ filePath: e, title: t }) {
         K.ipcRenderer.removeListener('converter-open-request', onOpenReq);
       };
     }, [T, Ee]),
+
+    // ── Auto-remove missing files ────────────────────────────────────────────
+    // When check-media-info sets 'player_pendingAutoRemove' for the current path,
+    // this effect fires (after Dn and removeMediaFromLibrary are in scope) to
+    // silently purge the file and advance to the next track automatically.
+    (0, _.useEffect)(() => {
+      const pending = localStorage.getItem('player_pendingAutoRemove');
+      if (!pending || !T || pending.toLowerCase().replace(/[\\/]/g, '/') !== T.toLowerCase().replace(/[\\/]/g, '/')) return;
+
+      console.info(`[Player] Auto-removing missing file from library: ${T}`);
+      localStorage.removeItem('player_pendingAutoRemove');
+
+      // Notify main process (also cleans settings.syncedFolders if folder is gone)
+      if (K) K.ipcRenderer.invoke('remove-media-path', T).catch(() => {});
+
+      // Remove from React state via the hook (updates playlist immediately)
+      removeMediaFromLibrary(T);
+
+      // Clean favourites & archive localStorage lists
+      try {
+        const norm = T.toLowerCase().replace(/[\\/]/g, '/');
+        const favRaw = localStorage.getItem('player_favourites');
+        if (favRaw) {
+          const newFav = JSON.parse(favRaw).filter((p: string) => p.toLowerCase().replace(/[\\/]/g, '/') !== norm);
+          localStorage.setItem('player_favourites', JSON.stringify(newFav));
+        }
+        const arcRaw = localStorage.getItem('player_archive');
+        if (arcRaw) {
+          const newArc = JSON.parse(arcRaw).filter((p: string) => p.toLowerCase().replace(/[\\/]/g, '/') !== norm);
+          localStorage.setItem('player_archive', JSON.stringify(newArc));
+        }
+      } catch (_) {}
+
+      // Skip to next track after state settles
+      setTimeout(() => Dn(), 400);
+    }, [T, te, Dn, removeMediaFromLibrary]),
+
     (0, W.jsxs)(`div`, {
       onDragOver: Mn,
       onDrop: Nn,
@@ -1632,6 +1831,7 @@ function tn({ filePath: e, title: t }) {
                     (0, W.jsx)(Mt, {
                       currentPlaylist: vn,
                       currentPath: T,
+                      streamingPort: Ut,
                       playerSearch: We,
                       playerViewMode: Ke,
                       playerExpandedFolders: Je,

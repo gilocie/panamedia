@@ -8,20 +8,21 @@ process.on('unhandledRejection', (reason) => {
   console.error('[Panamedia Main Process unhandledRejection]:', reason);
 });
 
-// Disable hardware-accelerated video decoding and direct composition video overlays so video frames are decoded and composited cleanly.
-// This permanently fixes "SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox"
-// and "GetGpuDriverOverlayInfo: Failed to retrieve video device" which causes videos in <webview> to render as a pitch-black box.
-app.commandLine.appendSwitch('disable-accelerated-video-decode');
+// Avoid placing video frames on a separate DirectComposition overlay plane.
+// Keep GPU rendering and hardware video decoding enabled for player windows.
 app.commandLine.appendSwitch('disable-direct-composition-video-overlays');
-app.commandLine.appendSwitch('disable-features', 'DirectCompositionVideoOverlays,DirectCompositionLetterboxing,D3D11VideoDecoder,VaapiVideoDecoder,PlatformHEVCDecoderSupport,PreloadMediaEngagementData,AutoplayIgnoreWebAudio');
+app.commandLine.appendSwitch('disable-features', 'DirectCompositionVideoOverlays,DirectCompositionLetterboxing,PlatformHEVCDecoderSupport,PreloadMediaEngagementData,AutoplayIgnoreWebAudio');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
-app.commandLine.appendSwitch('ignore-certificate-errors');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+// Fix "Unable to create cache" error: set an explicit, writable cache directory
+// and cap its size to 256 MB so it doesn't grow unbounded on disk.
+app.commandLine.appendSwitch('disk-cache-size', String(256 * 1024 * 1024));
 
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 const isDev = !app.isPackaged;
 
 function cleanArgPath(arg) {
@@ -68,12 +69,6 @@ app.on('child-process-gone', (event, details) => {
   }
 });
 
-// Prevent SSL handshake failures (net_error -113) on third-party live media edge CDNs
-app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
-  event.preventDefault();
-  callback(true);
-});
-// ──────────────────────────────────────────────────────────────────────────────
 const http = require('http');
 const https = require('https');
 const os = require('os');
@@ -86,16 +81,18 @@ const {
   resumeInstall,
   getPlaylistInfo,
   getVideoFormats,
-  generateVideoThumbnail,
   binDir,
   ffmpegPath,
   ffprobePath,
-  resolveBinary
 } = require('./panamedia-downloader/youtube.cjs');
 const { initDownloadManager, cleanUpDownloadManager, getDownloadsList, removeDownloadByPath } = require('./panamedia-downloader/downloadManager.cjs');
 const { getUniversalWebFormats } = require('./panamedia-downloader/web-downloader/webExtractor.cjs');
 const { convertAndSendToDrive, convertMediaFile, togglePauseProcess } = require('./panamedia-downloader/mediaConverter.cjs');
 const coreClient = require('./electron/core-client.cjs');
+const {
+  canStreamCopy,
+  transcodeVideoArgs
+} = require('./electron/playback-support.cjs');
 require('./electron/output-mover.cjs').register();
 const {
   initPlayerManager,
@@ -118,9 +115,31 @@ function getAppUrl(queryString = '') {
   if (isDev) {
     return `http://localhost:5173${queryString ? '?' + queryString : ''}`;
   }
-  // In production, load from bundled dist/index.html
+  // In production, load from bundled dist/index.html using standard file URL
   const indexPath = path.join(__dirname, 'dist', 'index.html');
-  return `file://${indexPath}${queryString ? '?' + queryString : ''}`;
+  const fileUrl = pathToFileURL(indexPath);
+  if (queryString) {
+    fileUrl.search = queryString.startsWith('?') ? queryString.slice(1) : queryString;
+  }
+  return fileUrl.href;
+}
+
+function isTrustedAppUrl(candidateUrl) {
+  try {
+    const candidate = new URL(candidateUrl);
+    const appUrl = new URL(getAppUrl());
+    if (isDev) {
+      return candidate.protocol === 'http:' && candidate.origin === appUrl.origin;
+    }
+    if (candidate.protocol === 'file:') {
+      const cPath = decodeURIComponent(candidate.pathname).toLowerCase().replace(/\\/g, '/');
+      const aPath = decodeURIComponent(appUrl.pathname).toLowerCase().replace(/\\/g, '/');
+      return cPath === aPath || cPath.endsWith('/dist/index.html') || cPath.endsWith('/index.html');
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function getIconPath(filename) {
@@ -582,7 +601,16 @@ function initCoreResponseListener() {
 
         if (response.id === 'init_server' && parsedPayload && parsedPayload.port) {
           cppStreamingPort = parsedPayload.port;
+          useCppEngine = true;
           console.log(`[Node Bridge] C++ Core Engine streaming port: ${cppStreamingPort}`);
+          // Broadcast the confirmed port to all open windows so they can update
+          // their streaming URL immediately without waiting for a user action.
+          const allWins = require('electron').BrowserWindow.getAllWindows();
+          for (const w of allWins) {
+            if (!w.isDestroyed()) {
+              try { w.webContents.send('streaming-port-ready', cppStreamingPort); } catch (e) {}
+            }
+          }
         }
 
         // Events carry no `id`, so they never matched a pending request and were
@@ -731,650 +759,60 @@ function isMpegTsVideo(filePath, fileSize) {
   }
 }
 
-// Safely serve small image files using buffer read so file descriptors are released immediately and errors are handled
-function safeServeThumbnail(res, thumbPath) {
-  fs.readFile(thumbPath, (err, data) => {
-    if (err) {
-      if (!res.writableEnded && !res.destroyed) {
-        res.writeHead(err.code === 'ENOENT' ? 404 : 500);
-        res.end();
-      }
-      return;
-    }
-    if (!res.writableEnded && !res.destroyed) {
-      res.writeHead(200, {
-        'Content-Type': 'image/jpeg',
-        'Content-Length': data.length,
-        'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'public, max-age=86400'
-      });
-      res.end(data);
-    }
-  });
-}
-
-// Queue for thumbnail generation to prevent spawning dozens of concurrent FFmpeg processes (EMFILE prevention)
-const thumbQueue = [];
-let activeThumbWorkers = 0;
-const MAX_CONCURRENT_THUMBS = 2;
-
-function enqueueThumbnailTask(task) {
-  thumbQueue.push(task);
-  processThumbQueue();
-}
-
-function processThumbQueue() {
-  if (activeThumbWorkers >= MAX_CONCURRENT_THUMBS || thumbQueue.length === 0) return;
-  activeThumbWorkers++;
-  const task = thumbQueue.shift();
-  task(() => {
-    activeThumbWorkers--;
-    processThumbQueue();
-  });
-}
-
-const previewCache = new Map();
-
-// Strict security whitelist for local media streaming server (prevents path traversal & unauthorized file access)
-const ALLOWED_STREAM_EXTENSIONS = new Set([
-  '.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv', '.mpg', '.mpeg', '.mpeg4',
-  '.3gp', '.wmv', '.m4v', '.ts', '.net.ts', '.ogv', '.m2ts', '.vob',
-  '.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg', '.opus', '.wma', '.weba',
-  '.jpg', '.jpeg', '.png', '.webp', '.gif', '.srt', '.vtt', '.ass'
-]);
-
-function isPathSafeForStreaming(inputPath) {
-  if (!inputPath || typeof inputPath !== 'string') return null;
-  if (inputPath.indexOf('\0') !== -1) return null;
-  try {
-    const resolved = path.resolve(inputPath);
-    const lower = resolved.toLowerCase();
-    const isNetTs = lower.endsWith('.net.ts');
-    const ext = isNetTs ? '.net.ts' : path.extname(resolved).toLowerCase();
-
-    if (!ALLOWED_STREAM_EXTENSIONS.has(ext)) {
-      return null;
-    }
-
-    if (!fs.existsSync(resolved)) return null;
-    const stat = fs.statSync(resolved);
-    if (!stat.isFile()) return null;
-
-    return resolved;
-  } catch (e) {
-    return null;
-  }
-}
-
-// Start local HTTP server to receive downloads from browser extension native host
-function startLocalServer() {
+// The C++ core exclusively serves media; this Node server is only for the browser extension bridge.
+function startExtensionBridgeServer() {
   const server = http.createServer((req, res) => {
-    // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    
+
     if (req.method === 'OPTIONS') {
       res.writeHead(200);
       res.end();
       return;
     }
-    
+
     if (req.url === '/ping' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'ok' }));
-    } else if (req.url === '/add-download' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const downloadData = JSON.parse(body);
-          if (mainWindow) {
-            mainWindow.webContents.send('native-download-received', downloadData);
-            if (mainWindow.isMinimized()) mainWindow.restore();
-            mainWindow.show();
-            mainWindow.focus();
-          }
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ status: 'ok' }));
-        } catch (e) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Invalid JSON' }));
-        }
-      });
-    } else if (req.url.startsWith('/stream') && (req.method === 'GET' || req.method === 'HEAD')) {
-      const urlObj = new URL(req.url, 'http://127.0.0.1:52321');
-      const rawPath = urlObj.searchParams.get('path');
-      const filePath = isPathSafeForStreaming(rawPath);
-      if (!filePath) {
-        res.writeHead(403, { 'Content-Type': 'text/plain' });
-        res.end('Access Denied');
-        return;
-      }
-      
-      const stat = fs.statSync(filePath);
-      const fileSize = stat.size;
-      const range = req.headers.range;
-      
-      // Shared with the tests. No guessed 'video/mp4' default: a wrong
-      // container type makes the browser reject files it could otherwise play,
-      // and the failure points nowhere near the real cause.
-      const contentType = contentTypeForPath(filePath);
-      
-      const parsedRange = parseByteRange(range, fileSize);
+      return;
+    }
 
-      if (parsedRange.kind === 'unsatisfiable') {
-        // 416 with the real size is what lets the browser recover: it clamps
-        // the seek instead of treating the request as a network failure.
-        res.writeHead(416, {
-          'Content-Range': `bytes */${fileSize}`,
-          'Accept-Ranges': 'bytes',
-          'Content-Type': 'text/plain',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges'
-        });
-        res.end();
-      } else if (parsedRange.kind === 'range') {
-        const start = parsedRange.start;
-        const end = parsedRange.end;
-        const chunksize = (end - start) + 1;
-        const file = fs.createReadStream(filePath, { start, end });
-        const destroyFile = () => {
-          try { file.destroy(); } catch (e) {}
-        };
-        file.on('error', (err) => {
-          destroyFile();
-          if (!res.writableEnded && !res.destroyed) {
-            try { res.writeHead(500); res.end(); } catch (e) {}
-          }
-        });
-        req.on('close', destroyFile);
-        res.on('close', destroyFile);
-        
-        res.writeHead(206, {
-          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-          'Accept-Ranges': 'bytes',
-          'Content-Length': chunksize,
-          'Content-Type': contentType,
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Range',
-          'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges'
-        });
-        if (req.method === 'HEAD') { destroyFile(); res.end(); return; }
-        file.pipe(res);
-      } else {
-        const file = fs.createReadStream(filePath);
-        const destroyFile = () => {
-          try { file.destroy(); } catch (e) {}
-        };
-        file.on('error', (err) => {
-          destroyFile();
-          if (!res.writableEnded && !res.destroyed) {
-            try { res.writeHead(500); res.end(); } catch (e) {}
-          }
-        });
-        req.on('close', destroyFile);
-        res.on('close', destroyFile);
-
-        res.writeHead(200, {
-          'Content-Length': fileSize,
-          'Content-Type': contentType,
-          'Accept-Ranges': 'bytes',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Range',
-          'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges'
-        });
-        if (req.method === 'HEAD') { destroyFile(); res.end(); return; }
-        file.pipe(res);
-      }
-    } else if (req.url.startsWith('/transcode') && req.method === 'GET') {
-      const urlObj = new URL(req.url, 'http://127.0.0.1:52321');
-      const rawPath = urlObj.searchParams.get('path');
-      const filePath = isPathSafeForStreaming(rawPath);
-      const startSec = parseFloat(urlObj.searchParams.get('start') || '0');
-      const quality = urlObj.searchParams.get('quality') || '1080p';
-
-      if (!filePath) {
-        res.writeHead(403, { 'Content-Type': 'text/plain' });
-        res.end('Access Denied');
-        return;
-      }
-
-      const { execFile, spawn } = require('child_process');
-
-      const executeTranscode = (videoCodec, audioCodec, pixelFormat, width, height, hasAudio, sourceBitrate = 0) => {
-        const ext = path.extname(filePath).toLowerCase();
-        const isAudioExt = ['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.aac', '.opus', '.wma'].includes(ext);
-        const isVideoExt = !isAudioExt;
-
-        const args = [];
-        const isAudioOnly = isAudioExt || (!videoCodec && !isVideoExt);
-
-        const {
-  canStreamCopy,
-  transcodeVideoArgs,
-  contentTypeForPath,
-  parseByteRange
-} = require('./electron/playback-support.cjs');
-
-// Codecs Chromium decodes itself, so re-encoding them to H.264 buys nothing
-        // and costs a whole core per file. This used to be just h264/avc1, which
-        // meant every VP8, VP9 and AV1 file was re-encoded in full before
-        // playback -- a 2.5 hour VP9 video turned into minutes of libx264 work
-        // for a picture the browser could already display as-is.
-        // The rule itself lives in playback-support.cjs so it can be tested
-        // without booting Electron.
-
-        const baseName = filePath.substring(0, filePath.lastIndexOf('.'));
-        let subPath = '';
-        const subExtensions = ['.srt', '.ass', '.vtt'];
-        for (const ext of subExtensions) {
-          if (fs.existsSync(baseName + ext)) {
-            subPath = baseName + ext;
-            break;
-          }
-        }
-
-        const hasSidecarSubtitle = !!subPath;
-
-        // One rule, one implementation, shared with the tests.
-        const canDirectCopy = canStreamCopy({
-          videoCodec, audioCodec, pixelFormat,
-          width, height, quality,
-          hasSubtitle: hasSidecarSubtitle,
-          audioOnly: isAudioOnly
-        });
-
-        if (!isAudioOnly && !canDirectCopy) {
-          args.push('-hwaccel', 'auto');
-        }
-
-        if (startSec > 0) {
-          args.push('-ss', startSec.toString());
-        }
-
-        args.push(
-          '-analyzeduration', '3000000',
-          '-probesize', '2000000',
-          '-fflags', '+genpts+discardcorrupt+igndts',
-          '-err_detect', 'ignore_err',
-          '-i', filePath
-        );
-
-        if (!isAudioOnly) {
-          if (canDirectCopy) {
-            args.push('-c:v', 'copy');
-          } else {
-            const filters = [];
-            if (quality === '720p') {
-              if (width > 1280 || height > 720) {
-                filters.push("scale='min(1280,iw)':-2");
-              }
-            } else if (quality === '1080p') {
-              if (width > 1920 || height > 1080) {
-                filters.push("scale='min(1920,iw)':-2");
-              }
-            }
-
-            if (subPath) {
-              const escapedSubPath = subPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
-              filters.push(`subtitles='${escapedSubPath}'`);
-            }
-
-            if (filters.length > 0) {
-              args.push('-vf', filters.join(','));
-            }
-
-            // A real transcode. The bitrate ceiling comes from playback-support.cjs,
-            // sized from the source so the output never inflates the stream.
-            args.push('-err_detect', 'ignore_err', ...transcodeVideoArgs({ width, height, sourceBitrate }));
-          }
-        } else {
-          args.push('-vn');
-        }
-
-        if (hasAudio) {
-          if (canDirectCopy && audioCodec === 'aac') {
-            args.push('-c:a', 'copy', '-bsf:a', 'aac_adtstoasc');
-          } else {
-            args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2');
-          }
-        } else {
-          args.push('-an');
-        }
-
-        args.push(
-          '-avoid_negative_ts', 'make_zero',
-          '-f', 'mp4',
-          '-movflags', 'frag_keyframe+empty_moov+default_base_moof+omit_tfhd_offset',
-          'pipe:1'
-        );
-
-        res.writeHead(200, {
-          'Content-Type': 'video/mp4',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Range',
-          'Connection': 'close'
-        });
-
-        if (req.method === 'HEAD') {
-          res.end();
-          return;
-        }
-
-        const ffmpegProc = spawn(ffmpegPath, args);
-        ffmpegProc.stdout.pipe(res);
-
-        let killed = false;
-        const killFfmpeg = () => {
-          if (killed) return;
-          killed = true;
-          if (idleTimer) clearTimeout(idleTimer);
-          try { ffmpegProc.kill('SIGKILL'); } catch (e) {}
-        };
-
-        req.on('close', killFfmpeg);
-        res.on('close', killFfmpeg);
-        ffmpegProc.stdout.on('error', killFfmpeg);
-
-        ffmpegProc.on('error', (procErr) => {
-          console.error('[Node Transcode] ffmpeg process error:', procErr);
-          killFfmpeg();
-        });
-
-        // ffmpeg also has to die when nobody is reading but the socket is
-        // still open, which is exactly what a paused or backgrounded <video>
-        // looks like. Measured: a paused 1080p playback held an ffmpeg process
-        // at 0% CPU for over ten minutes, still carrying ~200 MB and 44
-        // threads, because the response never closed.
-        //
-        // This is an inactivity timer, not a pause handler, on purpose. Pausing
-        // legitimately leaves the connection open, and /transcode has no Range
-        // support -- so killing on pause would throw away the buffer and make
-        // resume re-transcode from that point. Waiting for the pipe to go quiet
-        // only fires when the client has genuinely stopped consuming.
-        const IDLE_KILL_MS = 45000;
-        let idleTimer = setTimeout(killFfmpeg, IDLE_KILL_MS);
-        const touchIdleTimer = () => {
-          if (idleTimer) clearTimeout(idleTimer);
-          if (!killed) idleTimer = setTimeout(killFfmpeg, IDLE_KILL_MS);
-        };
-        ffmpegProc.stdout.on('data', touchIdleTimer);
-      };
-
-      getProbeInfo(filePath).then((info) => {
-        let width = 0;
-        let height = 0;
-        let videoCodec = '';
-        let audioCodec = '';
-        let pixelFormat = '';
-        let hasAudio = false;
-        let sourceBitrate = 0;
-
-        if (info) {
-          width = info.width;
-          height = info.height;
-          videoCodec = info.videoCodec;
-          audioCodec = info.audioCodec;
-          pixelFormat = info.pixelFormat;
-          hasAudio = info.hasAudio;
-          sourceBitrate = info.bitrate || 0;
-        }
-
-        if (!videoCodec || !audioCodec) {
-          // ffprobe failed or crashed on this file; run ffmpeg -i fallback
-          execFile(ffmpegPath, ['-i', filePath], { timeout: 8000 }, (ffErr, ffStdout, ffStderr) => {
-            const rawText = (ffStdout || '') + '\n' + (ffStderr || '');
-            const parsed = parseFfmpegOutput(rawText);
-            if (!videoCodec && parsed.videoCodec) videoCodec = parsed.videoCodec;
-            if (!audioCodec && parsed.audioCodec) audioCodec = parsed.audioCodec;
-            if (!pixelFormat && parsed.pixelFormat) pixelFormat = parsed.pixelFormat;
-            if (!width && parsed.width) width = parsed.width;
-            if (!height && parsed.height) height = parsed.height;
-            if (parsed.hasAudio) hasAudio = true;
-            executeTranscode(videoCodec, audioCodec, pixelFormat, width, height, hasAudio, sourceBitrate);
-          });
-          return;
-        }
-
-        executeTranscode(videoCodec, audioCodec, pixelFormat, width, height, hasAudio, sourceBitrate);
-      });
-    } else if (req.url.startsWith('/thumbnail') && req.method === 'GET') {
-      const urlObj = new URL(req.url, 'http://127.0.0.1:52321');
-      const rawPath = urlObj.searchParams.get('path');
-      const filePath = isPathSafeForStreaming(rawPath);
-      if (!filePath) {
-        res.writeHead(403, { 'Content-Type': 'text/plain' });
-        res.end('Access Denied');
-        return;
-      }
-
-      const crypto = require('crypto');
-      const hash = crypto.createHash('md5').update(filePath).digest('hex');
-      const thumbDir = path.join(dataDir, 'thumbnails');
-      if (!fs.existsSync(thumbDir)) {
-        try { fs.mkdirSync(thumbDir, { recursive: true }); } catch (e) {}
-      }
-      const thumbPath = path.join(thumbDir, `${hash}.jpg`);
-
-      if (fs.existsSync(thumbPath)) {
-        safeServeThumbnail(res, thumbPath);
-        return;
-      }
-
-      const ext = path.extname(filePath).toLowerCase();
-      const isAudio = ['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.aac'].includes(ext);
-
-      enqueueThumbnailTask((done) => {
-        if (res.writableEnded || res.destroyed) {
-          done();
-          return;
-        }
-
-        if (fs.existsSync(thumbPath)) {
-          safeServeThumbnail(res, thumbPath);
-          done();
-          return;
-        }
-
-        if (isAudio) {
-          const args = [
-            '-y',
-            '-i', filePath,
-            '-an',
-            '-vcodec', 'copy',
-            thumbPath
-          ];
-          const { spawn } = require('child_process');
-          const proc = spawn(ffmpegPath, args);
-          proc.on('close', (code) => {
-            done();
-            if (code === 0 && fs.existsSync(thumbPath) && fs.statSync(thumbPath).size > 0) {
-              safeServeThumbnail(res, thumbPath);
-            } else {
-              if (fs.existsSync(thumbPath)) {
-                try { fs.unlinkSync(thumbPath); } catch (e) {}
-              }
-              if (!res.writableEnded && !res.destroyed) {
-                res.writeHead(404);
-                res.end();
-              }
-            }
-          });
-          proc.on('error', () => {
-            done();
-            if (!res.writableEnded && !res.destroyed) {
-              res.writeHead(404);
-              res.end();
-            }
-          });
-        } else {
-          generateVideoThumbnail(filePath, thumbPath).then((success) => {
-            done();
-            if (success && fs.existsSync(thumbPath)) {
-              safeServeThumbnail(res, thumbPath);
-            } else {
-              if (!res.writableEnded && !res.destroyed) {
-                res.writeHead(404);
-                res.end();
-              }
-            }
-          }).catch(() => {
-            done();
-            if (!res.writableEnded && !res.destroyed) {
-              res.writeHead(404);
-              res.end();
-            }
-          });
-        }
-      });
-    } else if (req.url.startsWith('/preview') && req.method === 'GET') {
-      const urlObj = new URL(req.url, 'http://127.0.0.1:52321');
-      const rawPath = urlObj.searchParams.get('path');
-      const filePath = isPathSafeForStreaming(rawPath);
-      const timeSec = Math.max(0, Math.floor(parseFloat(urlObj.searchParams.get('time') || '0')));
-      if (!filePath) {
-        res.writeHead(403, { 'Content-Type': 'text/plain' });
-        res.end('Access Denied');
-        return;
-      }
-
-      const ext = path.extname(filePath).toLowerCase();
-      const isAudio = ['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.aac', '.opus', '.wma'].includes(ext);
-
-      if (isAudio) {
-        res.writeHead(302, { 'Location': `/thumbnail?path=${encodeURIComponent(filePath)}` });
-        res.end();
-        return;
-      }
-
-      const cacheKey = `${filePath}:${timeSec}`;
-      if (previewCache.has(cacheKey)) {
-        const cached = previewCache.get(cacheKey);
-        res.writeHead(200, {
-          'Content-Type': 'image/jpeg',
-          'Content-Length': cached.length,
-          'Access-Control-Allow-Origin': '*',
-          'Cache-Control': 'public, max-age=3600'
-        });
-        res.end(cached);
-        return;
-      }
-
-      const crypto = require('crypto');
-      const hash = crypto.createHash('md5').update(filePath).digest('hex');
-      const thumbDir = path.join(dataDir, 'thumbnails');
-      const thumbPath = path.join(thumbDir, `${hash}.jpg`);
-
-      const { spawn } = require('child_process');
-      const effectiveFFmpeg = resolveBinary ? resolveBinary('ffmpeg') : ffmpegPath;
-      const args = [
-        '-ss', String(timeSec),
-        '-i', filePath,
-        '-frames:v', '1',
-        '-vf', 'scale=240:-2',
-        '-q:v', '3',
-        '-f', 'image2',
-        'pipe:1'
-      ];
-
-      if (!global.__activePreviewProcs) global.__activePreviewProcs = [];
-      while (global.__activePreviewProcs.length >= 2) {
-        const oldProc = global.__activePreviewProcs.shift();
-        try { oldProc.kill('SIGKILL'); } catch (e) {}
-      }
-
-      const chunks = [];
-      const proc = spawn(effectiveFFmpeg, args, { stdio: ['ignore', 'pipe', 'ignore'] });
-      global.__activePreviewProcs.push(proc);
-
-      proc.on('error', (err) => {
-        const idx = global.__activePreviewProcs.indexOf(proc);
-        if (idx !== -1) global.__activePreviewProcs.splice(idx, 1);
-        console.warn('[Timeline Preview] ffmpeg spawn error:', err.message);
-      });
-      proc.stdout.on('data', (d) => chunks.push(d));
-
-      let finished = false;
-      const cleanup = () => {
-        if (!finished) {
-          finished = true;
-          const idx = global.__activePreviewProcs.indexOf(proc);
-          if (idx !== -1) global.__activePreviewProcs.splice(idx, 1);
-          try { proc.kill('SIGKILL'); } catch (e) {}
-        }
-      };
-
-      req.on('close', cleanup);
-
-      proc.on('close', (code) => {
-        finished = true;
-        const idx = global.__activePreviewProcs.indexOf(proc);
-        if (idx !== -1) global.__activePreviewProcs.splice(idx, 1);
-
-        if (code === 0 && chunks.length > 0) {
-          const buf = Buffer.concat(chunks);
-          if (previewCache.size > 400) {
-            const firstKey = previewCache.keys().next().value;
-            previewCache.delete(firstKey);
-          }
-          previewCache.set(cacheKey, buf);
-
-          if (!res.writableEnded && !res.destroyed) {
-            res.writeHead(200, {
-              'Content-Type': 'image/jpeg',
-              'Content-Length': buf.length,
-              'Access-Control-Allow-Origin': '*',
-              'Cache-Control': 'public, max-age=3600'
-            });
-            res.end(buf);
-          }
-        } else {
-          if (!res.writableEnded && !res.destroyed) {
-            if (fs.existsSync(thumbPath)) {
-              safeServeThumbnail(res, thumbPath);
-            } else {
-              res.writeHead(404);
-              res.end();
-            }
-          }
-        }
-      });
-
-      proc.on('error', () => {
-        finished = true;
-        if (fs.existsSync(thumbPath)) {
-          if (!res.writableEnded && !res.destroyed) {
-            safeServeThumbnail(res, thumbPath);
-          }
-        } else {
-          if (!res.writableEnded && !res.destroyed) {
-            res.writeHead(404);
-            res.end();
-          }
-        }
-      });
-    } else {
+    if (req.url !== '/add-download' || req.method !== 'POST') {
       res.writeHead(404);
       res.end();
+      return;
     }
+
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const downloadData = JSON.parse(body);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('native-download-received', downloadData);
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.show();
+          mainWindow.focus();
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok' }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
+    });
   });
-  
+
   server.listen(52321, '127.0.0.1', () => {
-    console.log('Local server listening on port 52321');
+    console.log('Browser extension bridge listening on port 52321');
   });
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-      // Another Panamedia instance already holds the port — this is normal
-      // when Player shortcut opens before the single-instance redirect completes.
-      // Safe to ignore: the running instance handles all API requests.
-      console.log('Port 52321 already in use — deferring to existing Panamedia instance.');
+      console.log('Port 52321 already in use ? deferring to the existing Panamedia instance.');
     } else {
-      console.error('Local server error:', err);
+      console.error('Browser extension bridge error:', err);
     }
   });
 }
@@ -1410,8 +848,9 @@ function createSplashWindow() {
     resizable: false,
     icon: getIconPath('panamedia.ico'),
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true
     }
   });
 
@@ -1592,19 +1031,17 @@ function createWindow(forceMode = null) {
       show: false, // Hide until ready
       icon: getIconPath('panamedia.ico'),
       webPreferences: {
-        nodeIntegration: true,
-        contextIsolation: false, // simpler for local development pair programming
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
         webviewTag: true, // enable in-app browser webviews
         preload: path.join(__dirname, 'preload.cjs')
       }
     });
     setMainWindow(mainWindow);
 
-    // Prevent Chromium from navigating the window away when a file is dropped
     mainWindow.webContents.on('will-navigate', (event, url) => {
-      if (url.startsWith('file://') && !url.includes('index.html')) {
-        event.preventDefault();
-      }
+      if (!isTrustedAppUrl(url)) event.preventDefault();
     });
     
     // Load app URL (dev: localhost:5173, prod: dist/index.html)
@@ -1730,7 +1167,10 @@ ipcMain.handle('select-media-files', async () => {
 });
 
 ipcMain.handle('get-streaming-port', () => {
-  return useCppEngine ? cppStreamingPort : 52321;
+  // Always return the port (defaults to 52322) so the player can build a valid
+  // streaming URL immediately. The C++ engine is asked to listen on this port;
+  // if it picks a different one it will broadcast 'streaming-port-ready'.
+  return cppStreamingPort;
 });
 
 // IPC State Management
@@ -2519,8 +1959,9 @@ ipcMain.handle('check-internet', async () => {
 
 // ── In-App Update Download & Install ──────────────────────────────────────────
 let updateDownloadAbort = null;
+let downloadedInstallerPath = null;
 
-ipcMain.handle('download-app-update', async (event, { downloadUrl, fileName } = {}) => {
+ipcMain.handle('download-app-update', async (_event, { fileName } = {}) => {
   try {
     const online = await checkInternetConnection();
     if (!online) {
@@ -2530,26 +1971,47 @@ ipcMain.handle('download-app-update', async (event, { downloadUrl, fileName } = 
     const LATEST_ENDPOINT = 'https://panamedia.lovable.app/api/public/latest/windows';
     const DOWNLOAD_ENDPOINT = 'https://panamedia.lovable.app/api/public/download/windows';
 
-    // 1. Fetch metadata if file_name or expected size is missing
-    let targetFileName = fileName || 'PanamediaSetup.exe';
+    const safeInstallerName = (value) => {
+      if (typeof value !== 'string' ||
+          path.basename(value) !== value ||
+          !/^[A-Z0-9][A-Z0-9._ ()-]{0,119}\.exe$/i.test(value)) {
+        return null;
+      }
+      return value;
+    };
+    let targetFileName = safeInstallerName(fileName || 'PanamediaSetup.exe');
+    if (!targetFileName) {
+      return { success: false, error: 'Invalid update installer filename.' };
+    }
+    downloadedInstallerPath = null;
+
     let expectedTotalBytes = 0;
+    let releaseMetadata = null;
     try {
       const metaRes = await fetch(LATEST_ENDPOINT, {
         headers: { 'cache-control': 'no-cache', 'User-Agent': 'Panamedia-Updater' }
       });
       if (metaRes.ok) {
-        const meta = await metaRes.json();
-        if (meta && meta.file_name) targetFileName = meta.file_name;
-        if (meta && meta.file_size) expectedTotalBytes = Number(meta.file_size);
+        releaseMetadata = await metaRes.json();
       }
     } catch (e) {
       console.warn('[Updater] Could not query latest metadata:', e.message);
     }
+    if (releaseMetadata && releaseMetadata.file_name) {
+      const metadataFileName = safeInstallerName(releaseMetadata.file_name);
+      if (!metadataFileName) {
+        return { success: false, error: 'Update website returned an invalid installer filename.' };
+      }
+      targetFileName = metadataFileName;
+    }
+    if (releaseMetadata && releaseMetadata.file_size) {
+      const metadataFileSize = Number(releaseMetadata.file_size);
+      if (Number.isFinite(metadataFileSize) && metadataFileSize > 0) {
+        expectedTotalBytes = metadataFileSize;
+      }
+    }
 
-    // Always fetch directly from the permanent redirect endpoint or given downloadUrl
-    const fetchUrl = downloadUrl && downloadUrl.startsWith('http') && !downloadUrl.includes('localhost')
-      ? downloadUrl
-      : DOWNLOAD_ENDPOINT;
+    const fetchUrl = DOWNLOAD_ENDPOINT;
 
     // Save directly to the user's Downloads folder
     const downloadsDir = app.getPath('downloads');
@@ -2630,6 +2092,7 @@ ipcMain.handle('download-app-update', async (event, { downloadUrl, fileName } = 
 
           const stat = fs.statSync(finalInstallerPath);
           if (stat.size > 1024 * 1024) { // At least 1MB
+            downloadedInstallerPath = finalInstallerPath;
             console.log(`[Updater] Download complete: ${finalInstallerPath} (${stat.size} bytes)`);
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('update-download-progress', {
@@ -2673,6 +2136,7 @@ ipcMain.handle('download-app-update', async (event, { downloadUrl, fileName } = 
 });
 
 ipcMain.handle('cancel-app-update-download', async () => {
+  downloadedInstallerPath = null;
   if (updateDownloadAbort) {
     try { updateDownloadAbort.abort(); } catch (e) {}
     updateDownloadAbort = null;
@@ -2680,20 +2144,29 @@ ipcMain.handle('cancel-app-update-download', async () => {
   return { success: true };
 });
 
-ipcMain.handle('install-app-update', async (_event, { installerPath }) => {
+ipcMain.handle('install-app-update', async () => {
   try {
+    const installerPath = downloadedInstallerPath;
     if (!installerPath || !fs.existsSync(installerPath)) {
       return { success: false, error: 'Installer file not found.' };
     }
 
-    console.log(`[Updater] Launching installer: ${installerPath}`);
+    const downloadsDir = path.resolve(app.getPath('downloads'));
+    const resolvedInstallerPath = path.resolve(installerPath);
+    const relativeInstallerPath = path.relative(downloadsDir, resolvedInstallerPath);
+    if (!relativeInstallerPath || relativeInstallerPath.startsWith('..') || path.isAbsolute(relativeInstallerPath)) {
+      return { success: false, error: 'Installer path is outside the Downloads folder.' };
+    }
+
+    console.log(`[Updater] Launching installer: ${resolvedInstallerPath}`);
     // Launch the installer and quit the app so it can update
     const { spawn: spawnProcess } = require('child_process');
-    const child = spawnProcess(installerPath, [], {
+    const child = spawnProcess(resolvedInstallerPath, [], {
       detached: true,
       stdio: 'ignore'
     });
     child.unref();
+    downloadedInstallerPath = null;
 
     // Give the installer a moment to start, then quit
     setTimeout(() => {
@@ -2879,8 +2352,52 @@ ipcMain.handle('get-converter-output-files', async (_event, dirPath) => {
 ipcMain.handle('remove-media-path', async (_event, filePath) => {
   if (!filePath) return { success: false };
   try {
+    // Remove from download manager index
     const removed = removeDownloadByPath(filePath);
-    return { success: true, removed };
+
+    // Check if the parent directory is still accessible; if not, remove it from syncedFolders
+    const parentDir = path.dirname(filePath);
+    let removedFolder = false;
+    if (settings.syncedFolders && Array.isArray(settings.syncedFolders)) {
+      const normParent = parentDir.replace(/[\\/]/g, '/').toLowerCase();
+      const foldersToKeep = settings.syncedFolders.filter(folder => {
+        const normFolder = folder.replace(/[\\/]/g, '/').toLowerCase();
+        // If this folder is the parent or an ancestor and it doesn't exist on disk, remove it
+        if (normParent.startsWith(normFolder) || normFolder.startsWith(normParent)) {
+          return fs.existsSync(folder);
+        }
+        return true;
+      });
+      if (foldersToKeep.length !== settings.syncedFolders.length) {
+        settings.syncedFolders = foldersToKeep;
+        await saveSettings();
+        removedFolder = true;
+        // Notify all windows about the updated settings & synced folders
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('settings-changed', settings);
+          mainWindow.webContents.send('synced-folders-updated', foldersToKeep);
+        }
+        for (const pWin of getActivePlayerWindows()) {
+          if (pWin && !pWin.isDestroyed()) {
+            pWin.webContents.send('settings-changed', settings);
+            pWin.webContents.send('synced-folders-updated', foldersToKeep);
+          }
+        }
+      }
+    }
+
+    // Notify all windows to remove this specific path from their in-memory library
+    const fileExists = fs.existsSync(filePath);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('media-path-removed', { filePath, fileExists });
+    }
+    for (const pWin of getActivePlayerWindows()) {
+      if (pWin && !pWin.isDestroyed()) {
+        pWin.webContents.send('media-path-removed', { filePath, fileExists });
+      }
+    }
+
+    return { success: true, removed, removedFolder, fileExists };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -3041,6 +2558,83 @@ function scanDirRecursive(dir, fileList, scannedPaths, depth = 0) {
     subdirs: directSubdirs
   });
 }
+
+/**
+ * Prune missing files from a list of paths/objects.
+ * Returns the paths that are confirmed missing from disk.
+ */
+function pruneMissingFromList(list, getPath) {
+  const missing = [];
+  const valid = [];
+  for (const item of list) {
+    const p = getPath ? getPath(item) : item;
+    if (p && fs.existsSync(p)) {
+      valid.push(item);
+    } else if (p) {
+      missing.push(p);
+    }
+  }
+  return { valid, missing };
+}
+
+/**
+ * validate-library-files: Called periodically (every 30 min) or on sync.
+ * Receives the full list of known file paths from the renderer, checks each
+ * against the filesystem, removes missing ones from all storage systems,
+ * and notifies all windows with the pruned result + removed list.
+ */
+ipcMain.handle('validate-library-files', async (event, filePaths) => {
+  if (!Array.isArray(filePaths)) return { valid: [], removed: [] };
+
+  const norm = p => p.replace(/[\\/]/g, '/').toLowerCase();
+  const removed = [];
+  const valid = [];
+
+  for (const p of filePaths) {
+    if (p && fs.existsSync(p)) {
+      valid.push(p);
+    } else if (p) {
+      removed.push(p);
+    }
+  }
+
+  if (removed.length === 0) return { valid, removed };
+
+  console.log(`[validate-library-files] Removing ${removed.length} missing file(s) from library`);
+
+  // Remove from download manager index
+  for (const p of removed) {
+    try { removeDownloadByPath(p); } catch (_) {}
+  }
+
+  // Check if any synced folders are now inaccessible and clean them out
+  let foldersChanged = false;
+  if (settings.syncedFolders && Array.isArray(settings.syncedFolders)) {
+    const before = settings.syncedFolders.length;
+    settings.syncedFolders = settings.syncedFolders.filter(folder => fs.existsSync(folder));
+    if (settings.syncedFolders.length !== before) {
+      foldersChanged = true;
+      await saveSettings();
+    }
+  }
+
+  // Notify all windows to remove missing paths from their in-memory playlists
+  const notifyWindows = (win) => {
+    if (!win || win.isDestroyed()) return;
+    for (const p of removed) {
+      win.webContents.send('media-path-removed', { filePath: p, fileExists: false });
+    }
+    if (foldersChanged) {
+      win.webContents.send('settings-changed', settings);
+      win.webContents.send('synced-folders-updated', settings.syncedFolders || []);
+    }
+  };
+
+  if (mainWindow) notifyWindows(mainWindow);
+  for (const pWin of getActivePlayerWindows()) notifyWindows(pWin);
+
+  return { valid, removed };
+});
 
 ipcMain.handle('sync-media-library', async (event, folderPath) => {
   let foldersToScan = [];
@@ -3766,7 +3360,7 @@ app.whenReady().then(() => {
   loadSettings();
   loadDirCache();
   startCoreEngine();
-  startLocalServer();
+  startExtensionBridgeServer();
   setupMediaSniffer();
   setupAdBlocker();
   

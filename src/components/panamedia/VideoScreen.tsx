@@ -342,9 +342,13 @@ export function VideoScreen({
         display: 'flex',
         flexDirection: 'column',
         position: 'relative',
-        backgroundImage: `linear-gradient(rgba(9, 9, 14, 0.72), rgba(9, 9, 14, 0.72)), url(${playerBg})`,
+        backgroundColor: '#09090e',
+        backgroundImage: (isAudioFile || isIdle || !hasStartedRendering)
+          ? `linear-gradient(rgba(9, 9, 14, 0.72), rgba(9, 9, 14, 0.72)), url(${playerBg})`
+          : undefined,
         backgroundSize: 'cover',
         backgroundPosition: 'center',
+        transition: 'background-image 0.3s ease',
         minHeight: 0,
         overflow: 'hidden',
         cursor: cursorVisible ? 'default' : 'none'
@@ -560,7 +564,7 @@ export function VideoScreen({
           }}
           onTimeUpdate={() => {
             handleTimeUpdate();
-            if (videoRef.current && (videoRef.current.currentTime > 0 || videoRef.current.readyState >= 3)) {
+            if (videoRef.current && (isAudioFile || videoRef.current.videoWidth > 0) && (videoRef.current.currentTime > 0 || videoRef.current.readyState >= 3)) {
               setHasStartedRendering(true);
               setIsBuffering(false);
               if (playbackError?.hasError) {
@@ -570,7 +574,7 @@ export function VideoScreen({
           }}
           onLoadedMetadata={() => {
             handleLoadedMetadata();
-            if (videoRef.current && videoRef.current.videoWidth > 0 && videoRef.current.readyState >= 3) {
+            if (videoRef.current && videoRef.current.videoWidth > 0 && videoRef.current.readyState >= 1) {
               setHasStartedRendering(true);
               setIsBuffering(false);
             }
@@ -601,7 +605,9 @@ export function VideoScreen({
           onWaiting={() => setIsBuffering(true)}
           onPlaying={() => {
             setIsBuffering(false);
-            setHasStartedRendering(true);
+            if (isAudioFile || videoRef.current?.videoWidth) {
+              setHasStartedRendering(true);
+            }
             if (playbackError?.hasError) {
               onDismissError?.();
             }
@@ -611,6 +617,7 @@ export function VideoScreen({
           onPlay={() => {
             setPlaying(true);
             setIsBuffering(false);
+            setHasStartedRendering(true);
             if (playbackError?.hasError) {
               onDismissError?.();
             }
@@ -649,8 +656,9 @@ export function VideoScreen({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: 'rgba(7, 7, 12, 0.65)',
-            backdropFilter: 'blur(8px)',
+            background: 'rgba(7, 7, 12, 0.40)',
+            backdropFilter: 'blur(4px)',
+            WebkitBackdropFilter: 'blur(4px)',
             zIndex: 6,
             pointerEvents: 'none'
           }}>
@@ -761,14 +769,14 @@ export function VideoScreen({
               WebkitBackdropFilter: 'blur(24px)',
               border: '1px solid rgba(244, 63, 94, 0.25)',
               borderRadius: '24px',
-              padding: '36px 44px',
+              padding: '36px 36px 32px 36px',
               boxShadow: '0 30px 70px rgba(0,0,0,0.65), 0 0 35px rgba(244, 63, 94, 0.15)',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
               gap: '20px',
-              maxWidth: '460px',
-              width: '90%',
+              maxWidth: '560px',
+              width: '92%',
               textAlign: 'center',
               animation: 'fadeIn 0.3s ease-out'
             }}>
@@ -842,7 +850,7 @@ export function VideoScreen({
                   fontWeight: '500',
                   color: '#e2e8f0',
                   marginBottom: '10px',
-                  maxWidth: '380px',
+                  maxWidth: '460px',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -853,43 +861,52 @@ export function VideoScreen({
                   fontSize: '12px',
                   color: 'rgba(255, 255, 255, 0.55)',
                   lineHeight: 1.5,
-                  maxWidth: '380px',
+                  maxWidth: '460px',
                 }}>
                   {playbackError.message || 'This media file could not be decoded. The file may be corrupted, missing, or in an unsupported format.'}
                 </div>
               </div>
 
-              {/* Action Buttons */}
+              {/* Action Buttons - Arranged cleanly in a single horizontal row */}
               <div style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '12px',
+                gap: '8px',
                 marginTop: '6px',
-                flexWrap: 'wrap',
+                flexWrap: 'nowrap',
                 justifyContent: 'center',
+                maxWidth: '100%',
               }}>
                 {onRetryPlayback && (
                   <button
                     onClick={onRetryPlayback}
                     style={{
-                      display: 'flex',
+                      display: 'inline-flex',
                       alignItems: 'center',
-                      gap: '8px',
-                      padding: '10px 18px',
+                      gap: '7px',
+                      padding: '9px 15px',
                       background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
                       border: 'none',
-                      borderRadius: '12px',
+                      borderRadius: '11px',
                       color: '#ffffff',
-                      fontSize: '13px',
+                      fontSize: '12.5px',
                       fontWeight: '600',
                       cursor: 'pointer',
-                      boxShadow: '0 4px 16px rgba(99, 102, 241, 0.35)',
+                      boxShadow: '0 4px 14px rgba(99, 102, 241, 0.35)',
                       transition: 'all 0.2s ease',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.transform = 'translateY(-1px)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = 'translateY(-1px)';
+                      e.currentTarget.style.boxShadow = '0 6px 18px rgba(99, 102, 241, 0.45)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = 'translateY(0)';
+                      e.currentTarget.style.boxShadow = '0 4px 14px rgba(99, 102, 241, 0.35)';
+                    }}
                   >
-                    <RefreshCw size={15} />
+                    <RefreshCw size={14} />
                     Retry
                   </button>
                 )}
@@ -898,18 +915,20 @@ export function VideoScreen({
                   <button
                     onClick={onNextTrack}
                     style={{
-                      display: 'flex',
+                      display: 'inline-flex',
                       alignItems: 'center',
-                      gap: '8px',
-                      padding: '10px 18px',
+                      gap: '7px',
+                      padding: '9px 15px',
                       background: 'rgba(255, 255, 255, 0.08)',
                       border: '1px solid rgba(255, 255, 255, 0.12)',
-                      borderRadius: '12px',
+                      borderRadius: '11px',
                       color: '#ffffff',
-                      fontSize: '13px',
+                      fontSize: '12.5px',
                       fontWeight: '500',
                       cursor: 'pointer',
                       transition: 'all 0.2s ease',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.background = 'rgba(255, 255, 255, 0.14)';
@@ -920,7 +939,7 @@ export function VideoScreen({
                       e.currentTarget.style.transform = 'translateY(0)';
                     }}
                   >
-                    <SkipForward size={15} />
+                    <SkipForward size={14} />
                     Next Track
                   </button>
                 )}
@@ -933,18 +952,20 @@ export function VideoScreen({
                       }
                     }}
                     style={{
-                      display: 'flex',
+                      display: 'inline-flex',
                       alignItems: 'center',
-                      gap: '8px',
-                      padding: '10px 16px',
+                      gap: '7px',
+                      padding: '9px 14px',
                       background: 'rgba(244, 63, 94, 0.15)',
                       border: '1px solid rgba(244, 63, 94, 0.35)',
-                      borderRadius: '12px',
+                      borderRadius: '11px',
                       color: '#fb7185',
-                      fontSize: '13px',
+                      fontSize: '12.5px',
                       fontWeight: '600',
                       cursor: 'pointer',
                       transition: 'all 0.2s ease',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.background = 'rgba(244, 63, 94, 0.25)';
@@ -956,7 +977,7 @@ export function VideoScreen({
                     }}
                     title="Remove this missing media from playlist and skip to next track"
                   >
-                    <Trash2 size={15} />
+                    <Trash2 size={14} />
                     Delete from Playlist
                   </button>
                 )}
@@ -969,17 +990,29 @@ export function VideoScreen({
                       }
                     }}
                     style={{
-                      display: 'flex',
+                      display: 'inline-flex',
                       alignItems: 'center',
-                      gap: '8px',
-                      padding: '10px 14px',
+                      gap: '7px',
+                      padding: '9px 13px',
                       background: 'rgba(255, 255, 255, 0.05)',
                       border: '1px solid rgba(255, 255, 255, 0.08)',
-                      borderRadius: '12px',
-                      color: 'rgba(255, 255, 255, 0.7)',
+                      borderRadius: '11px',
+                      color: 'rgba(255, 255, 255, 0.75)',
                       fontSize: '12px',
                       cursor: 'pointer',
                       transition: 'all 0.2s ease',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.12)';
+                      e.currentTarget.style.color = '#ffffff';
+                      e.currentTarget.style.transform = 'translateY(-1px)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                      e.currentTarget.style.color = 'rgba(255, 255, 255, 0.75)';
+                      e.currentTarget.style.transform = 'translateY(0)';
                     }}
                     title="Show in file explorer"
                   >

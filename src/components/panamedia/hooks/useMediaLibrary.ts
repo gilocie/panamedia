@@ -4,6 +4,7 @@ import { type MediaItem, electron, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS } from '..
 const SYNC_COOLDOWN = 60000; // 1 minute
 const MAX_LOCAL_ITEMS = 500;
 const CLEANUP_INTERVAL = 120000; // 2 minutes
+const AUTO_VALIDATE_INTERVAL = 30 * 60 * 1000; // 30 minutes
 
 function readFromStorage(key: string): any[] {
   try {
@@ -108,6 +109,12 @@ export function useMediaLibrary({
   const syncQueueRef = useRef<string[]>([]);
   const isSyncingQueueRef = useRef(false);
   const prevCurrentPathRef = useRef<string | null>(null);
+
+  // Stable refs for auto-validate interval (avoids stale closures)
+  const syncedVideosRef = useRef<MediaItem[]>([]);
+  const syncedAudiosRef = useRef<MediaItem[]>([]);
+  useEffect(() => { syncedVideosRef.current = syncedVideos; }, [syncedVideos]);
+  useEffect(() => { syncedAudiosRef.current = syncedAudios; }, [syncedAudios]);
 
   useEffect(() => {
     writeToStorage('player_syncedVideos', syncedVideos);
@@ -223,6 +230,24 @@ export function useMediaLibrary({
     setCurrentDirAudios(prev => prev.filter(item => isPathValid(item.path)));
   }, []);
 
+  /**
+   * Validate MediaItems against the filesystem. Returns only items whose
+   * files still exist on disk, using the main-process validate-library-files handler.
+   */
+  const validateAndPruneItems = useCallback(async (items: MediaItem[]): Promise<MediaItem[]> => {
+    if (!electron || items.length === 0) return items;
+    try {
+      const allPaths = items.map(i => i.path).filter(Boolean);
+      const result = await electron.ipcRenderer.invoke('validate-library-files', allPaths);
+      if (!result || result.removed.length === 0) return items;
+      console.info(`[Player Library] Auto-removed ${result.removed.length} missing file(s)`);
+      const removedSet = new Set<string>(result.removed.map((p: string) => p.toLowerCase().replace(/[\/]/g, '/')));
+      return items.filter(item => !removedSet.has(item.path.toLowerCase().replace(/[\/]/g, '/')));
+    } catch (e) {
+      return items;
+    }
+  }, []);
+
   const syncAllFolders = useCallback(async (activeDirs?: string[], activeDownloadDir?: string) => {
     if (!electron) return;
     setPlayerSyncing(true);
@@ -244,12 +269,15 @@ export function useMediaLibrary({
           })
         : items;
 
-      const { videos, audios } = categorizeMediaItems(filteredItems);
+      // Prune missing files from the scan results during sync
+      const prunedItems = await validateAndPruneItems(filteredItems);
+
+      const { videos, audios } = categorizeMediaItems(prunedItems);
       // Cleanly replace items from active folders so removed ones disappear
       setSyncedVideos(videos);
       setSyncedAudios(audios);
 
-      for (const item of filteredItems) {
+      for (const item of prunedItems) {
         const dir = getParentDirectory(item.path);
         if (dir) {
           scannedDirsRef.current[dir] = Date.now();
@@ -260,7 +288,7 @@ export function useMediaLibrary({
     } finally {
       setPlayerSyncing(false);
     }
-  }, [playerSyncedDirs, downloadDir]);
+  }, [playerSyncedDirs, downloadDir, validateAndPruneItems]);
 
   // Periodic cleanup of scannedDirsRef cache
   useEffect(() => {
@@ -272,6 +300,35 @@ export function useMediaLibrary({
         }
       }
     }, CLEANUP_INTERVAL);
+    return () => clearInterval(timer);
+  }, []);
+
+  // ── 30-minute auto-validation for player playlist ─────────────────────────
+  // Every 30 minutes, validate all in-memory playlist items against the filesystem.
+  // Silently removes files that no longer exist on disk, keeping the playlist clean.
+  useEffect(() => {
+    if (!electron) return;
+    const timer = setInterval(async () => {
+      const vids = syncedVideosRef.current;
+      const auds = syncedAudiosRef.current;
+      const allItems = [...vids, ...auds];
+      if (allItems.length === 0) return;
+      console.info(`[Player Library] Running 30-min auto-validation for ${allItems.length} items...`);
+      const allPaths = allItems.map(i => i.path).filter(Boolean);
+      try {
+        const result = await electron.ipcRenderer.invoke('validate-library-files', allPaths);
+        if (!result || result.removed.length === 0) return;
+        const removedSet = new Set<string>(result.removed.map((p: string) => p.toLowerCase().replace(/[\/]/g, '/')));
+        const isGone = (item: MediaItem) => removedSet.has(item.path.toLowerCase().replace(/[\/]/g, '/'));
+        setSyncedVideos(prev => prev.filter(i => !isGone(i)));
+        setSyncedAudios(prev => prev.filter(i => !isGone(i)));
+        setCurrentDirVideos(prev => prev.filter(i => !isGone(i)));
+        setCurrentDirAudios(prev => prev.filter(i => !isGone(i)));
+        console.info(`[Player Library] Auto-removed ${result.removed.length} missing item(s) from playlist`);
+      } catch (e) {
+        console.warn('[Player Library] 30-min validation failed:', e);
+      }
+    }, AUTO_VALIDATE_INTERVAL);
     return () => clearInterval(timer);
   }, []);
 
@@ -345,12 +402,25 @@ export function useMediaLibrary({
     };
     electron.ipcRenderer.on('library-synced', handleLibrarySynced);
 
+    // Auto-remove: when main process confirms a path was removed (manual or auto),
+    // immediately purge it from React state so the playlist reflects reality.
+    const handleMediaPathRemoved = (_event: any, { filePath }: { filePath: string; fileExists: boolean }) => {
+      if (!filePath) return;
+      const norm = filePath.toLowerCase().replace(/[\\/]/g, '/');
+      setSyncedVideos(prev => prev.filter(item => item.path.toLowerCase().replace(/[\\/]/g, '/') !== norm));
+      setSyncedAudios(prev => prev.filter(item => item.path.toLowerCase().replace(/[\\/]/g, '/') !== norm));
+      setCurrentDirVideos(prev => prev.filter(item => item.path.toLowerCase().replace(/[\\/]/g, '/') !== norm));
+      setCurrentDirAudios(prev => prev.filter(item => item.path.toLowerCase().replace(/[\\/]/g, '/') !== norm));
+    };
+    electron.ipcRenderer.on('media-path-removed', handleMediaPathRemoved);
+
     return () => {
       electron?.ipcRenderer.removeListener('downloads-updated', handleDownloadsUpdated);
       electron?.ipcRenderer.removeListener('player-open-file', handlePlayerOpenFile);
       electron?.ipcRenderer.removeListener('settings-changed', handleSettingsChanged);
       electron?.ipcRenderer.removeListener('synced-folders-updated', handleSyncedFoldersUpdated);
       electron?.ipcRenderer.removeListener('library-synced', handleLibrarySynced);
+      electron?.ipcRenderer.removeListener('media-path-removed', handleMediaPathRemoved);
     };
   }, [setCurrentPath, setCurrentTitle, setCurrentTime, setDuration, setForceTranscode, setDownloadDir, syncAllFolders, onOpenFile, downloadDir, pruneItemsForAllowedDirs, playerSyncedDirs]);
 
@@ -447,6 +517,26 @@ export function useMediaLibrary({
     queueSyncDirectory(dirPath, false);
   }, [queueSyncDirectory]);
 
+  /**
+   * Remove a media item by file path from ALL in-memory state and localStorage.
+   * This is the correct way to delete from playlist — updating React state so
+   * the UI re-renders immediately without the removed item.
+   */
+  const removeMediaItem = useCallback((targetPath: string) => {
+    if (!targetPath) return;
+    const norm = targetPath.toLowerCase().replace(/[\\/]/g, '/');
+
+    // Update syncedVideos state (and localStorage is updated via useEffect)
+    setSyncedVideos(prev => prev.filter(item => item.path.toLowerCase().replace(/[\\/]/g, '/') !== norm));
+
+    // Update syncedAudios state (and localStorage is updated via useEffect)
+    setSyncedAudios(prev => prev.filter(item => item.path.toLowerCase().replace(/[\\/]/g, '/') !== norm));
+
+    // Also update currentDirVideos and currentDirAudios for folder-mode playlists
+    setCurrentDirVideos(prev => prev.filter(item => item.path.toLowerCase().replace(/[\\/]/g, '/') !== norm));
+    setCurrentDirAudios(prev => prev.filter(item => item.path.toLowerCase().replace(/[\\/]/g, '/') !== norm));
+  }, []);
+
   return {
     syncedVideos,
     syncedAudios,
@@ -460,5 +550,6 @@ export function useMediaLibrary({
     syncAllFolders,
     handleSyncClick,
     syncDirectoryOnce,
+    removeMediaItem,
   };
 }
