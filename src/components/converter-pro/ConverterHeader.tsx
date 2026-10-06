@@ -1,6 +1,6 @@
 import React from 'react';
 import { 
-  Check, Sparkles, Zap, X, 
+  ArrowLeft, Check, Sparkles, Zap, X, 
   Maximize2, Minimize2, Minus 
 } from 'lucide-react';
 
@@ -9,6 +9,8 @@ interface ConverterHeaderProps {
   showDone: boolean;
   isExpanded: boolean;
   useHwAccel?: boolean;
+  /** When a tool studio is active, show a ← Queue back button on the left */
+  onQueueBack?: () => void;
   onToggleExpand: () => void;
   onMinimize: () => void;
   onBack: () => void;
@@ -20,6 +22,7 @@ export const ConverterHeader: React.FC<ConverterHeaderProps> = ({
   showDone,
   isExpanded,
   useHwAccel = true,
+  onQueueBack,
   onToggleExpand,
   onMinimize,
   onBack,
@@ -36,8 +39,33 @@ export const ConverterHeader: React.FC<ConverterHeaderProps> = ({
       borderBottom: '1px solid rgba(255, 255, 255, 0.07)',
       flexShrink: 0
     }}>
-      {/* Left: Done & Title */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      {/* Left: Queue back (when tool open) | Done | Title */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        {onQueueBack && (
+          <button
+            type="button"
+            onClick={onQueueBack}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '5px 12px',
+              borderRadius: '7px',
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              color: 'rgba(255,255,255,0.75)',
+              fontSize: '11.5px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+              flexShrink: 0
+            }}
+            title="Discard and return to queue"
+          >
+            <ArrowLeft size={13} />
+            Queue
+          </button>
+        )}
         {showDone && (
           <button
             type="button"

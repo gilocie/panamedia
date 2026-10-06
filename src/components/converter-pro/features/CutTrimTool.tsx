@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Scissors,
   SkipBack,
@@ -65,6 +65,7 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
   const [zoom, setZoom] = useState(1); // 0.25x – 4x
+  const [isMuted, setIsMuted] = useState(false);
 
   const totalDuration = mediaDuration > 0 ? mediaDuration : duration;
   const usableDuration = Math.max(0, totalDuration);
@@ -134,6 +135,20 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
       setIsPlaying(false);
     }
   };
+
+  // Spacebar: play / pause (but don't hijack when a text input is focused).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
+        e.preventDefault();
+        togglePreview();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  // togglePreview is stable enough; re-running on re-render is harmless.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying]);
 
   const resetRange = () => {
     hasEditedRange.current = true;
@@ -245,7 +260,7 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
               src={mediaUrl}
               poster={thumbnailUrl}
               preload="metadata"
-              muted
+              muted={isMuted}
               onLoadedMetadata={handleLoadedMetadata}
               onTimeUpdate={(event) => {
                 const video = event.currentTarget;
@@ -351,11 +366,8 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
         </div>
 
         <div className="pro-transport" style={{ padding: '5px 8px' }}>
-          <div className="pro-transport__readout">
-            <span style={{ color: ACCENT, fontSize: 10 }}>{formatTrimTime(playhead)}</span>
-            <small>/</small>
-            <small style={{ color: 'var(--pw-text-dim)', fontSize: 9 }}>{formatTrimTime(usableDuration)}</small>
-          </div>
+          {/* Duration readout removed per user request — timecode chip on the
+              monitor already shows current position / total. */}
           <div className="pro-transport__cluster">
             <button type="button" className="pw-icon-btn" aria-label="Jump to start" onClick={() => seekPreview(0)}>
               <SkipBack size={11} />
@@ -380,8 +392,20 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
             </button>
           </div>
           <div className="pro-row" style={{ gap: 5 }}>
-            <Volume2 size={11} style={{ color: 'var(--pw-text-dim)' }} />
-            <span className="pw-data" style={{ fontSize: 9 }}>MUTED</span>
+            <button
+              type="button"
+              className="pw-icon-btn"
+              aria-label={isMuted ? 'Unmute' : 'Mute'}
+              onClick={() => {
+                setIsMuted(m => !m);
+                if (videoRef.current) videoRef.current.muted = !isMuted;
+              }}
+              title={isMuted ? 'Click to unmute' : 'Click to mute'}
+              style={{ opacity: isMuted ? 1 : 0.45 }}
+            >
+              <Volume2 size={11} style={{ color: isMuted ? '#f87171' : 'var(--pw-text-dim)' }} />
+            </button>
+            {isMuted && <span className="pw-data" style={{ fontSize: 9, color: '#f87171' }}>MUTED</span>}
           </div>
         </div>
       </section>
@@ -512,6 +536,7 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
           {/* The ruler and both lanes live in one `surface` box so the drag
               overlay maps a pointer x straight onto a timecode. */}
           {/* Horizontally scrollable zoomed timeline surface */}
+          {/* Scroll = zoom in/out; horizontal scroll when zoomed. */}
           <div
             ref={scrollRef}
             style={{
@@ -519,6 +544,19 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
               overflowY: 'hidden',
               scrollbarWidth: 'thin',
               scrollbarColor: 'var(--pw-hi-line) transparent',
+            }}
+            onWheel={(e) => {
+              e.preventDefault();
+              if (e.ctrlKey) {
+                // Ctrl + scroll = zoom in / out
+                if (e.deltaY < 0) zoomIn();
+                else zoomOut();
+              } else {
+                // Plain scroll = horizontal pan along the timeline
+                if (scrollRef.current) {
+                  scrollRef.current.scrollLeft += e.deltaY !== 0 ? e.deltaY : e.deltaX;
+                }
+              }
             }}
           >
           <div
