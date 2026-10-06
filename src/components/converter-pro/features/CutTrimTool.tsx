@@ -58,12 +58,14 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hasEditedRange = useRef(Boolean(initialSettings));
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const [mediaDuration, setMediaDuration] = useState(duration);
   const [startSec, setStartSec] = useState(initialSettings?.startSec ?? 0);
   const [endSec, setEndSec] = useState(initialSettings?.endSec ?? duration);
   const [playhead, setPlayhead] = useState(initialSettings?.startSec ?? 0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
+  const [zoom, setZoom] = useState(1); // 0.25x – 4x
 
   const totalDuration = mediaDuration > 0 ? mediaDuration : duration;
   const usableDuration = Math.max(0, totalDuration);
@@ -72,6 +74,25 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
   const mediaUrl = `http://127.0.0.1:${streamingPort}/stream?path=${encodeURIComponent(fileName)}`;
   const thumbnailUrl = `http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(fileName)}`;
   const selectionPct = usableDuration > 0 ? Math.round((clipDuration / usableDuration) * 100) : 0;
+
+  // Zoom helpers
+  const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
+  const zoomIn  = () => setZoom(z => { const next = ZOOM_STEPS.find(s => s > z); return next ?? z; });
+  const zoomOut = () => setZoom(z => { const prev = [...ZOOM_STEPS].reverse().find(s => s < z); return prev ?? z; });
+  const zoomReset = () => setZoom(1);
+
+  // Dense adaptive ruler ticks: choose interval so ~12-20 ticks appear at 1x zoom.
+  const buildRulerTicks = (dur: number, zoomLevel: number): number[] => {
+    if (dur <= 0) return [];
+    const visibleDur = dur / zoomLevel;
+    const intervals = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+    const targetTicks = 16;
+    const interval = intervals.find(i => visibleDur / i <= targetTicks) ?? intervals[intervals.length - 1];
+    const ticks: number[] = [];
+    for (let t = 0; t <= dur; t += interval) ticks.push(t);
+    return ticks;
+  };
+  const rulerTicks = buildRulerTicks(usableDuration, zoom);
 
   const seekPreview = (time: number) => {
     setPlayhead(time);
@@ -487,20 +508,72 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
               <Timer size={13} />
               <span style={{ fontSize: 11 }}>Precision Cut Scrubber</span>
             </div>
-            <div className="pro-row" style={{ gap: 6 }}>
+            <div className="pro-row" style={{ gap: 6, alignItems: 'center' }}>
               <span className="pw-badge pw-badge--flat" style={{ fontSize: 8 }}>SAMPLE-ACCURATE</span>
-              <span className="pw-data" style={{ color: 'var(--pw-text-faint)', fontSize: 8 }}>
-                DRAG HANDLES TO TRIM
+              {/* Zoom controls */}
+              <button
+                type="button"
+                className="pw-btn"
+                onClick={zoomOut}
+                disabled={zoom <= 0.25}
+                title="Zoom out timeline"
+                style={{ minHeight: 20, padding: '2px 7px', fontSize: 10 }}
+              >－</button>
+              <span style={{ fontSize: 9, color: 'var(--pw-text-faint)', minWidth: 32, textAlign: 'center' }}>
+                {zoom === 1 ? '1×' : zoom < 1 ? `${Math.round(zoom * 100)}%` : `${zoom}×`}
               </span>
+              <button
+                type="button"
+                className="pw-btn"
+                onClick={zoomIn}
+                disabled={zoom >= 4}
+                title="Zoom in timeline"
+                style={{ minHeight: 20, padding: '2px 7px', fontSize: 10 }}
+              >＋</button>
+              <button
+                type="button"
+                className="pw-btn"
+                onClick={zoomReset}
+                title="Reset zoom"
+                style={{ minHeight: 20, padding: '2px 6px', fontSize: 9 }}
+              >FIT</button>
             </div>
           </div>
 
           {/* The ruler and both lanes live in one `surface` box so the drag
               overlay maps a pointer x straight onto a timecode. */}
-          <div className="pro-timeline__surface" ref={trackRef}>
-            <div className="pw-scale pro-timeline__ruler">
-              {[0, 0.25, 0.5, 0.75, 1].map(f => (
-                <span key={f}>{formatTrimTime(usableDuration * f)}</span>
+          {/* Horizontally scrollable zoomed timeline surface */}
+          <div
+            ref={scrollRef}
+            style={{
+              overflowX: zoom > 1 ? 'auto' : 'hidden',
+              overflowY: 'hidden',
+              scrollbarWidth: 'thin',
+              scrollbarColor: 'var(--pw-hi-line) transparent',
+            }}
+          >
+          <div
+            className="pro-timeline__surface"
+            ref={trackRef}
+            style={{ width: `${zoom * 100}%`, minWidth: '100%' }}
+          >
+            {/* Dense ruler — ticks adapt to zoom level */}
+            <div className="pw-scale pro-timeline__ruler" style={{ position: 'relative', display: 'block', height: 18 }}>
+              {rulerTicks.map(t => (
+                <span
+                  key={t}
+                  style={{
+                    position: 'absolute',
+                    left: `${(t / usableDuration) * 100}%`,
+                    transform: 'translateX(-50%)',
+                    fontSize: 8,
+                    color: 'var(--pw-text-faint)',
+                    whiteSpace: 'nowrap',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {formatTrimTime(t)}
+                </span>
               ))}
             </div>
 
@@ -568,6 +641,8 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
               </div>
             )}
           </div>
+
+          </div>{/* end scrollable wrapper */}
 
           {/* Footer status strip */}
           <div className="pro-timeline__status">

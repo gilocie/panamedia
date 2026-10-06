@@ -113,14 +113,9 @@
 .pro-studio__canvas::-webkit-scrollbar,
 .pro-studio__inspector::-webkit-scrollbar { display: none; }
 
-/* Tool identity row (compact) */
+/* Tool identity row — hidden: tabs strip already identifies the active tool */
 .pro-studio__toolhead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
-  min-width: 0;
-  padding-bottom: 2px;
+  display: none;
 }
 
 .pro-studio__toolhead [data-tool-icon] {
@@ -433,16 +428,19 @@
     var(--pw-low) !important;
 }
 
-/* ─── 15b. Preview monitor (fixed compact height) ────────────────────
-   Capped so transport + panels always stay visible without scrolling. */
+/* ─── 15b. Preview monitor — fills available height, 16:9 aspect ─────
+   Flex-1 so it grows to fill the canvas column; aspect-ratio keeps it
+   standard 16:9. max-height is generous so the video is genuinely large. */
 
 .pro-monitor {
   width: 100%;
   aspect-ratio: 16 / 9;
-  max-height: 170px;
+  flex: 1 1 auto;
+  max-height: none;
   border: 1px solid var(--pw-line);
   border-radius: 8px;
   overflow: hidden;
+  background: #000;
 }
 
 /* ─── 16. Timeline stage ───────────────────────────────────────────── */
