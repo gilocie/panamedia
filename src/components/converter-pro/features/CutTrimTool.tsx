@@ -340,35 +340,7 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
               backdropFilter: 'blur(1px)'
             }}
           />
-          {usableDuration > 0 && (
-            <>
-              <div
-                aria-hidden="true"
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  bottom: 0,
-                  left: `${pct(startSec)}%`,
-                  width: 2,
-                  background: ACCENT,
-                  boxShadow: `0 0 12px ${ACCENT}`
-                }}
-              />
-              <div
-                aria-hidden="true"
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  right: `${100 - pct(endSec)}%`,
-                  bottom: 0,
-                  width: 2,
-                  background: HOT,
-                  boxShadow: `0 0 12px ${HOT}`
-                }}
-              />
-              {/* Playhead hairline removed — position shown in monitor chip */}
-            </>
-          )}
+          {/* In/Out point hairlines removed — kept only on the timeline scrubber */}
           <span className="pro-canvas__chip pro-canvas__chip--br">
             {formatTrimTime(playhead)} / {formatTrimTime(usableDuration)}
           </span>
