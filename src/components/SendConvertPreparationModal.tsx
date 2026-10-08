@@ -77,6 +77,7 @@ export function SendConvertPreparationModal({
   onQueueFilesRemoved,
   activeMainTab: restoredMainTab = 'convert',
   onActiveMainTabChange,
+  standaloneWindow = false,
 }: SendConvertPreparationModalProps) {
   // The queue is owned by converterQueue. This used to keep its own copy seeded
   // from `converter_queue` and then fall back to `fileName` (the playing file),
@@ -88,15 +89,24 @@ export function SendConvertPreparationModal({
   // Per-file tool settings (Cut, Crop, Subtitle, Effect, Rotate,
   // Watermark, Compress). Keyed by normalised path so settings survive
   // queue reordering. The engine consumes them as options.tools.
-  const [toolSettings, setToolSettings] = useState<Record<string, Record<string, unknown>>>({});
-  const applyToolSettings = (file: string, tool: string, settings: Record<string, unknown>) => {
+  const [toolSettings, setToolSettings] = useState<Record<string, Record<string, unknown>>>(() => {
+    try {
+      const stored = localStorage.getItem('converter_tool_settings');
+      const parsed = stored ? JSON.parse(stored) : {};
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch { return {}; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('converter_tool_settings', JSON.stringify(toolSettings)); } catch { /* storage may be unavailable */ }
+  }, [toolSettings]);
+  const applyToolSettings = useCallback((file: string, tool: string, settings: Record<string, unknown>) => {
     const key = normalizeQueuePath(file);
     if (!key) return;
     setToolSettings(prev => ({
       ...prev,
       [key]: { ...(prev[key] || {}), [tool]: settings }
     }));
-  };
+  }, []);
 
   // Phase G: capacity and power, checked before a queue starts rather than
   // discovered by ffmpeg halfway through. `capacityNote` is advisory -- the
@@ -107,11 +117,15 @@ export function SendConvertPreparationModal({
 
   // Window states: Expand/Maximize to fit device screen, Minimize to background
   const [isExpanded, setIsExpanded] = useState<boolean>(() =>
-    localStorage.getItem('panamedia_converter_expanded') === 'true'
+    standaloneWindow || localStorage.getItem('panamedia_converter_expanded') === 'true'
   );
   const [isMinimized, setIsMinimized] = useState<boolean>(false);
 
   const handleToggleExpand = () => {
+    if (standaloneWindow) {
+      electron?.ipcRenderer.send('window-maximize');
+      return;
+    }
     setIsExpanded((expanded) => {
       const next = !expanded;
       localStorage.setItem('panamedia_converter_expanded', String(next));
@@ -302,8 +316,10 @@ export function SendConvertPreparationModal({
   }, []);
 
   const handleMinimizeModal = () => {
-    setIsMinimized(true);
-    if (onMinimizeChange) onMinimizeChange(true);
+    if (!standaloneWindow) {
+      setIsMinimized(true);
+      if (onMinimizeChange) onMinimizeChange(true);
+    }
     const activeFile = (activeConvertingFile || localQueue[selectedFileIdx] || '').split(/[\\/]/).pop() || '';
     const displayProgress = Math.round(conversionProgress <= 1 && conversionProgress > 0 ? conversionProgress * 100 : conversionProgress);
     if (electron) {
@@ -321,7 +337,11 @@ export function SendConvertPreparationModal({
         queue: localQueue,
         mediaTypes: mediaTypes
       });
-      electron.ipcRenderer.send('player-remote-command', 'play');
+      if (standaloneWindow) {
+        // Minimize the converter window itself so its parent/player can receive
+        // pointer and context-menu input again.
+        electron.ipcRenderer.send('window-minimize');
+      }
     }
   };
 
@@ -560,10 +580,18 @@ export function SendConvertPreparationModal({
     && typeof savedCutSettings.endSec === 'number'
     ? {
         startSec: savedCutSettings.startSec,
-        endSec: savedCutSettings.endSec
+        endSec: savedCutSettings.endSec,
+        timelineOrigin: 'timelineOrigin' in savedCutSettings && typeof savedCutSettings.timelineOrigin === 'number'
+          ? savedCutSettings.timelineOrigin : 0,
+        rightCutApplied: 'rightCutApplied' in savedCutSettings && savedCutSettings.rightCutApplied === true,
+        strategy: 'strategy' in savedCutSettings && savedCutSettings.strategy === 'delete'
+          ? 'delete' as const : 'keep' as const
       }
     : undefined;
-  const configuredToolIds = new Set(Object.keys(currentFileTools));
+  const persistCutSettings = useCallback((settings: { startSec: number; endSec: number; strategy: 'keep' | 'delete'; timelineOrigin?: number; rightCutApplied?: boolean }) => {
+    applyToolSettings(currentFile, 'cut', settings);
+  }, [applyToolSettings, currentFile]);
+  const configuredToolIds = new Set(currentFileTools.cut ? ['cut'] : []);
 
   // Duration for the targeted item. The player's figure is authoritative when
   // it is the same file; the tools fall back to probing the stream themselves
@@ -598,7 +626,7 @@ export function SendConvertPreparationModal({
   ];
 
   const studioTabs = MEDIA_TOOLS
-    .filter(tool => TOOL_STUDIO_IDS.includes(tool.id))
+    .filter(tool => tool.id === 'cut')
     .map(tool => ({
       id: tool.id,
       label: STUDIO_TAB_LABELS[tool.id] ?? tool.label,
@@ -607,6 +635,7 @@ export function SendConvertPreparationModal({
     }));
 
   const openStudioTool = (id: string) => {
+    if (id !== 'cut') return;
     const match = MEDIA_TOOLS.find(tool => tool.id === id);
     if (match) setActiveTool(match);
   };
@@ -636,19 +665,6 @@ export function SendConvertPreparationModal({
       }));
     }
   };
-  const handlePreviewStep = (direction: -1 | 1) => {
-    const outputs = activeMainTab === 'video_output'
-      ? convertedVideos
-      : activeMainTab === 'audio_output' ? convertedAudios : null;
-    if (!outputs) {
-      setSelectedFileIdx((index) => Math.max(0, Math.min(localQueue.length - 1, index + direction)));
-      return;
-    }
-    const currentIndex = outputs.findIndex((item) => item.path === currentFile);
-    const next = outputs[Math.max(0, Math.min(outputs.length - 1, currentIndex + direction))];
-    if (next) handleSelectOutput({ path: next.path, thumbnailPath: next.thumbnailPath });
-  };
-
   // Toggle media type on a card (Video <-> Audio) with immediate localStorage persistence
   const toggleMediaType = (fPath: string) => {
     setMediaTypes(prev => {
@@ -745,17 +761,16 @@ export function SendConvertPreparationModal({
     clearQueue();
     // Stop every conversion still running for a queued file, then mark
     // those files removed so their late progress events are dropped.
+    const removedFiles = localQueue;
     const inFlight = Object.entries(externalConversionStatus)
       .filter(([, s]) => s && (s.status === 'converting' || s.status === 'paused'))
       .map(([f]) => f);
-    if (inFlight.length > 0) {
-      inFlight.forEach(f => {
-        if (electron) {
-          electron.ipcRenderer.invoke('converter-cancel', f).catch(() => {});
-        }
-      });
-      onQueueFilesRemoved?.(inFlight);
-    }
+    inFlight.forEach(f => {
+      if (electron) electron.ipcRenderer.invoke('converter-cancel', f).catch(() => {});
+    });
+    // Mark pending as well as currently running rows as removed so a batch
+    // worker cannot start one after Clear All has emptied the queue.
+    onQueueFilesRemoved?.(removedFiles);
     setMediaTypes({});
     localStorage.removeItem('converter_media_types');
     if (electron) {
@@ -849,15 +864,14 @@ export function SendConvertPreparationModal({
     const perFileOptions: Record<string, { mode: 'original' | 'convert' | 'extract_audio'; format: string; bitrate: string; audioBitrate?: string; highQuality?: boolean; tools?: Record<string, unknown> }> = {};
     localQueue.forEach(f => {
       const mType = mediaTypes[f] || (isVideoFile(f) ? 'video' : 'audio');
-      const fileTools = toolSettings[normalizeQueuePath(f)];
-      const hasVideoEdits = mType === 'video' && Boolean(fileTools && Object.keys(fileTools).length > 0);
+      const savedTools = toolSettings[normalizeQueuePath(f)];
+      // Only Cut / Trim is enabled in this release. Ignore saved settings for
+      // tools that are currently marked Coming soon.
+      const fileTools = savedTools?.cut ? { cut: savedTools.cut } : undefined;
+      const hasVideoEdits = mType === 'video' && Boolean(fileTools?.cut);
       perFileOptions[f] = {
         mode: mType === 'video' ? (autoCopy && !hasVideoEdits ? 'original' : 'convert') : 'extract_audio',
-        // The GIF tool always produces an animated GIF,
-        // whatever container the dock selector shows.
-        format: fileTools && fileTools.gif
-          ? 'gif'
-          : (mType === 'video' ? selectedVideoFmt : selectedAudioFmt),
+        format: mType === 'video' ? selectedVideoFmt : selectedAudioFmt,
         bitrate: mType === 'video' ? videoQuality : audioBitrate,
         audioBitrate,
         highQuality: useHqEngine,
@@ -957,15 +971,16 @@ export function SendConvertPreparationModal({
 
 
   return (
-    <div 
-      className="videoproc-converter-modal glass-panel"
-      onClick={(e) => e.stopPropagation()}
-      style={{
+    <div
+        onClick={(e) => e.stopPropagation()}
+        className={`videoproc-converter-modal glass-panel${standaloneWindow ? ' videoproc-converter-modal--standalone' : ''}`}
+        style={{
         width: isExpanded ? '100vw' : '1060px',
+        minWidth: standaloneWindow ? 0 : undefined,
         maxWidth: isExpanded ? '100vw' : '96vw',
         height: isExpanded ? '100vh' : '760px',
         maxHeight: isExpanded ? '100vh' : '92vh',
-        background: 'linear-gradient(180deg, #121320 0%, #0a0b12 100%)',
+        background: standaloneWindow ? 'transparent' : 'linear-gradient(180deg, #121320 0%, #0a0b12 100%)',
         border: isExpanded ? 'none' : '1px solid rgba(255, 255, 255, 0.1)',
         borderRadius: isExpanded ? '0px' : '18px',
         boxShadow: isExpanded ? 'none' : '0 25px 80px rgba(0, 0, 0, 0.9), 0 0 50px rgba(99, 102, 241, 0.12)',
@@ -986,10 +1001,11 @@ export function SendConvertPreparationModal({
         queueCount={localQueue.length}
         showDone={activeMainTab === 'convert' && localQueue.length > 0 && !(activeTool && TOOL_STUDIO_IDS.includes(activeTool.id))}
         isExpanded={isExpanded}
+        draggable={standaloneWindow}
         useHwAccel={useHwAccel}
         onToggleExpand={handleToggleExpand}
-        onMinimize={onClose || onBack || (() => {})}
-        onBack={isConverting ? handleMinimizeModal : (onClose || onBack || (() => {}))}
+        onMinimize={standaloneWindow ? (() => electron?.ipcRenderer.send('window-minimize')) : (onClose || onBack || (() => {}))}
+        onBack={standaloneWindow || isConverting ? handleMinimizeModal : (onClose || onBack || (() => {}))}
         onClose={isConverting ? handleMinimizeModal : (onClose || onBack || (() => {}))}
       />
 
@@ -1014,24 +1030,25 @@ export function SendConvertPreparationModal({
       )}
 
       {/* ─── 2. MAIN CENTER WORKSPACE ─── hidden while a tool is open */}
-      <div style={{
+      <div className={standaloneWindow ? 'converter-pro-main-workspace' : undefined} style={{
         flex: 1,
         minHeight: 0,
         display: activeTool && TOOL_STUDIO_IDS.includes(activeTool.id) ? 'none' : 'flex',
-        background: 'rgba(0, 0, 0, 0.25)',
+        background: standaloneWindow ? 'transparent' : 'rgba(0, 0, 0, 0.25)',
         borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
       }}>
         {/* ── LEFT PANEL: Tabs + Media Items Queue ── */}
-        <div style={{
+        <div className={standaloneWindow ? 'converter-pro-queue-panel' : undefined} style={{
           flex: 1,
           minWidth: 0,
           borderRight: '1px solid rgba(255, 255, 255, 0.07)',
           display: 'flex',
           flexDirection: 'column',
-          background: 'rgba(15, 16, 26, 0.55)'
+          background: standaloneWindow ? 'transparent' : 'rgba(15, 16, 26, 0.55)'
         }}>
           {/* Top Subheader: Clean 3 Main Tabs (No duplicate settings buttons) */}
           <TopTabsBar
+            standaloneWindow={standaloneWindow}
             activeMainTab={activeMainTab}
             onSelectTab={handleSelectMainTab}
             queueCount={localQueue.length}
@@ -1082,6 +1099,7 @@ export function SendConvertPreparationModal({
               activeAudioPreset={activeAudioPreset}
               videoQuality={videoQuality}
               audioBitrate={audioBitrate}
+              trimmedFiles={localQueue.filter((file) => Boolean(toolSettings[normalizeQueuePath(file)]?.cut))}
               conversionStatus={externalConversionStatus}
               onConvertSingleFile={handleConvertSingleFile}
               onTogglePauseSingleFile={onTogglePauseSingleFile}
@@ -1126,18 +1144,19 @@ export function SendConvertPreparationModal({
         </div>
 
         {/* ── RIGHT PANEL: Video Preview Player + Destination Selector (Comfortable 300px width) ── */}
-        <div style={{
+        <div className={standaloneWindow ? 'converter-pro-preview-panel' : undefined} style={{
           width: '300px',
           flex: '0 0 300px',
           minWidth: '290px',
           maxWidth: '320px',
           display: 'flex',
           flexDirection: 'column',
-          background: 'rgba(12, 13, 22, 0.75)'
+          background: standaloneWindow ? 'transparent' : 'rgba(12, 13, 22, 0.75)'
         }}>
           {/* Preview Monitor */}
           <PreviewMonitor
             currentFile={currentFile}
+            trimRange={activeMainTab === 'convert' ? initialCutSettings : undefined}
             thumbnailPath={activeOutputPreview?.path === currentFile ? activeOutputPreview.thumbnailPath : undefined}
             playbackRequest={outputPlaybackRequest}
             streamingPort={streamingPort}
@@ -1148,13 +1167,8 @@ export function SendConvertPreparationModal({
                 return current === path ? null : current;
               });
             }}
-            onPrevFile={() => {
-              handlePreviewStep(-1);
-            }}
-            onNextFile={() => {
-              handlePreviewStep(1);
-            }}
             isMinimized={isMinimized}
+            hotkeysEnabled={!activeTool || activeTool.id !== 'cut'}
           />
 
           {/* Export Settings Panel */}
@@ -1185,6 +1199,7 @@ export function SendConvertPreparationModal({
       {/* ─── 3. BOTTOM DOCK ─── hidden while a tool is open */}
       {!(activeTool && TOOL_STUDIO_IDS.includes(activeTool.id)) && (
       <ConverterBottomDock
+        standaloneWindow={standaloneWindow}
         formatModalMode={formatModalMode}
         activeVideoPreset={activeVideoPreset}
         activeAudioPreset={activeAudioPreset}
@@ -1240,6 +1255,7 @@ export function SendConvertPreparationModal({
                 duration={currentDuration}
                 streamingPort={streamingPort}
                 initialSettings={initialCutSettings}
+                onSettingsChange={persistCutSettings}
                 onApply={(cutSettings) => {
                   applyToolSettings(currentFile, 'cut', cutSettings);
                 }}
@@ -1328,7 +1344,7 @@ export function SendConvertPreparationModal({
               duration={currentDuration}
                 onApply={({ flipH, flipV }) => {
                   const existing = (currentFileTools.rotate ?? {}) as Record<string, unknown>;
-                  applyToolSettings(currentFile, 'rotate', { ...existing, angle: 0, flipH, flipV });
+                  applyToolSettings(currentFile, 'rotate', { ...existing, flipH, flipV });
                 }}
                 onClose={closeStudio}
               />

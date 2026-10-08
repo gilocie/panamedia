@@ -31,6 +31,7 @@ import {
 interface SendToFlashModalProps {
   filePath: string;
   onClose: () => void;
+  openConverterProDirectly?: boolean;
   isBatch?: boolean;
   sendTrayItems?: string[];
   setSendTrayItems?: React.Dispatch<React.SetStateAction<string[]>>;
@@ -44,6 +45,7 @@ interface SendToFlashModalProps {
 export function SendToFlashModal({ 
   filePath, 
   onClose, 
+  openConverterProDirectly = false,
   isBatch = false,
   sendTrayItems = [], 
   setSendTrayItems,
@@ -70,13 +72,13 @@ export function SendToFlashModal({
   // header asks for the preparation screen, and the queue is left alone.
   //
   // The flag is read once, here, at mount, and consumed immediately.
-  const openedFromPlayer = Boolean((window as any).__openConverterProOpen);
+  const openedDirectly = openConverterProDirectly || Boolean((window as any).__openConverterProOpen);
   if ((window as any).__openConverterProOpen) {
     (window as any).__openConverterProOpen = false;
   }
   const [activeSection, setActiveSection] = useState<
     'main' | 'prepare' | 'drives' | 'sendtray_progress' | 'sendtray_destination'
-  >(() => (openedFromPlayer ? 'prepare' : 'main'));
+  >(() => (openedDirectly ? 'prepare' : 'main'));
   const [converterTab, setConverterTab] = useState<'convert' | 'video_output' | 'audio_output'>(() => {
     const savedTab = localStorage.getItem('panamedia_converter_active_tab');
     return savedTab === 'video_output' || savedTab === 'audio_output' ? savedTab : 'convert';
@@ -125,7 +127,7 @@ export function SendToFlashModal({
   // `isPaused` false, so the big button kept reading PAUSE and kept pulsing
   // while the card read RESUME. It is derived below instead.
   const [fileConversionMap, setFileConversionMap] = useState<Record<string, {
-    status: 'idle' | 'converting' | 'paused' | 'completed' | 'failed';
+    status: 'idle' | 'converting' | 'paused' | 'completed' | 'failed' | 'cancelled';
     progress: number;
     error?: string;
     outputPath?: string;
@@ -138,6 +140,24 @@ export function SendToFlashModal({
   const handleQueueFilesRemoved = (files: string[]) => {
     if (!files || files.length === 0) return;
     files.forEach(f => removedFilesRef.current.add(f));
+    setFileConversionMap(prev => {
+      const next = { ...prev };
+      for (const file of files) {
+        if (next[file] && (next[file].status === 'converting' || next[file].status === 'paused')) {
+          next[file] = { ...next[file], status: 'cancelled', progress: 0 };
+        }
+      }
+      return next;
+    });
+
+    // If every file in this run was removed, clear the aggregate run state now
+    // instead of waiting for a late FFmpeg/core completion event to arrive.
+    if (isConvertingBatch && allFiles.length > 0 && allFiles.every(file => removedFilesRef.current.has(file))) {
+      setIsConvertingBatch(false);
+      setCopyStatus('idle');
+      setCopyProgress(0);
+      try { localStorage.removeItem('converter_active_progress'); } catch (e) {}
+    }
   };
   // Mirror of the above, readable from callbacks without re-creating them.
   const fileConversionMapRef = useRef(fileConversionMap);
@@ -550,6 +570,9 @@ export function SendToFlashModal({
       console.log(`[Converter] converting ${allFiles.length} file(s), ${poolSize} at a time, ${threadBudget} threads each`);
 
       const conversionPromises = mapWithConcurrency(allFiles, poolSize, async (target, i) => {
+        if (removedFilesRef.current.has(target)) {
+          return { file: target, success: false, cancelled: true };
+        }
         setFileConversionMap(prev => ({
           ...prev,
           [target]: { status: 'converting', progress: 0.05 }
@@ -588,6 +611,9 @@ export function SendToFlashModal({
                 filePath: target,
                 driveLetter: options.exportDriveLetter
               });
+              if (removedFilesRef.current.has(target)) {
+                return { file: target, success: false, cancelled: true };
+              }
               if (!res.success) throw new Error(res.error || 'Copy to drive failed');
             } else {
               const res = await bridge.ipcRenderer.invoke('convert-and-send-to-drive', {
@@ -602,6 +628,9 @@ export function SendToFlashModal({
                   tools: itemOpt.tools
                 }
               });
+              if (removedFilesRef.current.has(target)) {
+                return { file: target, success: false, cancelled: true };
+              }
               if (!res.success) throw new Error(res.error || 'Conversion to drive failed');
               if (res.outputs && res.outputs.length) driveOutputs = res.outputs;
               else if (res.outputPath) driveOutputs = [res.outputPath];
@@ -644,6 +673,9 @@ export function SendToFlashModal({
               }
             });
             if (res.success && res.outputPath) {
+              if (removedFilesRef.current.has(target)) {
+                return { file: target, success: false, cancelled: true };
+              }
               // Split writes a numbered series that already sits in
               // the destination, so every segment is registered and
               // no relocation happens. A single-file conversion is
@@ -693,6 +725,9 @@ export function SendToFlashModal({
           }
           return { file: target, success: true };
         } catch (err: any) {
+          if (removedFilesRef.current.has(target)) {
+            return { file: target, success: false, cancelled: true };
+          }
           setFileConversionMap(prev => ({
             ...prev,
             [target]: { status: 'failed', progress: 0, error: err?.message }
@@ -703,11 +738,15 @@ export function SendToFlashModal({
 
       // mapWithConcurrency already awaits its own pool.
       const results = await conversionPromises;
-      const anyFailed = results.some(r => !r.success);
+      const remainingResults = results.filter(r => !removedFilesRef.current.has(r.file));
+      const anyFailed = remainingResults.some(r => !r.success);
 
-      if (anyFailed) {
+      if (remainingResults.length === 0) {
+        setCopyStatus('idle');
+        setCopyProgress(0);
+      } else if (anyFailed) {
         setCopyStatus('failed');
-        const failedFiles = results.filter(r => !r.success);
+        const failedFiles = remainingResults.filter(r => !r.success);
         setErrorMsg(`${failedFiles.length} file(s) failed to convert`);
       } else {
         setCopyStatus('completed');
@@ -716,13 +755,15 @@ export function SendToFlashModal({
 
       try {
         localStorage.removeItem('converter_active_progress');
-        localStorage.setItem('converter_last_event', JSON.stringify({
-          status: anyFailed ? 'partial' : 'completed',
-          completedAt: Date.now(),
-          totalFiles: allFiles.length
-        }));
+        if (remainingResults.length > 0) {
+          localStorage.setItem('converter_last_event', JSON.stringify({
+            status: anyFailed ? 'partial' : 'completed',
+            completedAt: Date.now(),
+            totalFiles: remainingResults.length
+          }));
+        }
       } catch (e) {}
-      if (!anyFailed && activeSection !== 'prepare') {
+      if (remainingResults.length > 0 && !anyFailed && activeSection !== 'prepare') {
         setTimeout(() => {
           onClose();
         }, 1500);
@@ -761,6 +802,7 @@ export function SendToFlashModal({
 
   const handleConvertSingleFile = async (targetFile: string, options: SendConvertOptions) => {
     if (!targetFile) return;
+    removedFilesRef.current.delete(targetFile);
     if (!electron) {
       setFileConversionMap(prev => ({
         ...prev,
@@ -827,6 +869,7 @@ export function SendToFlashModal({
       if (outputs.length === 0) {
         throw new Error('Conversion finished without returning an output path.');
       }
+      if (removedFilesRef.current.has(targetFile)) return;
 
       const outputPath = outputs[0];
       const outputKind = classifyOutput(itemOptions.mode, targetFile, outputPath);
@@ -1150,16 +1193,23 @@ export function SendToFlashModal({
 
   return (
     <div 
-      className="modal-backdrop send-to-flash-modal" 
+      className={`modal-backdrop send-to-flash-modal${openedDirectly ? ' converter-pro-standalone' : ''}`}
       data-modal="send" 
       style={{ 
         zIndex: 12000, 
-        display: isMinimized ? 'none' : 'flex' 
+        display: isMinimized ? 'none' : 'flex',
+        ...(openedDirectly ? {
+          position: 'fixed' as const, inset: 0, width: '100vw', height: '100vh',
+          minWidth: 0, minHeight: 0, padding: 0, margin: 0,
+          alignItems: 'stretch', justifyContent: 'stretch',
+          background: 'transparent', overflow: 'hidden', borderRadius: 0
+        } : {})
       }} 
-      onClick={onClose}
+      onClick={openedDirectly ? undefined : onClose}
     >
       {activeSection === 'prepare' ? (
         <SendConvertPreparationModal
+          standaloneWindow={openedDirectly}
           fileName={allFiles.length > 1 ? `${allFiles.length} files queued` : defaultDisplayName}
           targetAction={pendingAction}
           isBatch={allFiles.length > 1 || isBatch}
@@ -1195,9 +1245,8 @@ export function SendToFlashModal({
           onMinimizeChange={setIsMinimized}
           onBack={() => {
             setIsMinimized(false);
-            // Arrived here from the player header, so back means close rather
-            // than drop back to the send/copy menu.
-            if (openedFromPlayer) {
+            // A direct Converter Pro window has no send/copy menu to return to.
+            if (openedDirectly) {
               (window as any).__openConverterProOpen = false;
               onClose();
             } else {

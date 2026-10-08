@@ -2,6 +2,7 @@ import React from 'react';
 import { Film, Music, Layers } from 'lucide-react';
 
 interface TopTabsBarProps {
+  standaloneWindow?: boolean;
   activeMainTab: 'convert' | 'video_output' | 'audio_output';
   onSelectTab: (tab: 'convert' | 'video_output' | 'audio_output') => void;
   queueCount: number;
@@ -10,6 +11,7 @@ interface TopTabsBarProps {
 }
 
 export const TopTabsBar: React.FC<TopTabsBarProps> = ({
+  standaloneWindow = false,
   activeMainTab,
   onSelectTab,
   queueCount,
@@ -17,7 +19,7 @@ export const TopTabsBar: React.FC<TopTabsBarProps> = ({
   audioOutputCount
 }) => {
   return (
-    <div style={{
+    <div className={standaloneWindow ? 'converter-pro-transparent-surface' : undefined} style={{
       padding: '10px 16px',
       borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
       display: 'flex',

@@ -19,6 +19,7 @@
 #include <regex>
 #include <unordered_map>
 #include <mutex>
+#include <cstdlib>
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -335,6 +336,16 @@ namespace Panamedia {
                             handleProbe(client, decodedPath);
                         } else if (url.find("/thumbnail") != std::string::npos) {
                             handleThumbnail(client, decodedPath);
+                        } else if (url.find("/waveform") != std::string::npos) {
+                            auto queryInt = [&url](const std::string& key, int fallback) {
+                                const auto pos = url.find(key + "=");
+                                if (pos == std::string::npos) return fallback;
+                                const auto begin = pos + key.size() + 1;
+                                const auto end = url.find('&', begin);
+                                try { return std::stoi(url.substr(begin, end == std::string::npos ? end : end - begin)); }
+                                catch (...) { return fallback; }
+                            };
+                            handleWaveform(client, decodedPath, queryInt("width", 4096), queryInt("height", 128));
                         } else if (url.find("/preview") != std::string::npos) {
                             double timeSec = 0.0;
                             size_t timePos = url.find("time=");
@@ -879,6 +890,77 @@ namespace Panamedia {
 
         std::string response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         sendAll(client, response.c_str(), response.length());
+    }
+
+    void HTTPServer::handleWaveform(unsigned long long clientSocket, const std::string& decodedPath, int width, int height) {
+        SOCKET client = static_cast<SOCKET>(clientSocket);
+        const auto source = toPath(decodedPath);
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(source, ec) || ec) {
+            const std::string response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            sendAll(client, response.c_str(), static_cast<int>(response.size()));
+            return;
+        }
+        width = std::clamp(width, 256, 8192);
+        height = std::clamp(height, 32, 512);
+
+        const auto modified = std::filesystem::last_write_time(source, ec).time_since_epoch().count();
+        const std::string cacheKey = decodedPath + std::to_string(modified) + "_" + std::to_string(width) + "x" + std::to_string(height);
+        const std::string cacheName = std::to_string(std::hash<std::string>{}(cacheKey)) + ".png";
+        const auto cachePath = toPath(findThumbnailCacheDir()) / "waveforms" / cacheName;
+        std::filesystem::create_directories(cachePath.parent_path(), ec);
+
+        if (!std::filesystem::exists(cachePath, ec) || ec || std::filesystem::file_size(cachePath, ec) == 0 || ec) {
+            std::error_code removeError;
+            std::filesystem::remove(cachePath, removeError);
+            const std::string filter = "[0:a:0]aformat=channel_layouts=mono,showwavespic=s=" + std::to_string(width) + "x" + std::to_string(height) + ":colors=0x38bdf8,format=rgba,colorkey=0x000000:0.05:0.0[out]";
+            std::stringstream cmd;
+            cmd << escapeArg(findFFmpegExecutable()) << " -y -hide_banner -loglevel error -i " << escapeArg(decodedPath)
+                << " -filter_complex " << escapeArg(filter) << " -map " << escapeArg("[out]")
+                << " -frames:v 1 -threads 1 " << escapeArg(cachePath.u8string());
+
+#ifdef _WIN32
+            std::wstring wcmd = utf8ToWide(cmd.str());
+            STARTUPINFOW si{};
+            PROCESS_INFORMATION pi{};
+            si.cb = sizeof(si);
+            si.dwFlags |= STARTF_USESHOWWINDOW;
+            si.wShowWindow = SW_HIDE;
+            if (CreateProcessW(nullptr, wcmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+                const DWORD waitResult = WaitForSingleObject(pi.hProcess, 120000);
+                if (waitResult == WAIT_TIMEOUT) {
+                    TerminateProcess(pi.hProcess, 1);
+                    WaitForSingleObject(pi.hProcess, INFINITE);
+                }
+                DWORD exitCode = 1;
+                GetExitCodeProcess(pi.hProcess, &exitCode);
+                CloseHandle(pi.hProcess);
+                CloseHandle(pi.hThread);
+                if (exitCode != 0) std::filesystem::remove(cachePath, removeError);
+            }
+#else
+            const int exitCode = std::system(cmd.str().c_str());
+            if (exitCode != 0) std::filesystem::remove(cachePath, removeError);
+#endif
+        }
+
+        if (!std::filesystem::exists(cachePath, ec) || ec || std::filesystem::file_size(cachePath, ec) == 0 || ec) {
+            const std::string response = "HTTP/1.1 422 Unprocessable Content\r\nContent-Length: 0\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n";
+            sendAll(client, response.c_str(), static_cast<int>(response.size()));
+            return;
+        }
+        const auto size = std::filesystem::file_size(cachePath, ec);
+        std::ifstream image(cachePath, std::ios::binary);
+        if (!image) return;
+        std::stringstream headers;
+        headers << "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: " << size
+                << "\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: public, max-age=31536000, immutable\r\nConnection: close\r\n\r\n";
+        const auto header = headers.str();
+        if (!sendAll(client, header.c_str(), static_cast<int>(header.size()))) return;
+        std::vector<char> buffer(32768);
+        while (image.read(buffer.data(), static_cast<std::streamsize>(buffer.size())) || image.gcount() > 0) {
+            if (!sendAll(client, buffer.data(), static_cast<int>(image.gcount()))) break;
+        }
     }
 
     void HTTPServer::handleTimelinePreview(unsigned long long clientSocket, const std::string& decodedPath, double timeSec) {

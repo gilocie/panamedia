@@ -15,6 +15,7 @@ export interface SendConvertOptions {
 }
 
 export interface SendConvertPreparationModalProps {
+  standaloneWindow?: boolean;
   fileName: string;
   targetAction?: 'drive' | 'sendtray' | 'convert';
   isBatch?: boolean;
@@ -32,7 +33,7 @@ export interface SendConvertPreparationModalProps {
   isPaused?: boolean;
   conversionProgress?: number;
   activeConvertingFile?: string;
-  conversionStatus?: Record<string, { status: 'idle' | 'converting' | 'paused' | 'completed' | 'failed'; progress: number; error?: string }>;
+  conversionStatus?: Record<string, { status: 'idle' | 'converting' | 'paused' | 'completed' | 'failed' | 'cancelled'; progress: number; error?: string }>;
   onTogglePauseConversion?: () => void;
   onConvertSingleFile?: (filePath: string, options: SendConvertOptions) => void;
   onTogglePauseSingleFile?: (filePath: string) => void;

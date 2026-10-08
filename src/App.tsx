@@ -736,7 +736,28 @@ export default function App() {
     );
   }
 
+  if (mode === 'converter') {
+    return (
+      <SendToFlashModal
+        filePath="media"
+        openConverterProDirectly
+        onClose={() => electron?.ipcRenderer.send('window-close')}
+      />
+    );
+  }
+
   const [activeTab, setActiveTab] = useState<'downloads' | 'queues' | 'settings' | 'integration' | 'browser'>('downloads');
+
+  useEffect(() => {
+    if (!electron) return;
+    const openConverter = () => {
+      electron.ipcRenderer.invoke('open-converter-window').catch((error: unknown) => {
+        console.error('Failed to open Converter Pro:', error);
+      });
+    };
+    electron.ipcRenderer.on('converter-open-request', openConverter);
+    return () => electron.ipcRenderer.removeListener('converter-open-request', openConverter);
+  }, []);
 
   // ─── Custom Hooks ────────────────────────────────────────────────
   const {
@@ -1894,6 +1915,26 @@ export default function App() {
             >
               <Download /> Download
             </div>
+            <div
+              className="sidebar-item"
+              onClick={() => {
+                electron?.ipcRenderer.invoke('open-player-window', { filePath: '', filename: 'Panamedia Player' })
+                  .catch((error: unknown) => console.error('Failed to open Player:', error));
+              }}
+              title="Open Panamedia Player in its own window"
+            >
+              <Tv /> Player
+            </div>
+            <div
+              className="sidebar-item"
+              onClick={() => {
+                electron?.ipcRenderer.invoke('open-converter-window')
+                  .catch((error: unknown) => console.error('Failed to open Converter Pro:', error));
+              }}
+              title="Open Converter Pro in its own window"
+            >
+              <Sparkles /> Converter
+            </div>
           </div>
 
           {/* Live Network Speed Widget — always visible in sidebar footer */}
@@ -2462,12 +2503,14 @@ export default function App() {
               </div>
 
               {/* Right Panel Drawer: Details & Media Library */}
-              {(libraryCategory as string) !== 'duplicates' && (
-                <div className="detail-drawer" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '330px', flexShrink: 0, borderLeft: '1px solid var(--panel-border)', background: 'rgba(10, 10, 16, 0.5)', padding: '16px', minHeight: 0 }}>
+              <div className="detail-drawer" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '330px', flexShrink: 0, borderLeft: '1px solid var(--panel-border)', background: 'rgba(10, 10, 16, 0.5)', padding: '16px', minHeight: 0 }}>
                   {/* Header Switcher */}
                   <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '12px', gap: '8px', flexShrink: 0 }}>
                     <button
-                      onClick={() => setRightPanelTab('details')}
+                      onClick={() => {
+                        setRightPanelTab('details');
+                        if ((libraryCategory as string) === 'duplicates') setLibraryCategory('recent');
+                      }}
                     disabled={!selectedTask}
                     className={`btn-secondary ${rightPanelTab === 'details' ? 'active' : ''}`}
                     style={{
@@ -2483,7 +2526,10 @@ export default function App() {
                     Active Details
                   </button>
                   <button
-                    onClick={() => setRightPanelTab('library')}
+                    onClick={() => {
+                      setRightPanelTab('library');
+                      if ((libraryCategory as string) === 'duplicates') setLibraryCategory('recent');
+                    }}
                     className={`btn-secondary ${rightPanelTab === 'library' ? 'active' : ''}`}
                     style={{
                       flex: 1,
@@ -2496,8 +2542,32 @@ export default function App() {
                   >
                     Media Library
                   </button>
+                  <button
+                    onClick={() => {
+                      setRightPanelTab('library');
+                      setLibraryCategory('duplicates');
+                    }}
+                    aria-pressed={(libraryCategory as string) === 'duplicates'}
+                    className={`btn-secondary ${(libraryCategory as string) === 'duplicates' ? 'active' : ''}`}
+                    style={{
+                      flex: 1,
+                      padding: '8px 4px',
+                      fontSize: '11px',
+                      borderRadius: '8px',
+                      background: (libraryCategory as string) === 'duplicates' ? 'rgba(239, 68, 68, 0.1)' : 'transparent',
+                      borderColor: (libraryCategory as string) === 'duplicates' ? 'rgba(239, 68, 68, 0.4)' : 'rgba(255,255,255,0.06)',
+                      color: (libraryCategory as string) === 'duplicates' ? '#f87171' : undefined,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <Copy size={12} /> Duplicates
+                  </button>
                 </div>
 
+                <div style={{ display: (libraryCategory as string) === 'duplicates' ? 'none' : 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
                 {/* DETAILS TAB CONTENT */}
                 {rightPanelTab === 'details' && selectedTask ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', flex: 1, overflowY: 'auto', marginTop: '14px', paddingRight: '4px' }}>
@@ -2721,60 +2791,6 @@ export default function App() {
                       ))}
                     </div>
 
-                    {/* ── Find & Remove Duplicates button ── */}
-                    {(() => {
-                      const dupCount = (() => {
-                        const m = new Map<string, number>();
-                        libraryFiles.forEach(f => {
-                          const key = getNormalizedName(f.name);
-                          m.set(key, (m.get(key) || 0) + 1);
-                        });
-                        return Array.from(m.values()).filter(c => c > 1).reduce((acc, c) => acc + c, 0);
-                      })();
-                      return (
-                        <button
-                          onClick={() => setLibraryCategory('duplicates')}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '6px',
-                            width: '100%',
-                            padding: '7px 10px',
-                            borderRadius: '8px',
-                            border: (libraryCategory as string) === 'duplicates'
-                              ? '1px solid rgba(239,68,68,0.4)'
-                              : '1px solid rgba(239,68,68,0.15)',
-                            background: (libraryCategory as string) === 'duplicates'
-                              ? 'rgba(239,68,68,0.12)'
-                              : 'rgba(239,68,68,0.05)',
-                            color: '#f87171',
-                            fontSize: '11px',
-                            fontWeight: '600',
-                            cursor: 'pointer',
-                            flexShrink: 0,
-                            transition: 'all 0.15s',
-                          }}
-                        >
-                          <Copy size={12} />
-                          Find {'&'} Remove Duplicates
-                          {dupCount > 0 && (
-                            <span style={{
-                              background: '#ef4444',
-                              color: '#fff',
-                              fontSize: '9px',
-                              fontWeight: 'bold',
-                              borderRadius: '10px',
-                              padding: '1px 6px',
-                              lineHeight: '14px',
-                            }}>
-                              {dupCount.toLocaleString()}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })()}
-
                     {/* Search and sync controls */}
                     <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                       <div className="search-bar" style={{ flex: 1, background: 'rgba(255,255,255,0.04)', borderRadius: '8px', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: '6px', border: '1px solid rgba(255,255,255,0.04)' }}>
@@ -2822,42 +2838,28 @@ export default function App() {
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: 'var(--text-muted)' }}>
                         <span>View:</span>
-                        <div style={{ display: 'inline-flex', background: 'rgba(255,255,255,0.04)', borderRadius: '5px', padding: '1px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                          <button
-                            onClick={() => setLibraryViewMode('files')}
-                            style={{
-                              background: libraryViewMode === 'files' ? 'var(--primary)' : 'transparent',
-                              color: '#fff',
-                              border: 'none',
-                              borderRadius: '4px',
-                              padding: '2px 7px',
-                              fontSize: '9.5px',
-                              lineHeight: '13px',
-                              cursor: 'pointer',
-                              fontWeight: libraryViewMode === 'files' ? '600' : 'normal',
-                              transition: 'all 0.15s ease'
-                            }}
-                          >
-                            Files List
-                          </button>
-                          <button
-                            onClick={() => setLibraryViewMode('folders')}
-                            style={{
-                              background: libraryViewMode === 'folders' ? 'var(--primary)' : 'transparent',
-                              color: '#fff',
-                              border: 'none',
-                              borderRadius: '4px',
-                              padding: '2px 7px',
-                              fontSize: '9.5px',
-                              lineHeight: '13px',
-                              cursor: 'pointer',
-                              fontWeight: libraryViewMode === 'folders' ? '600' : 'normal',
-                              transition: 'all 0.15s ease'
-                            }}
-                          >
-                            Folder View
-                          </button>
-                        </div>
+                        <button
+                          type="button"
+                          aria-pressed={libraryViewMode === 'folders'}
+                          onClick={() => setLibraryViewMode(libraryViewMode === 'files' ? 'folders' : 'files')}
+                          className="btn-secondary"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            padding: '4px 8px',
+                            fontSize: '9.5px',
+                            lineHeight: '13px',
+                            borderRadius: '5px',
+                            background: 'rgba(255,255,255,0.04)',
+                            border: '1px solid rgba(255,255,255,0.08)',
+                            color: '#fff'
+                          }}
+                          title={`Switch to ${libraryViewMode === 'files' ? 'folder' : 'file list'} view`}
+                        >
+                          {libraryViewMode === 'files' ? <List size={11} /> : <Folder size={11} />}
+                          {libraryViewMode === 'files' ? 'Files List' : 'Folder View'}
+                        </button>
                       </div>
                     </div>
 
@@ -3481,8 +3483,8 @@ export default function App() {
                     </div>
                   </div>
                 )}
+                </div>
               </div>
-              )}
             </div>
           )}
 
@@ -5363,7 +5365,10 @@ export default function App() {
 
       {/* Send Modal */}
       {flashDriveTarget && (
-        <SendToFlashModal filePath={flashDriveTarget} onClose={() => setFlashDriveTarget(null)} />
+        <SendToFlashModal
+          filePath={flashDriveTarget}
+          onClose={() => setFlashDriveTarget(null)}
+        />
       )}
 
       {/* Bottom Toasts container */}

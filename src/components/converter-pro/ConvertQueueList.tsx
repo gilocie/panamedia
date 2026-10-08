@@ -5,6 +5,7 @@ import {
   Play, Pause, CheckCircle2
 } from 'lucide-react';
 import { isVideoFile, type VideoFormatPreset, type AudioFormatPreset } from './types';
+import { electron } from '../panamedia/types';
 
 interface ConvertQueueListProps {
   localQueue: string[];
@@ -16,7 +17,8 @@ interface ConvertQueueListProps {
   activeAudioPreset: AudioFormatPreset;
   videoQuality: string;
   audioBitrate: string;
-  conversionStatus?: Record<string, { status: 'idle' | 'converting' | 'paused' | 'completed' | 'failed'; progress: number; error?: string }>;
+  trimmedFiles?: string[];
+  conversionStatus?: Record<string, { status: 'idle' | 'converting' | 'paused' | 'completed' | 'failed' | 'cancelled'; progress: number; error?: string }>;
   onConvertSingleFile?: (filePath: string) => void;
   onTogglePauseSingleFile?: (filePath: string) => void;
   onSelectFile: (idx: number) => void;
@@ -39,6 +41,7 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
   activeAudioPreset,
   videoQuality,
   audioBitrate,
+  trimmedFiles = [],
   conversionStatus = {},
   onConvertSingleFile,
   onTogglePauseSingleFile,
@@ -52,6 +55,16 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
   onAddFiles
 }) => {
   const isAllSelected = localQueue.length > 0 && selectedIndices.size === localQueue.length;
+  const [activeStreamingPort, setActiveStreamingPort] = React.useState(streamingPort || 52322);
+
+  // The streaming service may select a free port when the default is already
+  // occupied. Queue thumbnails must use that live port, just like the preview.
+  React.useEffect(() => {
+    if (!electron) return;
+    electron.ipcRenderer.invoke('get-streaming-port').then((port: number) => {
+      if (port) setActiveStreamingPort(port);
+    }).catch(() => {});
+  }, [streamingPort]);
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -208,6 +221,7 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
             const isSelected = selectedFileIdx === idx;
             const isChecked = selectedIndices.has(idx);
             const isCardVideo = (mediaTypes[fPath] || (isVideoFile(fPath) ? 'video' : 'audio')) === 'video';
+            const hasTrim = trimmedFiles.includes(fPath);
 
             return (
               <div
@@ -270,7 +284,8 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
                       /* Server-rendered poster frame. A <video> element here would spin up a
                          full demuxer + decoder + range request per queue row on mount. */
                       <img
-                        src={`http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(fPath)}`}
+                        key={`${fPath}-${activeStreamingPort}`}
+                        src={`http://127.0.0.1:${activeStreamingPort}/thumbnail?path=${encodeURIComponent(fPath)}`}
                         alt=""
                         width={64}
                         height={42}
@@ -369,6 +384,25 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
                       {isCardVideo ? <Film size={11} /> : <Music size={11} />}
                       <span>{isCardVideo ? 'Video' : 'Audio'}</span>
                     </button>
+
+                    {hasTrim && (
+                      <span
+                        title="Cut / Trim will be applied when conversion starts"
+                        style={{
+                          fontSize: '9px',
+                          fontWeight: 800,
+                          letterSpacing: '0.35px',
+                          color: '#67e8f9',
+                          background: 'rgba(6, 182, 212, 0.13)',
+                          border: '1px solid rgba(6, 182, 212, 0.36)',
+                          padding: '2px 5px',
+                          borderRadius: '4px',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        TRIM READY
+                      </span>
+                    )}
 
                     <ArrowRight size={12} style={{ color: 'rgba(255, 255, 255, 0.3)' }} />
 

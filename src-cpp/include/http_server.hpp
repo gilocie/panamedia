@@ -28,6 +28,7 @@ namespace Panamedia {
         void handleClient(unsigned long long clientSocket);
         void handleTranscode(unsigned long long clientSocket, const std::string& decodedPath, double startSec, const std::string& quality);
         void handleThumbnail(unsigned long long clientSocket, const std::string& decodedPath);
+        void handleWaveform(unsigned long long clientSocket, const std::string& decodedPath, int width, int height);
         void handleTimelinePreview(unsigned long long clientSocket, const std::string& decodedPath, double timeSec);
         
         // Helper functions for transcoding/subtitles/binaries

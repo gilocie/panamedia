@@ -139,6 +139,22 @@ async function probeDuration(filePath) {
   });
 }
 
+async function probeHasAudio(filePath) {
+  return new Promise((resolve) => {
+    try {
+      const proc = spawn(ffprobePath, [
+        '-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', filePath
+      ], { windowsHide: true });
+      let output = '';
+      proc.stdout.on('data', data => { output += data.toString(); });
+      proc.on('close', () => resolve(/audio/i.test(output)));
+      proc.on('error', () => resolve(true));
+    } catch {
+      resolve(true);
+    }
+  });
+}
+
 function parseTimeString(tStr) {
   if (!tStr) return 0;
   const parts = tStr.split(':');
@@ -198,6 +214,16 @@ function cancelConversion(filePath) {
   const item = activeProcesses.get(filePath);
   if (!item || !item.proc || item.proc.killed) return false;
   return item.proc.kill();
+}
+
+function cancelConversionsWritingOutput(outputPath) {
+  const target = path.resolve(outputPath).toLowerCase();
+  const cancelledInputs = [];
+  for (const [inputPath, item] of activeProcesses.entries()) {
+    if (!item.outputPath || path.resolve(item.outputPath).toLowerCase() !== target) continue;
+    if (item.proc && !item.proc.killed && item.proc.kill()) cancelledInputs.push(inputPath);
+  }
+  return cancelledInputs;
 }
 
 /**
@@ -302,7 +328,10 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
       cut.startSec < 0 || cut.endSec <= cut.startSec)) {
     throw new Error('Invalid cut range.');
   }
-  const progressDuration = cut ? Math.max(0.1, cut.endSec - cut.startSec) : duration;
+  const isDeleteCut = Boolean(cut && cut.strategy === 'delete');
+  const progressDuration = cut
+    ? Math.max(0.1, isDeleteCut ? duration - (cut.endSec - cut.startSec) : cut.endSec - cut.startSec)
+    : duration;
   const mode = options.mode || 'extract_audio';
   const format = (options.format || (mode === 'extract_audio' ? 'mp3' : 'mp4')).toLowerCase();
   const bitrate = options.bitrate || (mode === 'extract_audio' ? '320k' : '1080p');
@@ -318,11 +347,44 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
   }
 
   const args = ['-y'];
-  if (cut) {
-    if (cut.startSec > 0) args.push('-ss', String(cut.startSec));
-    args.push('-to', String(cut.endSec));
+  if (cut && !isDeleteCut) {
+    // Seek before opening the source, then limit the encoded output by the
+    // selected range's length. `-to` before `-i` is interpreted inconsistently
+    // by FFmpeg builds and can leave trim jobs with no useful progress.
+    args.push('-ss', String(cut.startSec));
   }
   args.push('-i', inputPath);
+  if (cut && !isDeleteCut) {
+    args.push('-t', String(cut.endSec - cut.startSec));
+  }
+
+  if (isDeleteCut) {
+    const segments = [];
+    if (cut.startSec > 0.001) segments.push([0, cut.startSec]);
+    if (cut.endSec < duration - 0.001) segments.push([cut.endSec, duration]);
+    if (segments.length === 0) throw new Error('The delete cut would remove the entire media file.');
+    const audioOnly = mode === 'extract_audio';
+    const hasAudio = audioOnly ? true : await probeHasAudio(inputPath);
+    if (!audioOnly) {
+      const filters = [];
+      segments.forEach(([start, end], index) => {
+        filters.push(`[0:v:0]trim=start=${start}:end=${end},setpts=PTS-STARTPTS[v${index}]`);
+        if (hasAudio) filters.push(`[0:a:0]atrim=start=${start}:end=${end},asetpts=PTS-STARTPTS[a${index}]`);
+      });
+      const concatInputs = segments.map((_, index) => hasAudio ? `[v${index}][a${index}]` : `[v${index}]`).join('');
+      filters.push(`${concatInputs}concat=n=${segments.length}:v=1:a=${hasAudio ? 1 : 0}[outv]${hasAudio ? '[outa]' : ''}`);
+      args.push('-filter_complex', filters.join(';'), '-map', '[outv]');
+      if (hasAudio) args.push('-map', '[outa]');
+    } else {
+      const filters = [];
+      segments.forEach(([start, end], index) => {
+        filters.push(`[0:a:0]atrim=start=${start}:end=${end},asetpts=PTS-STARTPTS[a${index}]`);
+      });
+      const inputs = segments.map((_, index) => `[a${index}]`).join('');
+      filters.push(`${inputs}concat=n=${segments.length}:v=0:a=1[outa]`);
+      args.push('-filter_complex', filters.join(';'), '-map', '[outa]');
+    }
+  }
 
   // Set thread limitation to prevent 100% CPU lockup
   args.push('-threads', threads.toString());
@@ -362,6 +424,10 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
     args.push('-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart');
   }
 
+  // Request machine-readable progress from the same process doing the encode.
+  // This works even when FFmpeg's human-readable `time=` stats are suppressed
+  // or emitted in chunks that split across stream events.
+  args.push('-progress', 'pipe:2', '-stats_period', '0.5', '-nostats');
   args.push(outputPath);
 
   return new Promise((resolve, reject) => {
@@ -369,7 +435,7 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
 
     // Spawn with windowsHide and standard pipe
     const proc = spawn(ffmpegPath, args, { windowsHide: true });
-    activeProcesses.set(inputPath, { proc, isPaused: false });
+    activeProcesses.set(inputPath, { proc, outputPath, isPaused: false });
 
     // Lower process priority on Windows so FFmpeg never starves the UI or jams the PC
     if (proc.pid) {
@@ -383,6 +449,7 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
     }
 
     let lastStderr = '';
+    let progressBuffer = '';
     let lastKnownProgress = 0.05;
 
     // Timed fake-progress ramp: when duration is unknown (0), we slowly walk progress
@@ -406,8 +473,24 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
       lastStderr += str;
       if (lastStderr.length > 4000) lastStderr = lastStderr.slice(-4000);
 
+      progressBuffer += str;
+      const progressLines = progressBuffer.split(/\r?\n/);
+      progressBuffer = progressLines.pop() || '';
+      for (const line of progressLines) {
+        const outTimeMatch = line.match(/^out_time_(?:us|ms)=(\d+)/);
+        if (outTimeMatch && progressDuration > 0) {
+          // FFmpeg's out_time_us and out_time_ms are both microseconds.
+          const currentTime = parseInt(outTimeMatch[1], 10) / 1e6;
+          const pct = Math.min(0.99, Math.max(0.05, currentTime / progressDuration));
+          if (pct > lastKnownProgress) {
+            lastKnownProgress = pct;
+            onProgress({ progress: pct, status: 'converting' });
+          }
+        }
+      }
+
       // Primary: time-based progress when duration is known
-      const timeMatch = str.match(/time=(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/);
+      const timeMatch = lastStderr.match(/time=(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/g)?.at(-1)?.match(/time=(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/);
       if (timeMatch && progressDuration > 0) {
         const currentTime = parseTimeString(timeMatch[1]);
         const pct = Math.min(0.99, Math.max(0.05, currentTime / progressDuration));
@@ -418,16 +501,6 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
         return;
       }
 
-      // Fallback: parse FFmpeg "out_time_us" microsecond counter (emitted by -progress pipe)
-      const outTimeMatch = str.match(/out_time_us=(\d+)/);
-      if (outTimeMatch && progressDuration > 0) {
-        const currentTime = parseInt(outTimeMatch[1], 10) / 1e6;
-        const pct = Math.min(0.99, Math.max(0.05, currentTime / progressDuration));
-        if (pct > lastKnownProgress) {
-          lastKnownProgress = pct;
-          onProgress({ progress: pct, status: 'converting' });
-        }
-      }
     });
 
     proc.on('close', (code) => {
@@ -460,7 +533,12 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
  * Node could produce a half-written output file.
  */
 async function executeOptimizedConversion(inputPath, outputPath, options = {}, onProgress = () => {}) {
-  const viaCore = await executeOptimizedConversionViaCore(inputPath, outputPath, options, onProgress);
+  const hasCut = Boolean(options?.tools?.cut);
+  // Use the local FFmpeg path for every Cut / Trim export. It is the path that
+  // owns both the in/out range and Cut & Delete's concat filter, and reports
+  // its progress from the same ffmpeg process doing the edit. The native path
+  // remains preferred for unedited conversions.
+  const viaCore = hasCut ? null : await executeOptimizedConversionViaCore(inputPath, outputPath, options, onProgress);
   if (viaCore) return viaCore;
   const tools = options && options.tools;
   const unsupportedTools = tools && typeof tools === 'object'
@@ -483,5 +561,6 @@ module.exports = {
   executeOptimizedConversionLocal,
   togglePauseProcess,
   cancelConversion,
+  cancelConversionsWritingOutput,
   probeDuration
 };

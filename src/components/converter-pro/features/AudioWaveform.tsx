@@ -3,30 +3,36 @@
 interface AudioWaveformProps {
   fileName: string;
   streamingPort?: number;
+  mediaDuration?: number;
   height?: number;
   color?: string;
   background?: string;
+  sourceStart?: number;
+  sourceEnd?: number;
 }
 
 /**
- * Real audio waveform — fetches the media stream, decodes it with the
- * Web Audio API, bins the PCM samples into pixel-wide bars, and draws
- * amplitude bars onto a canvas. Looks like a professional NLE waveform.
+ * The native media engine analyzes the source audio with FFmpeg. This works
+ * for audio tracks inside video containers regardless of browser codec support.
  */
 export const AudioWaveform: React.FC<AudioWaveformProps> = ({
   fileName,
   streamingPort = 52322,
+  mediaDuration = 0,
   height = 56,
   color = "#38bdf8",
   background = "transparent",
+  sourceStart = 0,
+  sourceEnd,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const samplesRef = useRef<Float32Array | null>(null);
+  const waveformRef = useRef<HTMLImageElement | null>(null);
   const [status, setStatus] = useState<"loading" | "done" | "error">("loading");
 
-  const drawWaveform = (samples: Float32Array) => {
+  const drawWaveform = (rangeStart = sourceStart, rangeEnd = sourceEnd) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const image = waveformRef.current;
+    if (!canvas || !image?.complete || image.naturalWidth === 0) return;
     const dpr = window.devicePixelRatio || 1;
     const W = canvas.offsetWidth || 800;
     const H = height;
@@ -40,34 +46,19 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
       ctx.fillStyle = background;
       ctx.fillRect(0, 0, W, H);
     }
-    const mid = H / 2;
-    const numBars = W;
-    const samplesPerBar = Math.max(1, Math.floor(samples.length / numBars));
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, color);
-    grad.addColorStop(0.45, color);
-    grad.addColorStop(0.5, color);
-    grad.addColorStop(0.55, color);
-    grad.addColorStop(1, color);
-    ctx.fillStyle = grad;
-    for (let b = 0; b < numBars; b++) {
-      const offset = b * samplesPerBar;
-      let rms = 0;
-      let peak = 0;
-      for (let s = 0; s < samplesPerBar; s++) {
-        const v = Math.abs(samples[offset + s] || 0);
-        rms += v * v;
-        if (v > peak) peak = v;
-      }
-      rms = Math.sqrt(rms / samplesPerBar);
-      const rmsH = Math.max(1.5, rms * mid * 2.6);
-      const peakH = Math.max(1.5, peak * mid * 1.15);
-      ctx.globalAlpha = 0.88;
-      ctx.fillRect(b, mid - rmsH / 2, 1, rmsH);
-      ctx.globalAlpha = 0.38;
-      ctx.fillRect(b, mid - peakH / 2, 1, peakH);
+    const duration = mediaDuration || (rangeEnd ?? 0);
+    const from = duration > 0 ? Math.max(0, Math.min(1, rangeStart / duration)) : 0;
+    const to = duration > 0 ? Math.max(from, Math.min(1, (rangeEnd ?? duration) / duration)) : 1;
+    const sourceX = from * image.naturalWidth;
+    const sourceWidth = Math.max(1, (to - from) * image.naturalWidth);
+    ctx.drawImage(image, sourceX, 0, sourceWidth, image.naturalHeight, 0, 0, W, H);
+    if (color !== "#38bdf8") {
+      ctx.globalCompositeOperation = "source-in";
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalCompositeOperation = "source-over";
     }
-    ctx.globalAlpha = 1;
+    const mid = H / 2;
     ctx.strokeStyle = "rgba(56,189,248,0.18)";
     ctx.lineWidth = 0.5;
     ctx.beginPath();
@@ -80,48 +71,35 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
     if (!fileName) return;
     let cancelled = false;
     setStatus("loading");
-    samplesRef.current = null;
-    const url = `http://127.0.0.1:${streamingPort}/stream?path=${encodeURIComponent(fileName)}`;
-    (async () => {
-      try {
-        const res = await fetch(url, {
-          headers: { Range: "bytes=0-8388607" },
-          credentials: "omit",
-        });
-        if (!res.ok && res.status !== 206) throw new Error(`HTTP ${res.status}`);
-        if (cancelled) return;
-        const buf = await res.arrayBuffer();
-        if (cancelled) return;
-        const audioCtx = new AudioContext();
-        const decoded = await audioCtx.decodeAudioData(buf);
-        await audioCtx.close();
-        if (cancelled) return;
-        const numChannels = decoded.numberOfChannels;
-        const totalSamples = decoded.length;
-        const mixed = new Float32Array(totalSamples);
-        for (let c = 0; c < numChannels; c++) {
-          const ch = decoded.getChannelData(c);
-          for (let i = 0; i < totalSamples; i++) mixed[i] += ch[i] / numChannels;
-        }
-        samplesRef.current = mixed;
-        drawWaveform(mixed);
-        setStatus("done");
-      } catch {
-        if (!cancelled) setStatus("error");
-      }
-    })();
-    return () => { cancelled = true; };
+    waveformRef.current = null;
+    const image = new Image();
+    image.onload = () => {
+      if (cancelled) return;
+      waveformRef.current = image;
+      drawWaveform();
+      setStatus("done");
+    };
+    image.onerror = () => { if (!cancelled) setStatus("error"); };
+    image.crossOrigin = "anonymous";
+    image.src = `http://127.0.0.1:${streamingPort}/waveform?path=${encodeURIComponent(fileName)}&width=4096&height=128`;
+    return () => {
+      cancelled = true;
+    };
   }, [fileName, streamingPort]);
+
+  useEffect(() => {
+    drawWaveform(sourceStart, sourceEnd);
+  }, [sourceStart, sourceEnd, height, color, background, mediaDuration, status]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ro = new ResizeObserver(() => {
-      if (samplesRef.current) drawWaveform(samplesRef.current);
+      drawWaveform(sourceStart, sourceEnd);
     });
     ro.observe(canvas);
     return () => ro.disconnect();
-  }, [height, color, background]);
+  }, [height, color, background, sourceStart, sourceEnd, mediaDuration]);
 
   return (
     <div style={{ position: "relative", width: "100%", height: `${height}px` }}>
@@ -144,6 +122,17 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
           pointerEvents: "none",
         }}>
           Analysing audio…
+        </div>
+      )}
+      {status === "error" && (
+        <div style={{
+          position: "absolute", inset: 0, display: "flex",
+          alignItems: "center", justifyContent: "center",
+          fontSize: 8, fontWeight: 700, letterSpacing: "0.08em",
+          color: "rgba(255,255,255,0.42)", textTransform: "uppercase",
+          pointerEvents: "none",
+        }}>
+          Waveform unavailable
         </div>
       )}
     </div>

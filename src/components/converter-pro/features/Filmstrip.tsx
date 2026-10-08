@@ -16,6 +16,9 @@ interface FilmstripProps {
   streamingPort?: number;
   /** Clip length in seconds; frames are spread evenly across it. */
   duration?: number;
+  /** Source-time window represented by this strip after a ripple edit. */
+  sourceStart?: number;
+  sourceEnd?: number;
   /** How many frames to sample. */
   frames?: number;
   /** Extra CSS applied to each cell (rotate / filter / flip previews). */
@@ -27,6 +30,8 @@ export const Filmstrip: React.FC<FilmstripProps> = ({
   fileName,
   streamingPort = 52322,
   duration = 0,
+  sourceStart = 0,
+  sourceEnd,
   frames = 10,
   cellStyle,
   className = ''
@@ -35,11 +40,14 @@ export const Filmstrip: React.FC<FilmstripProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const frameIndexRef = useRef(0);
   const cancelledRef = useRef(false);
+  const captureTimerRef = useRef<number | null>(null);
   const [shots, setShots] = useState<string[]>([]);
 
   // Callers pass an optional duration; treat anything non-positive as unknown
   // rather than dividing by zero when spreading the sample points.
   const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
+  const safeSourceStart = Math.max(0, sourceStart);
+  const safeSourceEnd = Number.isFinite(sourceEnd) ? Math.max(safeSourceStart, sourceEnd as number) : safeSourceStart + safeDuration;
 
   // Reset whenever the clip changes.
   useEffect(() => {
@@ -60,9 +68,9 @@ export const Filmstrip: React.FC<FilmstripProps> = ({
 
       const w = videoEl.videoWidth || 160;
       const h = videoEl.videoHeight || 90;
-      // Small cells — 160px wide is plenty and keeps memory trivial.
-      canvas.width = 160;
-      canvas.height = Math.max(2, Math.round((160 * h) / w));
+      // Compact samples keep the denser strip inexpensive in memory.
+      canvas.width = 128;
+      canvas.height = Math.max(2, Math.round((128 * h) / w));
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
@@ -70,7 +78,7 @@ export const Filmstrip: React.FC<FilmstripProps> = ({
       const index = frameIndexRef.current;
       setShots(prev => {
         const next = prev.slice();
-        next[index] = canvas.toDataURL('image/jpeg', 0.62);
+        next[index] = canvas.toDataURL('image/jpeg', 0.55);
         return next;
       });
 
@@ -79,30 +87,36 @@ export const Filmstrip: React.FC<FilmstripProps> = ({
 
       // Sample at the midpoint of each slice so key frames are more likely.
       const slice = safeDuration / frames;
-      const nextTime = Math.min(safeDuration - 0.05, (index + 0.5) * slice);
+      const nextTime = Math.min(safeSourceEnd - 0.05, safeSourceStart + (index + 1.5) * slice);
       videoEl.currentTime = nextTime;
     };
 
     const onSeeked = () => {
       // Give the decoder a beat, then paint.
-      window.setTimeout(capture, 30);
+      if (captureTimerRef.current !== null) window.clearTimeout(captureTimerRef.current);
+      captureTimerRef.current = window.setTimeout(capture, 30);
     };
 
-    video.addEventListener('loadeddata', capture);
+    const startSampling = () => {
+      const slice = safeDuration / frames;
+      video.currentTime = Math.min(safeSourceEnd - 0.05, safeSourceStart + slice * 0.5);
+    };
+
+    video.addEventListener('loadeddata', startSampling);
     video.addEventListener('seeked', onSeeked);
 
     // The <video> src is already set in JSX; only nudge the seek here. If the
     // metadata has not arrived yet, `loadeddata` will kick the chain off.
     if (video.readyState >= 2) {
-      const slice = safeDuration / frames;
-      video.currentTime = Math.min(safeDuration - 0.05, slice * 0.5);
+      startSampling();
     }
 
     return () => {
-      video.removeEventListener('loadeddata', capture);
+      video.removeEventListener('loadeddata', startSampling);
       video.removeEventListener('seeked', onSeeked);
+      if (captureTimerRef.current !== null) window.clearTimeout(captureTimerRef.current);
     };
-  }, [fileName, streamingPort, safeDuration, frames]);
+  }, [fileName, streamingPort, safeDuration, safeSourceStart, safeSourceEnd, frames]);
 
   return (
     <>
@@ -128,7 +142,11 @@ export const Filmstrip: React.FC<FilmstripProps> = ({
       />
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-      <div className={`pro-filmstrip ${className}`} aria-hidden="true">
+      <div
+        className={`pro-filmstrip ${className}`}
+        aria-hidden="true"
+        style={{ '--filmstrip-frames': frames } as React.CSSProperties}
+      >
         {Array.from({ length: frames }, (_, i) => (
           <span
             key={i}

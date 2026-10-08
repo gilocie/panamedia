@@ -315,6 +315,10 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
                     encoding == "Windows-1252") {
                     subtitleFilter += ":charenc=" + encoding;
                 }
+                const int fontSize = std::max(8, std::min(96, s.value("fontSize", 24)));
+                const int marginV = std::max(0, std::min(100, s.value("marginV", 8)));
+                subtitleFilter += ":force_style='FontSize=" + std::to_string(fontSize) +
+                                 ",MarginV=" + std::to_string(marginV) + "'";
                 chain.push_back(subtitleFilter);
             }
         }
@@ -343,6 +347,10 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
         bool deinterlace = opts.value("deinterlacing", false);
         json tools = opts.contains("tools") && opts["tools"].is_object() ? opts["tools"] : json::object();
         const json& trim = tools.contains("cut") && tools["cut"].is_object() ? tools["cut"] : json::object();
+        const double trimStart = trim.value("startSec", 0.0);
+        const double trimEnd = trim.value("endSec", 0.0);
+        const bool cutDelete = trim.value("strategy", std::string("keep")) == "delete" &&
+                               trimEnd > trimStart;
         const json& subTool = tools.contains("subtitle") && tools["subtitle"].is_object() ? tools["subtitle"] : json::object();
         const json& denoiseTool = tools.contains("denoise") && tools["denoise"].is_object() ? tools["denoise"] : json::object();
         const json& gifTool = tools.contains("gif") && tools["gif"].is_object() ? tools["gif"] : json::object();
@@ -398,9 +406,9 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
 
         // Trim range. Applied before -i so ffmpeg seeks instead of decoding the
         // discarded part.
-        if (trim.contains("startSec") && trim.contains("endSec")) {
-            double s0 = trim.value("startSec", 0.0);
-            double s1 = trim.value("endSec", 0.0);
+        if (!cutDelete && trim.contains("startSec") && trim.contains("endSec")) {
+            double s0 = trimStart;
+            double s1 = trimEnd;
             // Each flag and its value must be separate argv elements, otherwise
             // quoting turns "-ss 12.5" into one token ffmpeg cannot parse.
             if (s0 > 0) { a.push_back("-ss"); a.push_back(std::to_string(s0)); }
@@ -469,8 +477,89 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
             if (deinterlace) vf = vf.empty() ? "yadif" : ("yadif," + vf);
         }
 
+        // Cut & Delete joins the material before and after the selected range.
+        // Build the concat graph once so video conversions, GIFs, and audio
+        // extraction all use the same exact cut points.
+        std::string deleteCutGraph;
+        std::vector<int> deleteAudioIndexes;
+        std::vector<std::string> deleteAudioLabels;
+        double sourceDuration = 0.0;
+        if (cutDelete) {
+            try {
+                json probe = json::parse(ConversionSupport::probeMedia(inputPath));
+                sourceDuration = probe.value("duration", 0.0);
+                if (gifTool.empty() || mode == "extract_audio") {
+                    int audioCount = probe.contains("audioTracks") && probe["audioTracks"].is_array()
+                        ? static_cast<int>(probe["audioTracks"].size()) : 0;
+                    if (hasAudioPick) {
+                        for (int index : audioTrackIdx) {
+                            if (index >= 0 && index < audioCount) deleteAudioIndexes.push_back(index);
+                        }
+                    } else if (audioCount > 0) {
+                        deleteAudioIndexes.push_back(0);
+                    }
+                }
+            } catch (...) {
+                // Video-only cuts can still be generated if probing audio
+                // metadata fails; audio cuts require a valid stream list.
+            }
+        }
+
+        if (cutDelete && mode != "extract_audio") {
+            if (trimStart <= 0.000001) {
+                deleteCutGraph += "[0:v]trim=start=" + std::to_string(trimEnd) +
+                    ",setpts=PTS-STARTPTS[vcut];";
+            } else if (sourceDuration > 0.0 && trimEnd >= sourceDuration - 0.000001) {
+                deleteCutGraph += "[0:v]trim=end=" + std::to_string(trimStart) +
+                    ",setpts=PTS-STARTPTS[vcut];";
+            } else {
+                deleteCutGraph += "[0:v]split=2[vdelpre][vdelpost];";
+                deleteCutGraph += "[vdelpre]trim=start=0:end=" + std::to_string(trimStart) +
+                    ",setpts=PTS-STARTPTS[vkeeppre];";
+                deleteCutGraph += "[vdelpost]trim=start=" + std::to_string(trimEnd) +
+                    ",setpts=PTS-STARTPTS[vkeeppost];";
+                deleteCutGraph += "[vkeeppre][vkeeppost]concat=n=2:v=1:a=0[vcut];";
+            }
+            deleteCutGraph += "[vcut]" + (vf.empty() ? std::string("null") : vf) + "[base];";
+        }
+
+        if (cutDelete && (gifTool.empty() || mode == "extract_audio")) {
+            for (int index : deleteAudioIndexes) {
+                const std::string stream = "0:a:" + std::to_string(index);
+                const std::string prefix = "cut_a" + std::to_string(index);
+                const std::string label = "[" + prefix + "]";
+                if (trimStart <= 0.000001) {
+                    deleteCutGraph += "[" + stream + "]atrim=start=" + std::to_string(trimEnd) +
+                        ",asetpts=PTS-STARTPTS" + label + ";";
+                } else if (sourceDuration > 0.0 && trimEnd >= sourceDuration - 0.000001) {
+                    deleteCutGraph += "[" + stream + "]atrim=end=" + std::to_string(trimStart) +
+                        ",asetpts=PTS-STARTPTS" + label + ";";
+                } else {
+                    deleteCutGraph += "[" + stream + "]asplit=2[adelpre" + std::to_string(index) +
+                        "][adelpost" + std::to_string(index) + "];";
+                    deleteCutGraph += "[adelpre" + std::to_string(index) + "]atrim=start=0:end=" +
+                        std::to_string(trimStart) + ",asetpts=PTS-STARTPTS[akeepre" +
+                        std::to_string(index) + "];";
+                    deleteCutGraph += "[adelpost" + std::to_string(index) + "]atrim=start=" +
+                        std::to_string(trimEnd) + ",asetpts=PTS-STARTPTS[akeepost" +
+                        std::to_string(index) + "];";
+                    deleteCutGraph += "[akeepre" + std::to_string(index) + "][akeepost" +
+                        std::to_string(index) + "]concat=n=2:v=0:a=1" + label + ";";
+                }
+                deleteAudioLabels.push_back(label);
+            }
+        }
+
         if (mode == "extract_audio") {
             a.push_back("-vn");
+            if (cutDelete && !deleteAudioLabels.empty()) {
+                a.push_back("-filter_complex");
+                a.push_back(deleteCutGraph);
+                for (const auto& label : deleteAudioLabels) {
+                    a.push_back("-map");
+                    a.push_back(label);
+                }
+            }
             std::string extractBitrate =
                 bitrate.find('k') != std::string::npos ? bitrate : "320k";
 
@@ -500,8 +589,8 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
             if (fps < 1) fps = 1;
             if (fps > 60) fps = 60;
             if (width < 64) width = 64;
-            std::string fc = "[0:v]";
-            if (!vf.empty()) fc += vf + ",";
+            std::string fc = cutDelete ? deleteCutGraph + "[base]" : "[0:v]";
+            if (!cutDelete && !vf.empty()) fc += vf + ",";
             fc += "fps=" + std::to_string(fps) +
                   ",scale=" + std::to_string(width) + ":-1:flags=lanczos[gifbase];";
             std::string paletteInput = "[gifbase]";
@@ -603,7 +692,8 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
                 const auto position = watermarkPosition(
                     watermark.value("position", std::string("bottom-right")), false);
                 std::string base = vf.empty() ? "null" : vf;
-                std::string graph = "[0:v]" + base + "[base];movie=" +
+                std::string graph = cutDelete ? deleteCutGraph : ("[0:v]" + base + "[base];");
+                graph += "movie=" +
                     stagedFilterName(watermark.value("imagePath", std::string()), "logo") +
                     ",scale=120:-1,format=rgba,colorchannelmixer=aa=" +
                     std::to_string(normalizedOpacity(watermark)) +
@@ -611,6 +701,9 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
                     position.second + "[vout]";
                 a.push_back("-filter_complex");
                 a.push_back(graph);
+            } else if (cutDelete) {
+                a.push_back("-filter_complex");
+                a.push_back(deleteCutGraph);
             } else if (!vf.empty()) {
                 a.push_back("-vf");
                 a.push_back(vf);
@@ -624,11 +717,16 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
             // moment the user picks audio tracks, because a `-map` switches
             // off the automatic rules entirely. Getting this wrong is silent:
             // the file converts fine and the embedded subtitles are just gone.
-            if (softSub || hasAudioPick || imageWatermark) {
+            if (softSub || hasAudioPick || imageWatermark || cutDelete) {
                 a.push_back("-map");
-                a.push_back(imageWatermark ? "[vout]" : "0:v:0");
+                a.push_back(imageWatermark ? "[vout]" : (cutDelete ? "[base]" : "0:v:0"));
 
-                if (hasAudioPick) {
+                if (cutDelete) {
+                    for (const auto& label : deleteAudioLabels) {
+                        a.push_back("-map");
+                        a.push_back(label);
+                    }
+                } else if (hasAudioPick) {
                     for (size_t k = 0; k < audioTrackIdx.size(); ++k) {
                         // The trailing '?' makes each audio stream optional. A
                         // track the probe listed but ffmpeg cannot reach should
@@ -646,7 +744,7 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
                     // A second input carries the external subtitle file.
                     a.push_back("-map"); a.push_back("1:s:0?");
                     a.push_back("-c:s"); a.push_back(format == "mkv" ? "ass" : "mov_text");
-                } else if (hasAudioPick || imageWatermark) {
+                } else if (hasAudioPick || imageWatermark || cutDelete) {
                     // No external subtitle, so the source's own have to be
                     // asked for by hand to keep the automatic behaviour.
                     a.push_back("-map"); a.push_back("0:s?");
@@ -1426,6 +1524,7 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
             json o;
             o["jobId"] = kv.first;
             o["filePath"] = job->inputPath;
+            o["outputPath"] = job->outputPath;
             o["status"] = job->status;
             o["progress"] = job->progress.load();
             o["paused"] = job->paused.load();

@@ -1585,15 +1585,9 @@ function tn({ filePath: e, title: t }) {
     (0, _.useEffect)(() => {
       if (!K) return;
       let onOpenReq = () => {
-        // If converter is already open (Ee/flashDriveTarget is set), don't re-trigger — just keep it visible.
-        // Opening only opens: it lands on the preparation screen and touches
-        // nothing else. Adding the playing file to the queue used to happen
-        // here, which is not what this button says it does and is why the
-        // current media could not be removed from the converter.
-        if (!Ee) {
-          (window as any).__openConverterProOpen = true;
-          De(T || 'media');
-        }
+        K.ipcRenderer.invoke('open-converter-window').catch((error: unknown) => {
+          console.error('Failed to open Converter Pro:', error);
+        });
       };
       K.ipcRenderer.on('converter-open-request', onOpenReq);
       return () => {
@@ -1656,10 +1650,9 @@ function tn({ filePath: e, title: t }) {
           currentTitle: E,
           onHelpClick: () => xe(!0),
           onOpenConverter: () => {
-            // Opens the converter on the preparation screen without changing
-            // the queue. To convert the playing file, add it from the queue.
-            (window as any).__openConverterProOpen = true;
-            De(T || 'media');
+            K?.ipcRenderer.invoke('open-converter-window').catch((error: unknown) => {
+              console.error('Failed to open Converter Pro:', error);
+            });
           },
         }),
         (0, W.jsxs)(`div`, {

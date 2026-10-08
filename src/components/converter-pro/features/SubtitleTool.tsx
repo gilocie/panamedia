@@ -19,7 +19,7 @@ interface SubtitleToolProps {
   streamingPort?: number;
   /** Clip length, used to spread the timeline filmstrip across the clip. */
   duration?: number;
-  onApply: (subSettings: { subPath: string; burnIn: boolean; encoding: string }) => void;
+  onApply: (subSettings: { subPath: string; burnIn: boolean; encoding: string; fontSize: number; marginV: number }) => void;
   onClose: () => void;
 }
 
@@ -113,7 +113,7 @@ export const SubtitleTool: React.FC<SubtitleToolProps> = ({
       footerActionIcon={<Check size={14} />}
       applyDisabled={!isReady}
       onApply={() => {
-        onApply({ subPath, burnIn, encoding });
+        onApply({ subPath, burnIn, encoding, fontSize, marginV });
         onClose();
       }}
     >

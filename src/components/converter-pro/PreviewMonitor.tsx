@@ -19,26 +19,26 @@ interface AppPlayerState {
 
 interface PreviewMonitorProps {
   currentFile: string;
+  trimRange?: { startSec: number; endSec: number; strategy: 'keep' | 'delete' };
   thumbnailPath?: string;
   playbackRequest?: { id: number; path: string; action: 'play' | 'pause' };
   streamingPort?: number;
   appPlayerState: AppPlayerState | null;
-  onPrevFile: () => void;
-  onNextFile: () => void;
   onPlaybackStateChange?: (path: string, playing: boolean) => void;
   isMinimized?: boolean;
+  hotkeysEnabled?: boolean;
 }
 
 export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
   currentFile,
+  trimRange,
   thumbnailPath,
   playbackRequest,
   streamingPort = 52322,
   appPlayerState,
-  onPrevFile,
-  onNextFile,
   onPlaybackStateChange,
-  isMinimized
+  isMinimized,
+  hotkeysEnabled = true
 }) => {
   const isVideo = isVideoFile(currentFile);
   const hasCurrentFile = Boolean(currentFile);
@@ -59,6 +59,11 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
   const lastPlayRequestRef = useRef(0);
+  const keepsRange = trimRange?.strategy === 'keep';
+  const trimStart = keepsRange ? Math.max(0, trimRange?.startSec || 0) : 0;
+  const trimEnd = keepsRange && Number.isFinite(trimRange?.endSec)
+    ? Math.max(trimStart, trimRange!.endSec)
+    : 0;
 
   // Volume state brought from original player
   const [volume, setVolume] = useState<number>(() => {
@@ -79,25 +84,12 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
   const hasInitializedTime = useRef<boolean>(false);
   const volumeContainerRef = useRef<HTMLDivElement | null>(null);
   const audioThumbnailUrl = `http://127.0.0.1:${activePort}/thumbnail?path=${encodeURIComponent(thumbnailPath || currentFile)}`;
+  const volumePercent = isMuted ? 0 : Math.round(volume * 100);
+  const volumeRingColor = volumePercent >= 100 ? '#a78bfa' : '#38bdf8';
 
   useEffect(() => {
     setAudioThumbnailFailed(false);
   }, [currentFile, thumbnailPath, activePort]);
-
-  // Close volume popover when clicking outside
-  useEffect(() => {
-    const handleOutsideClick = (e: MouseEvent) => {
-      if (volumeContainerRef.current && !volumeContainerRef.current.contains(e.target as Node)) {
-        setShowVolumeSlider(false);
-      }
-    };
-    if (showVolumeSlider) {
-      document.addEventListener('mousedown', handleOutsideClick);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleOutsideClick);
-    };
-  }, [showVolumeSlider]);
 
   // Bring original volume from player when appPlayerState updates
   useEffect(() => {
@@ -129,6 +121,20 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
       electron.ipcRenderer.send('player-remote-command', 'pause');
     }
   }, [currentFile]);
+
+  // Applying Keep Range turns the selected queue item into a preview of the
+  // exported clip straight away. The source remains untouched until Start,
+  // but the monitor always begins at the in point and cannot run past out.
+  useEffect(() => {
+    if (!keepsRange || trimEnd <= trimStart) return;
+    const media = mediaRef.current;
+    if (!media) return;
+    media.pause();
+    media.currentTime = trimStart;
+    setCurrentTime(trimStart);
+    setIsPlaying(false);
+    hasInitializedTime.current = true;
+  }, [currentFile, keepsRange, trimStart, trimEnd]);
 
   useEffect(() => {
     if (!playbackRequest || playbackRequest.id === lastPlayRequestRef.current || playbackRequest.path !== currentFile) return;
@@ -184,8 +190,12 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
     video.volume = volume;
     video.muted = isMuted;
 
+    if (keepsRange && trimEnd > trimStart) {
+      video.currentTime = trimStart;
+      setCurrentTime(trimStart);
+      hasInitializedTime.current = true;
     // If matching active player file, resume from where player left off, but paused
-    if (!hasInitializedTime.current && appPlayerState && appPlayerState.filePath === currentFile && appPlayerState.currentTime > 0) {
+    } else if (!hasInitializedTime.current && appPlayerState && appPlayerState.filePath === currentFile && appPlayerState.currentTime > 0) {
       video.currentTime = appPlayerState.currentTime;
       setCurrentTime(appPlayerState.currentTime);
       hasInitializedTime.current = true;
@@ -194,7 +204,15 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
 
   const handleTimeUpdate = () => {
     if (mediaRef.current) {
-      setCurrentTime(mediaRef.current.currentTime);
+      const media = mediaRef.current;
+      if (keepsRange && trimEnd > trimStart && media.currentTime >= trimEnd) {
+        media.currentTime = trimEnd;
+        media.pause();
+        setCurrentTime(trimEnd);
+        setIsPlaying(false);
+        return;
+      }
+      setCurrentTime(media.currentTime);
     }
   };
 
@@ -208,6 +226,10 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
       if (electron) {
         electron.ipcRenderer.send('player-remote-command', 'pause');
       }
+      if (keepsRange && trimEnd > trimStart && (video.currentTime < trimStart || video.currentTime >= trimEnd)) {
+        video.currentTime = trimStart;
+        setCurrentTime(trimStart);
+      }
       video.play().then(() => setIsPlaying(true)).catch(() => {});
     } else {
       video.pause();
@@ -215,21 +237,48 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
     }
   };
 
+  useEffect(() => {
+    if (!hotkeysEnabled || !hasCurrentFile) return;
+    const onPlaybackKey = (event: KeyboardEvent) => {
+      // Space and Backspace operate the converter's selected preview, never
+      // the background Panamedia player or the library's delete shortcut.
+      if ((event.code !== 'Space' && event.code !== 'Backspace') || event.repeat) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      togglePlay();
+    };
+    window.addEventListener('keydown', onPlaybackKey, true);
+    return () => window.removeEventListener('keydown', onPlaybackKey, true);
+  }, [hotkeysEnabled, hasCurrentFile, togglePlay]);
+
 
   // Scrubber click seek
   const handleScrubberClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const video = mediaRef.current;
-    const effectiveDuration = duration || appPlayerState?.duration || 0;
+    const effectiveDuration = keepsRange && trimEnd > trimStart
+      ? trimEnd - trimStart
+      : duration || appPlayerState?.duration || 0;
     if (!effectiveDuration) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const targetSec = ratio * effectiveDuration;
+    const targetSec = (keepsRange ? trimStart : 0) + ratio * effectiveDuration;
 
     if (video) {
       video.currentTime = targetSec;
       setCurrentTime(targetSec);
     }
+  };
+
+  const seekBy = (seconds: number) => {
+    const media = mediaRef.current;
+    const sourceDuration = duration || appPlayerState?.duration || 0;
+    const lowerBound = keepsRange ? trimStart : 0;
+    const upperBound = keepsRange && trimEnd > trimStart ? trimEnd : sourceDuration;
+    const base = media?.currentTime ?? currentTime;
+    const target = Math.max(lowerBound, Math.min(upperBound || Number.MAX_SAFE_INTEGER, base + seconds));
+    if (media) media.currentTime = target;
+    setCurrentTime(target);
   };
 
   // Mute toggle
@@ -278,8 +327,18 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
     }
   };
 
-  const displayDuration = duration || (appPlayerState && appPlayerState.filePath === currentFile ? appPlayerState.duration : 0);
-  const displayTime = currentTime || (appPlayerState && appPlayerState.filePath === currentFile && !hasInitializedTime.current ? appPlayerState.currentTime : 0);
+  const adjustVolumeWithWheel = (event: React.WheelEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const current = isMuted ? 0 : Math.round(volume * 100);
+    handleVolumeChange(Math.max(0, Math.min(100, current + (event.deltaY < 0 ? 5 : -5))));
+  };
+
+  const displayDuration = keepsRange && trimEnd > trimStart
+    ? trimEnd - trimStart
+    : duration || (appPlayerState && appPlayerState.filePath === currentFile ? appPlayerState.duration : 0);
+  const sourceTime = currentTime || (appPlayerState && appPlayerState.filePath === currentFile && !hasInitializedTime.current ? appPlayerState.currentTime : 0);
+  const displayTime = keepsRange ? Math.max(0, Math.min(displayDuration, sourceTime - trimStart)) : sourceTime;
 
   return (
     <div style={{
@@ -287,8 +346,9 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
       borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
       display: 'flex',
       flexDirection: 'column',
-      gap: '10px'
-    }}>
+      gap: '10px',
+      overscrollBehavior: 'contain'
+    }} onWheel={adjustVolumeWithWheel}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <Sparkles size={12} style={{ color: '#06b6d4' }} />
@@ -492,12 +552,12 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
           width: '100%',
           boxSizing: 'border-box'
         }}>
-          {/* Previous Media in Queue */}
+          {/* Seek backward */}
           <button
             type="button"
-            onClick={onPrevFile}
+            onClick={() => seekBy(-10)}
             style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '4px', height: '26px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#fff', transition: 'all 0.15s ease' }}
-            title="Previous Media in Queue"
+            title="Seek back 10 seconds"
           >
             <SkipBack size={13} />
           </button>
@@ -523,28 +583,22 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
             {isPlaying ? <Pause size={13} fill="#fff" /> : <Play size={13} fill="#fff" />}
           </button>
 
-          {/* Next Media in Queue */}
+          {/* Seek forward */}
           <button
             type="button"
-            onClick={onNextFile}
+            onClick={() => seekBy(10)}
             style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '4px', height: '26px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#fff', transition: 'all 0.15s ease' }}
-            title="Next Media in Queue"
+            title="Seek forward 10 seconds"
           >
             <SkipForward size={13} />
           </button>
 
-          {/* Interactive Speaker with Volume Adjustment Popover */}
+          {/* Circular volume progress, matching Cut / Trim. */}
           <div
             ref={volumeContainerRef}
-            style={{ position: 'relative', width: '100%', height: '26px' }}
-            onMouseEnter={() => setShowVolumeSlider(true)}
-            onMouseLeave={() => setShowVolumeSlider(false)}
-            onWheel={(e) => {
-              e.stopPropagation();
-              const delta = e.deltaY < 0 ? 5 : -5;
-              const currentVal = isMuted ? 0 : Math.round(volume * 100);
-              handleVolumeChange(Math.max(0, Math.min(100, currentVal + delta)));
-            }}
+            className="pw-volume-control"
+            style={{ position: 'relative', width: '100%', height: '26px', display: 'grid', placeItems: 'center' }}
+            onWheel={adjustVolumeWithWheel}
           >
             {showVolumeSlider && (
               <div
@@ -608,16 +662,18 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
 
             <button
               type="button"
+              className="pw-icon-btn"
               onClick={(e) => {
                 e.stopPropagation();
                 setShowVolumeSlider(prev => !prev);
               }}
               style={{
-                width: '100%',
-                height: '100%',
-                background: showVolumeSlider ? 'rgba(6, 182, 212, 0.2)' : 'rgba(255,255,255,0.05)',
-                border: showVolumeSlider ? '1px solid rgba(6, 182, 212, 0.4)' : 'none',
+                width: '26px',
+                height: '26px',
+                background: 'transparent',
+                border: 'none',
                 borderRadius: '4px',
+                overflow: 'visible',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -627,7 +683,13 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
               }}
               title={`Volume: ${isMuted ? '0% (Muted)' : `${Math.round(volume * 100)}%`} • Click or Hover to adjust • Scroll wheel to change`}
             >
-              {isMuted || volume === 0 ? <VolumeX size={12} /> : volume < 0.5 ? <Volume1 size={12} /> : <Volume2 size={12} />}
+              <span
+                className="pw-volume-ring"
+                style={{ '--volume-progress': `${volumePercent}%`, '--volume-ring-color': volumeRingColor } as React.CSSProperties}
+                aria-hidden="true"
+              >
+                {isMuted || volume === 0 ? <VolumeX size={12} /> : volume < 0.5 ? <Volume1 size={12} /> : <Volume2 size={12} />}
+              </span>
             </button>
           </div>
         </div>

@@ -9,6 +9,7 @@ interface ConverterHeaderProps {
   showDone: boolean;
   isExpanded: boolean;
   useHwAccel?: boolean;
+  draggable?: boolean;
   /** When a tool studio is active, show a ← Queue back button on the left */
   onQueueBack?: () => void;
   onToggleExpand: () => void;
@@ -22,6 +23,7 @@ export const ConverterHeader: React.FC<ConverterHeaderProps> = ({
   showDone,
   isExpanded,
   useHwAccel = true,
+  draggable = false,
   onQueueBack,
   onToggleExpand,
   onMinimize,
@@ -29,7 +31,7 @@ export const ConverterHeader: React.FC<ConverterHeaderProps> = ({
   onClose
 }) => {
   return (
-    <div style={{
+    <div className={draggable ? 'converter-pro-titlebar converter-pro-titlebar--draggable' : 'converter-pro-titlebar'} style={{
       height: '52px',
       padding: '0 18px',
       display: 'flex',

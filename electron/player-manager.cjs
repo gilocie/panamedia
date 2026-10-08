@@ -60,6 +60,16 @@ function openPlayerWindow(filePath, filename, options = {}) {
   // If not explicitly requesting a new window and an active player window already exists,
   // update the existing player window with the new media
   if (!isForceNew && existingPlayer && !existingPlayer.isDestroyed()) {
+    // An empty file path means "open/focus the player", not "replace its
+    // current media with nothing". Preserve its playback state in that case.
+    if (!filePath) {
+      lastFocusedPlayerWindow = existingPlayer;
+      if (existingPlayer.isMinimized()) existingPlayer.restore();
+      existingPlayer.show();
+      existingPlayer.focus();
+      return { success: true, windowId: existingPlayer.id };
+    }
+
     const st = { filePath, filename: targetTitle, playing: true, currentTime: 0, duration: 0, minimized: false, windowId: existingPlayer.id };
     playerStates.set(existingPlayer.id, st);
     lastFocusedPlayerWindow = existingPlayer;

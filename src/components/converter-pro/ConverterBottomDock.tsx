@@ -22,6 +22,7 @@ export const MEDIA_TOOLS: MediaToolItem[] = [
 ];
 
 interface ConverterBottomDockProps {
+  standaloneWindow?: boolean;
   formatModalMode: 'video' | 'audio';
   activeVideoPreset: VideoFormatPreset;
   activeAudioPreset: AudioFormatPreset;
@@ -37,6 +38,7 @@ interface ConverterBottomDockProps {
 }
 
 export const ConverterBottomDock: React.FC<ConverterBottomDockProps> = ({
+  standaloneWindow = false,
   formatModalMode,
   activeVideoPreset,
   activeAudioPreset,
@@ -53,9 +55,9 @@ export const ConverterBottomDock: React.FC<ConverterBottomDockProps> = ({
   const toolsScrollRef = useRef<HTMLDivElement | null>(null);
 
   return (
-    <div style={{
+    <div className={standaloneWindow ? 'converter-pro-transparent-surface' : undefined} style={{
       height: '110px',
-      background: 'rgba(10, 11, 18, 0.95)',
+      background: standaloneWindow ? 'transparent' : 'rgba(10, 11, 18, 0.95)',
       borderTop: '1px solid rgba(255, 255, 255, 0.08)',
       padding: '0 20px',
       display: 'flex',
@@ -119,10 +121,26 @@ export const ConverterBottomDock: React.FC<ConverterBottomDockProps> = ({
           padding: '0 4px'
         }}
       >
-        {MEDIA_TOOLS.map(tool => (
-          <div
+        {MEDIA_TOOLS.map(tool => {
+          const available = tool.id === 'cut';
+          return (
+          <Tooltip
             key={tool.id}
-            onClick={() => onSelectTool(tool)}
+            label={available ? tool.label : 'Coming soon'}
+            note={available ? tool.desc : `${tool.label} is disabled while Cut / Trim is being completed.`}
+            side="top"
+          >
+          <div
+            role="button"
+            aria-disabled={!available}
+            tabIndex={available ? 0 : -1}
+            onClick={available ? () => onSelectTool(tool) : undefined}
+            onKeyDown={available ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                onSelectTool(tool);
+              }
+            } : undefined}
             style={{
               minWidth: '82px',
               height: '70px',
@@ -134,11 +152,12 @@ export const ConverterBottomDock: React.FC<ConverterBottomDockProps> = ({
               alignItems: 'center',
               justifyContent: 'center',
               gap: '4px',
-              cursor: 'pointer',
+              cursor: available ? 'pointer' : 'not-allowed',
+              opacity: available ? 1 : 0.48,
+              filter: available ? undefined : 'saturate(0.45)',
               flexShrink: 0,
               transition: 'all 0.15s ease'
             }}
-            title={`${tool.label}: ${tool.desc}`}
           >
             <div style={{ position: 'relative', color: tool.color }}>
               {tool.icon}
@@ -170,7 +189,8 @@ export const ConverterBottomDock: React.FC<ConverterBottomDockProps> = ({
               {tool.sub}
             </div>
           </div>
-        ))}
+          </Tooltip>
+        );})}
       </div>
 
       {/* Right: Circular Neon RUN Button with Play/Pause Icon and Glowing Pulse Animation */}

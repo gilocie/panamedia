@@ -28,7 +28,7 @@ if (isTrustedAppDocument) {
     'install-app-update', 'install-binaries', 'install-browser-integration',
     'load-archive-data', 'move-converted-output', 'open-converter-folder',
     'open-file', 'open-folder', 'open-new-player-window',
-    'open-player-window', 'pause-binary-install', 'pause-download',
+    'open-player-window', 'open-converter-window', 'pause-binary-install', 'pause-download',
     'player-restore', 'register-media-folder', 'remove-media-path', 'resume-binary-install',
     'resume-download', 'save-archive-data', 'save-folder-to-disk',
     'save-settings', 'select-converter-output-folder', 'select-directory',

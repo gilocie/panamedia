@@ -372,6 +372,7 @@ const dataDir = path.join(app.getPath('userData'));
 const settingsFile = path.join(dataDir, 'settings.json');
 
 let mainWindow = null;
+let converterWindow = null;
 let tray = null; // Main app system tray icon instance
 
 let settings = {
@@ -1135,6 +1136,55 @@ ipcMain.on('window-maximize', (event) => {
 ipcMain.on('window-close', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (win) win.close();
+});
+
+ipcMain.handle('open-converter-window', () => {
+  if (converterWindow && !converterWindow.isDestroyed()) {
+    if (converterWindow.isMinimized()) converterWindow.restore();
+    converterWindow.show();
+    converterWindow.focus();
+    return { success: true, windowId: converterWindow.id };
+  }
+
+  converterWindow = new BrowserWindow({
+    // Keep the converter as a distinct, independently movable window while
+    // keeping it in front of the main Panamedia window that launched it.
+    ...(mainWindow && !mainWindow.isDestroyed() ? { parent: mainWindow, modal: false } : {}),
+    width: 1440,
+    height: 900,
+    minWidth: 1024,
+    minHeight: 680,
+    frame: false,
+    backgroundColor: '#080b16',
+    show: false,
+    autoHideMenuBar: true,
+    icon: getIconPath('panamedia.ico'),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      preload: path.join(__dirname, 'preload.cjs')
+    }
+  });
+
+  converterWindow.webContents.on('will-navigate', (event, url) => {
+    if (!isTrustedAppUrl(url)) event.preventDefault();
+  });
+  converterWindow.once('ready-to-show', () => {
+    if (converterWindow && !converterWindow.isDestroyed()) {
+      converterWindow.show();
+      converterWindow.focus();
+    }
+  });
+  converterWindow.on('closed', () => {
+    converterWindow = null;
+  });
+  converterWindow.loadURL(getAppUrl('mode=converter')).catch((error) => {
+    console.error('[Electron] Failed to load Converter Pro window:', error);
+    if (converterWindow && !converterWindow.isDestroyed()) converterWindow.close();
+  });
+
+  return { success: true, windowId: converterWindow.id };
 });
 
 ipcMain.handle('select-directory', async () => {
@@ -2866,13 +2916,67 @@ ipcMain.handle('trash-converter-output', async (_event, filePath) => {
     return { success: false, error: 'Invalid output file path' };
   }
   try {
-    const stat = await fs.promises.stat(filePath);
-    if (!stat.isFile()) {
-      return { success: false, error: 'Selected output is not a file' };
+    const normalizedTarget = path.resolve(filePath).toLowerCase();
+
+    // Stop an encoder that is still writing this output before asking Windows
+    // to move it to the Recycle Bin. Otherwise shell.trashItem commonly fails
+    // with "Operation was aborted" for an open/locked zero-byte output.
+    try {
+      const coreClient = require('./electron/core-client.cjs');
+      const activeJobs = await coreClient.call('convert_list', {}, 3000);
+      if (Array.isArray(activeJobs)) {
+        const matchingJobs = activeJobs.filter(job => job?.outputPath && path.resolve(job.outputPath).toLowerCase() === normalizedTarget);
+        for (const job of matchingJobs) {
+          if (job.jobId) await coreClient.call('convert_cancel', { jobId: job.jobId }, 8000);
+        }
+      }
+    } catch (cancelError) {
+      console.warn('[Converter] Could not query native jobs before deleting output:', cancelError);
     }
-    await shell.trashItem(filePath);
+
+    try {
+      const hardwareEngine = require('./panamedia-downloader/conversion-engine/hardwareEngine.cjs');
+      hardwareEngine.cancelConversionsWritingOutput?.(filePath);
+    } catch (cancelError) {
+      console.warn('[Converter] Could not cancel local output writer:', cancelError);
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 120));
+    let stat;
+    try { stat = await fs.promises.stat(filePath); }
+    catch (err) {
+      if (err.code === 'ENOENT') return { success: true };
+      throw err;
+    }
+    if (!stat.isFile()) return { success: false, error: 'Selected output is not a file' };
+
+    try {
+      await shell.trashItem(filePath);
+    } catch (trashError) {
+      // Windows shell trash can abort on outputs in synced folders or partial
+      // files. The user explicitly requested Delete, so fall back to unlink.
+      let unlinkError = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          await fs.promises.unlink(filePath);
+          unlinkError = null;
+          break;
+        } catch (err) {
+          if (err.code === 'ENOENT') {
+            unlinkError = null;
+            break;
+          }
+          unlinkError = err;
+          if (!['EPERM', 'EBUSY', 'EACCES'].includes(err.code) || attempt === 4) break;
+          await new Promise(resolve => setTimeout(resolve, 150));
+        }
+      }
+      if (unlinkError) throw unlinkError;
+      console.warn('[Converter] Recycle Bin move failed; permanently deleted output instead:', trashError.message);
+    }
     return { success: true };
   } catch (err) {
+    if (err.code === 'ENOENT') return { success: true };
     console.error('[Converter] Failed to move output to Recycle Bin:', err);
     return { success: false, error: err.message };
   }

@@ -98,7 +98,7 @@ export const useTimelineDrag = ({
    * is exported separately for the caller to merge in.
    */
   const handleProps = useCallback(
-    (target: DragTarget) => ({
+    (target: DragTarget, currentFraction = 0) => ({
       onPointerDown: (event: React.PointerEvent) => {
         // Primary button / single touch only.
         if (event.button !== 0 && event.pointerType === 'mouse') return;
@@ -120,10 +120,12 @@ export const useTimelineDrag = ({
         if (!el) return;
         const rect = el.getBoundingClientRect();
         if (rect.width <= 0) return;
-        const step = (event.shiftKey ? 1 : 0.1) / rect.width;
-        const centre = (target === 'in' ? fractionRef.current : fractionRef.current) * rect.width + rect.left;
+        // Timeline values are stored as a 0–1 fraction, so keyboard steps
+        // should be based on that value rather than on CSS pixels.
+        const step = event.shiftKey ? 0.01 : 0.001;
+        const current = currentFraction;
         const direction = event.key === 'ArrowRight' ? 1 : -1;
-        const next = Math.min(1, Math.max(0, (centre - rect.left + direction * step) / rect.width));
+        const next = Math.min(1, Math.max(0, current + direction * step));
         fractionRef.current = next;
         onDragRef.current(target, next);
         onCommitRef.current?.(target, next);
