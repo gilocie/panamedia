@@ -131,7 +131,7 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
     };
     electron.ipcRenderer.on('streaming-port-ready', onPort);
     return () => {
-      try { electron.ipcRenderer.removeListener('streaming-port-ready', onPort); } catch (_) {}
+      try { electron?.ipcRenderer.removeListener('streaming-port-ready', onPort); } catch (_) {}
     };
   }, [streamingPort]);
 

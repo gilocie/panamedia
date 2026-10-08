@@ -1,13 +1,13 @@
-import { useEffect, useState, useRef, useCallback, lazy, Suspense, useMemo, Component, type ReactNode } from 'react';
+import { useEffect, useState, useCallback, lazy, Suspense, useMemo } from 'react';
 import {
   Download, Pause, Play, Trash2, Plus, Settings, Folder,
   ExternalLink, Globe, CheckCircle2,
   AlertCircle, Loader2, Activity, PlayCircle,
   Search, Volume2, VolumeX, SkipForward, SkipBack,
   ChevronLeft, ChevronRight, FileText, Music, Film, Copy,
-  List, PlaySquare, RefreshCw, Maximize2, Info, Send, Tv,
+  List, RefreshCw, Maximize2, Info, Send, Tv,
   HelpCircle, CloudDownload, LayoutDashboard,
-  Sparkles, Flame, Heart, Star, Video, ShieldCheck,
+  Sparkles, ShieldCheck,
   Eye, EyeOff, KeyRound, Lock, Unlock, ShieldAlert, Check, X
 } from 'lucide-react';
 import playerBg from './assets/playerbg.jpg';
@@ -16,7 +16,6 @@ import { SegmentVisualizer } from './components/SegmentVisualizer';
 import { PlaylistSelector } from './components/PlaylistSelector';
 import { SendToFlashModal } from './components/SendToFlashModal';
 import { PanamediaPlayer } from './components/panamediaPlayer';
-import { getQueue, subscribeQueue } from './components/panamedia/converterQueue';
 const DuplicatesPanel = lazy(() => import('./components/DuplicatesPanel').then(m => ({ default: m.DuplicatesPanel })));
 import { AddStreamSiteModal, type NewStreamSiteData } from './components/AddStreamSiteModal';
 import { hashPin } from './components/panamedia/utils/pinSecurity';
@@ -35,666 +34,22 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useFormatPicker } from './hooks/useFormatPicker';
 import { useToasts } from './hooks/useToasts';
 import { HelpTab } from './features/HelpTab';
+import { FormatPickerContent } from './components/FormatPickerContent';
+import { PlayerErrorBoundary } from './components/PlayerErrorBoundary';
+import { BinarySetupScreen } from './components/BinarySetupScreen';
+import { isSocialOrPlatformUrl, getParentFolderName, getNormalizedName } from './utils/urlUtils';
+import { extractWebviewStreamScript } from './utils/extractWebviewStreamScript';
+import { useConverterState } from './hooks/useConverterState';
+import { useDownloadFormatting } from './hooks/useDownloadFormatting';
+import { useBulkDownloadActions } from './hooks/useBulkDownloadActions';
+import { useAppDragDrop } from './hooks/useAppDragDrop';
+import { useAddDownloadHandler } from './hooks/useAddDownloadHandler';
+import { useFileOperations } from './hooks/useFileOperations';
+import { useAppStartupListeners } from './hooks/useAppStartupListeners';
+import { cleanStreamUrl, DEFAULT_STREAM_SITES, getSiteIcon } from './hooks/useStreamSites';
 
 // Gain access to Electron IPC Renderer safely
 const electron = (window as any).electron || ((window as any).require ? (window as any).require('electron') : null);
-
-const isExtractorUrl = (url: string) => {
-  if (!url) return false;
-  const lower = url.toLowerCase();
-  return lower.includes('youtube.com/') ||
-    lower.includes('youtu.be/') ||
-    lower.includes('facebook.com/') ||
-    lower.includes('fb.watch/') ||
-    lower.includes('fb.com/') ||
-    lower.includes('instagram.com/') ||
-    lower.includes('tiktok.com/') ||
-    lower.includes('x.com/') ||
-    lower.includes('twitter.com/') ||
-    lower.includes('vimeo.com/') ||
-    lower.includes('dailymotion.com/') ||
-    lower.includes('reddit.com/') ||
-    lower.includes('threads.net/') ||
-    lower.includes('pinterest.com/') ||
-    lower.includes('.m3u8') ||
-    lower.includes('.mpd');
-};
-
-const isSocialOrPlatformUrl = (url: string) => {
-  if (!url) return false;
-  const lower = url.toLowerCase();
-  return lower.includes('facebook.com/') ||
-    lower.includes('fb.watch/') ||
-    lower.includes('fb.com/') ||
-    lower.includes('instagram.com/') ||
-    lower.includes('tiktok.com/') ||
-    lower.includes('x.com/') ||
-    lower.includes('twitter.com/') ||
-    lower.includes('vimeo.com/') ||
-    lower.includes('dailymotion.com/') ||
-    lower.includes('reddit.com/') ||
-    lower.includes('threads.net/') ||
-    lower.includes('pinterest.com/');
-};
-
-const getParentFolderName = (filePath: string) => {
-  if (!filePath) return '';
-  const parts = filePath.split(/[\\/]/);
-  if (parts.length > 1) {
-    return parts[parts.length - 2];
-  }
-  return '';
-};
-
-
-const getNormalizedName = (filename: string) => {
-  if (!filename) return '';
-  const extIndex = filename.lastIndexOf('.');
-  const ext = extIndex !== -1 ? filename.substring(extIndex) : '';
-  const base = extIndex !== -1 ? filename.substring(0, extIndex) : filename;
-
-  // Remove common suffixes like " (1)", " (2)", "_1", "_2", " - Copy", " (Copy)"
-  const normalizedBase = base
-    .replace(/\s*\(\d+\)$/g, '') // "video (1)" -> "video"
-    .replace(/_\d+$/g, '')       // "video_1" -> "video"
-    .replace(/\s*-\s*Copy$/gi, '') // "video - Copy" -> "video"
-    .replace(/\s*\(Copy\)$/gi, '') // "video (Copy)" -> "video"
-    .trim()
-    .toLowerCase();
-
-  return normalizedBase + ext.toLowerCase();
-};
-
-
-interface AppTask {
-  id: string;
-  url: string;
-  filename: string;
-  saveDir: string;
-  totalBytes: number;
-  downloadedBytes: number;
-  speed: number;
-  eta: number;
-  status: 'queued' | 'preparing' | 'downloading' | 'paused' | 'merging' | 'compressing' | 'completed' | 'failed';
-  connections: number;
-  headers: Record<string, string>;
-  addedAt: number;
-  isYoutube: boolean;
-  error?: string;
-  thumbnail?: string;
-
-  // Custom display fields for YouTube downloads
-  duration?: number;
-  displayProgress?: number;
-  displaySpeed?: string;
-  displayEta?: string;
-  displaySize?: string;
-
-  // Array of segment trackers
-  segments?: Array<{
-    index: number;
-    start: number;
-    end: number;
-    downloaded: number;
-    status: 'pending' | 'downloading' | 'completed' | 'failed';
-  }>;
-}
-
-interface AppSettings {
-  connections: number;
-  downloadDir: string;
-  autoCompress: boolean;
-  compressionCRF: number;
-  maxConcurrent: number;
-  syncedFolders: string[];
-}
-
-const getFriendlyErrorMessage = (rawError: string): string => {
-  if (!rawError) return 'An unknown error occurred during installation.';
-  const lower = rawError.toLowerCase();
-  
-  if (lower.includes('econnreset') || lower.includes('connection reset')) {
-    return 'Connection was interrupted. Please check your internet connection and try again.';
-  }
-  if (lower.includes('econnrefused') || lower.includes('connection refused')) {
-    return 'Connection refused by the server. The download server might be temporarily offline or blocked.';
-  }
-  if (lower.includes('enotfound') || lower.includes('eai_again') || lower.includes('getaddrinfo')) {
-    return 'Could not reach the server. Please check your internet connection.';
-  }
-  if (lower.includes('etimeout') || lower.includes('timed out') || lower.includes('timeout')) {
-    return 'The connection timed out. Please check your internet speed and try again.';
-  }
-  
-  return `Installation failed: ${rawError}. Please verify your connection.`;
-};
-
-// Robust in-webview media extraction function serialized via .toString() to prevent escaping bugs
-function extractWebviewStreamScript() {
-  try {
-    let mediaUrl = '';
-
-    const isTrashMedia = (u: any) => {
-      if (!u || typeof u !== 'string') return true;
-      const l = u.toLowerCase();
-      if (l.includes('.gif') || l.includes('data:image/gif')) return true;
-      const adWords = [
-        'trafficjunky', 'tsyndicate', 'exoclick', 'juicyads', 'eroadvertising',
-        'plugrush', 'adxad', 'popads', 'adsterra', 'propeller', 'doubleclick',
-        'googleads', 'googlesyndication', 'adnxs', 'adform', 'adroll', 'criteo',
-        'taboola', 'outbrain', 'zedo', 'adcolony', 'vungle', 'applovin', 'inmobi',
-        'ironsource', 'exosrv', 'realsrv', 'twinred', 'trafficfactory', 'popcash',
-        'adcash', 'hilltopads', 'clickadu', 'evadav', 'rollerads', 'yllix',
-        'etahub', 'twistity', 'stripchat', 'chaturbate', 'bongacams', 'livejasmin',
-        'camsoda', 'imlive', 'flirt4free', 'jerkmate', 'adservice', 'clicksor',
-        'serving-sys', 'innovid', 'spotxchange', 'spotx.tv', 'springserve',
-        'teads.tv', 'smartclip', 'tremorhub', 'extremereach', 'freewheel',
-        'imasdk', 'flashtalking', 'sizmek', 'mediaplex', 'connatix', 'vidoomy',
-        'monetag', 'galaksion', 'pushground', 'clickaine', 'admaven'
-      ];
-      if (adWords.some(w => l.includes(w))) return true;
-      if (l.includes('/ads/') || l.includes('/ad/') ||
-          l.includes('ad_') || l.includes('ad-') ||
-          l.includes('banner') || l.includes('creative') ||
-          l.includes('sponsor') || l.includes('promo') ||
-          l.includes('exclusive') || l.includes('advert') ||
-          l.includes('commercial') || l.includes('preroll') ||
-          l.includes('pre-roll') || l.includes('popunder') ||
-          l.includes('preview') || l.includes('teaser') ||
-          l.includes('trailer') || l.includes('verify') ||
-          l.includes('interstitial') || l.includes('instream') ||
-          l.includes('outstream') || l.includes('video_ad') ||
-          l.includes('videoad') || l.includes('ad_video') ||
-          l.includes('ad_media') || l.includes('overlay_ad') ||
-          l.includes('companion_ad') || l.includes('promotional')) {
-        return true;
-      }
-      if (l.includes('ad_type=') || l.includes('adtype=') ||
-          l.includes('ad_zone=') || l.includes('adzone=') ||
-          l.includes('campaign_id=') || l.includes('adid=') ||
-          l.includes('creative_id=') || l.includes('spot_id=')) {
-        return true;
-      }
-      return false;
-    };
-
-    const formatMediaUrl = (u: any) => {
-      if (!u) return '';
-      if (u.startsWith('//')) return 'https:' + u;
-      return u;
-    };
-
-    // 1. Inspect window.html5player or global player object if available
-    try {
-      const anyWin = window as any;
-      if (anyWin.html5player) {
-        if (typeof anyWin.html5player.getVideoUrlHigh === 'function') {
-          const u = anyWin.html5player.getVideoUrlHigh();
-          if (u && !isTrashMedia(u)) mediaUrl = formatMediaUrl(u);
-        }
-        if (!mediaUrl && anyWin.html5player.hlssrc && !isTrashMedia(anyWin.html5player.hlssrc)) {
-          mediaUrl = formatMediaUrl(anyWin.html5player.hlssrc);
-        }
-        if (!mediaUrl && typeof anyWin.html5player.getVideoUrlLow === 'function') {
-          const u = anyWin.html5player.getVideoUrlLow();
-          if (u && !isTrashMedia(u)) mediaUrl = formatMediaUrl(u);
-        }
-      }
-    } catch (e) {}
-
-    // 2. Search inline <script> tags for player definitions
-    if (!mediaUrl) {
-      const scripts = Array.from(document.querySelectorAll('script'));
-      for (const s of scripts) {
-        const text = s.textContent || '';
-        if (!text) continue;
-        const mHigh = text.match(/setVideoUrlHigh\s*\(\s*['"]((?:https?:)?\/\/[^'"]+)['"]\s*\)/i);
-        if (mHigh && mHigh[1] && !isTrashMedia(mHigh[1])) { mediaUrl = formatMediaUrl(mHigh[1]); break; }
-        const mHls = text.match(/setVideoHLS\s*\(\s*['"]((?:https?:)?\/\/[^'"]+)['"]\s*\)/i);
-        if (mHls && mHls[1] && !isTrashMedia(mHls[1])) { mediaUrl = formatMediaUrl(mHls[1]); break; }
-        const mHls2 = text.match(/hlssrc\s*=\s*['"]((?:https?:)?\/\/[^'"]+)['"]/i);
-        if (mHls2 && mHls2[1] && !isTrashMedia(mHls2[1])) { mediaUrl = formatMediaUrl(mHls2[1]); break; }
-      }
-      if (!mediaUrl) {
-        for (const s of scripts) {
-          const text = s.textContent || '';
-          if (!text) continue;
-          const mLow = text.match(/setVideoUrlLow\s*\(\s*['"]((?:https?:)?\/\/[^'"]+)['"]\s*\)/i);
-          if (mLow && mLow[1] && !isTrashMedia(mLow[1])) { mediaUrl = formatMediaUrl(mLow[1]); break; }
-        }
-      }
-    }
-
-    // 3. Inspect direct <video> elements with intelligent scoring
-    const isAdVideoEl = (v: HTMLVideoElement) => {
-      if (!v) return true;
-      if (v.closest('iframe, [class*="ad-"], [class*="ad_"], [class*="ads"], [id*="ad-"], [id*="ad_"], [id*="ads"], [class*="banner"], [id*="banner"], [class*="sponsor"], [class*="promo"], [class*="popup"], [id*="popup"], [class*="overlay"], [id*="overlay"], [class*="interstitial"], [class*="commercial"], [class*="preroll"], [id*="preroll"], [class*="companion"], [data-ad], [data-advertisement]')) {
-        return true;
-      }
-      const r = v.getBoundingClientRect();
-      if (r.width > 0 && r.width < 320) return true;
-      if (r.height > 0 && r.height < 180) return true;
-      if (r.width === 0 || r.height === 0) return true;
-      if (v.loop && (!v.duration || v.duration < 120)) return true;
-      if (v.muted && v.autoplay && (!v.duration || v.duration < 60)) return true;
-      const vSrc = (v.currentSrc || v.src || '').toLowerCase();
-      if (vSrc && isTrashMedia(vSrc)) return true;
-      return false;
-    };
-
-    const allVideos = Array.from(document.querySelectorAll('video'));
-    let bestVideo: HTMLVideoElement | null = null;
-    let bestScore = -999999;
-
-    for (const v of allVideos) {
-      if (isAdVideoEl(v)) continue;
-      let score = 0;
-      if (!v.paused) score += 5000;
-      if (v.currentTime > 0) score += 3000;
-      if (v.duration && v.duration > 120 && isFinite(v.duration)) score += 2000;
-      if (v.duration && v.duration > 30) score += 1000;
-      if (v.duration && v.duration < 15) score -= 3000;
-      if (v.muted && v.autoplay) score -= 800;
-      const r = v.getBoundingClientRect();
-      if (r.width >= 400 && r.height >= 200) score += 1500;
-      if (r.width > 0 && r.height > 0) score += 500;
-      if (v.matches('#html5video video, #main-player video, .video-player video, #video-player video, video.html5-main-video, #player video, #video_html5 video, .player video, .plyr video, .jwplayer video, .vjs-tech')) {
-        score += 2500;
-      }
-      if (score > bestScore) {
-        bestScore = score;
-        bestVideo = v;
-      }
-    }
-
-    const mainVideoEl = bestVideo || allVideos.find(v => !isAdVideoEl(v)) || allVideos[0] || null;
-
-    if (mainVideoEl) {
-      let s = mainVideoEl.currentSrc || mainVideoEl.src;
-      if (!s) {
-        const srcEl = mainVideoEl.querySelector('source');
-        if (srcEl && srcEl.src) s = srcEl.src;
-      }
-      if (s && !s.startsWith('blob:') && !s.startsWith('data:') && !isTrashMedia(s)) {
-        if (!mediaUrl) mediaUrl = s;
-      }
-    }
-
-    if (!mediaUrl) {
-      for (const v of allVideos) {
-        if (isAdVideoEl(v)) continue;
-        let s = v.currentSrc || v.src;
-        if (!s) {
-          const srcEl = v.querySelector('source');
-          if (srcEl && srcEl.src) s = srcEl.src;
-        }
-        if (s && !s.startsWith('blob:') && !s.startsWith('data:') && !isTrashMedia(s)) {
-          mediaUrl = s;
-          break;
-        }
-      }
-    }
-
-    // 4. Inspect Resource Timing entries for full .m3u8 or .mp4 streams
-    if (!mediaUrl) {
-      const entries = performance.getEntriesByType('resource');
-      for (let i = entries.length - 1; i >= 0; i--) {
-        const n = entries[i].name || '';
-        if (isTrashMedia(n)) continue;
-        const clean = n.split('?')[0].toLowerCase();
-        if (clean.endsWith('.m3u8') || clean.endsWith('.mp4') || clean.endsWith('.webm') || clean.endsWith('.m4v')) {
-          mediaUrl = n;
-          break;
-        }
-      }
-      if (!mediaUrl) {
-        for (let i = entries.length - 1; i >= 0; i--) {
-          const n = entries[i].name || '';
-          if (isTrashMedia(n)) continue;
-          if (n.includes('.m3u8') || n.includes('googotv.com') || (n.includes('/stream/') && n.includes('.ts'))) {
-            mediaUrl = n;
-            break;
-          }
-        }
-      }
-    }
-
-    // 5. Fallback poster from metadata
-    const isAdOrGif = (src: string | null | undefined) => {
-      if (!src || typeof src !== 'string') return true;
-      const l = src.toLowerCase();
-      if (l.endsWith('.gif') || l.includes('.gif?') || l.includes('.gif#')) return true;
-      if (l.includes('doubleclick') || l.includes('googleads') || l.includes('ad_') || l.includes('ad-') ||
-          l.includes('banner') || l.includes('sponsor') || l.includes('promo') || l.includes('exclusive') ||
-          l.includes('trafficjunky') || l.includes('advert')) return true;
-      return false;
-    };
-
-    let poster = '';
-    // 5. Official video thumbnail / poster from page player metadata
-    try {
-      const anyWin = window as any;
-      if (anyWin.html5player) {
-        if (typeof anyWin.html5player.getThumbUrl169 === 'function') {
-          const t = anyWin.html5player.getThumbUrl169();
-          if (t && !isAdOrGif(t)) poster = t;
-        }
-        if (!poster && typeof anyWin.html5player.getThumbUrl === 'function') {
-          const t = anyWin.html5player.getThumbUrl();
-          if (t && !isAdOrGif(t)) poster = t;
-        }
-        if (!poster && anyWin.html5player.thumb_url && !isAdOrGif(anyWin.html5player.thumb_url)) {
-          poster = anyWin.html5player.thumb_url;
-        }
-      }
-    } catch (e) {}
-
-    if (!poster) {
-      const scripts = Array.from(document.querySelectorAll('script'));
-      for (const s of scripts) {
-        const text = s.textContent || '';
-        if (!text) continue;
-        const m169 = text.match(/setThumbUrl169\s*\(\s*['"]((?:https?:)?\/\/[^'"]+)['"]\s*\)/i);
-        if (m169 && m169[1] && !isAdOrGif(m169[1])) { poster = m169[1]; break; }
-        const mThumb = text.match(/setThumbUrl\s*\(\s*['"]((?:https?:)?\/\/[^'"]+)['"]\s*\)/i);
-        if (mThumb && mThumb[1] && !isAdOrGif(mThumb[1])) { poster = mThumb[1]; break; }
-      }
-    }
-
-    if (!poster) {
-      const ogImg = document.querySelector('meta[property="og:image"]')?.getAttribute('content');
-      const twImg = document.querySelector('meta[name="twitter:image"]')?.getAttribute('content');
-      const vPoster = (bestVideo && (bestVideo as HTMLVideoElement).poster) || '';
-      for (const cand of [ogImg, twImg, vPoster]) {
-        if (cand && !isAdOrGif(cand)) {
-          poster = cand;
-          break;
-        }
-      }
-    }
-
-    // 6. Video duration
-    let duration = 0;
-    const allScripts = Array.from(document.querySelectorAll('script'));
-    for (const s of allScripts) {
-      const text = s.textContent || '';
-      if (!text) continue;
-      const m1 = text.match(/setVideoDuration\s*\(\s*(\d+)\s*\)/i);
-      const m2 = text.match(/video_duration\s*[:=]\s*['"]?(\d+)['"]?/i);
-      const m3 = text.match(/duration\s*[:=]\s*(\d{2,})/i);
-      const match = m1 || m2 || m3;
-      if (match) {
-        const val = parseInt(match[1], 10);
-        if (val > 45) { duration = val; break; }
-      }
-    }
-
-    if (!duration) {
-      const metaDur = document.querySelector('meta[property="video:duration"], meta[itemprop="duration"]')?.getAttribute('content');
-      if (metaDur) {
-        const isoMatch = metaDur.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/i);
-        if (isoMatch) {
-          const h = parseInt(isoMatch[1] || '0', 10);
-          const m = parseInt(isoMatch[2] || '0', 10);
-          const sec = parseInt(isoMatch[3] || '0', 10);
-          duration = h * 3600 + m * 60 + sec;
-        } else if (!isNaN(Number(metaDur))) {
-          duration = Math.round(Number(metaDur));
-        }
-      }
-    }
-
-    if (!duration) {
-      const durTextEl = document.querySelector('.duration, .video-duration, span.time, .badge-duration') as HTMLElement | null;
-      if (durTextEl) {
-        const raw = (durTextEl.innerText || '').trim();
-        const minMatch = raw.match(/(\d+)\s*min/i);
-        const colonMatch = raw.match(/(\d+):(\d{2})(?::(\d{2}))?/);
-        if (minMatch) {
-          duration = parseInt(minMatch[1], 10) * 60;
-        } else if (colonMatch) {
-          if (colonMatch[3]) {
-            duration = parseInt(colonMatch[1], 10) * 3600 + parseInt(colonMatch[2], 10) * 60 + parseInt(colonMatch[3], 10);
-          } else {
-            duration = parseInt(colonMatch[1], 10) * 60 + parseInt(colonMatch[2], 10);
-          }
-        }
-      }
-    }
-
-    if (!duration && mainVideoEl && mainVideoEl.duration && !isNaN(mainVideoEl.duration) && isFinite(mainVideoEl.duration) && mainVideoEl.duration > 1) {
-      duration = Math.round(mainVideoEl.duration);
-    }
-
-    // 7. Video current playback position & in-memory canvas frame capture
-    let currentTime = 0;
-    if (mainVideoEl && !isNaN(mainVideoEl.currentTime) && mainVideoEl.currentTime > 0) {
-      currentTime = Math.round(mainVideoEl.currentTime);
-    }
-
-    let frameData: string | null = null;
-    if (mainVideoEl) {
-      try {
-        const vw = mainVideoEl.videoWidth || mainVideoEl.clientWidth || 640;
-        const vh = mainVideoEl.videoHeight || mainVideoEl.clientHeight || 360;
-        if (vw > 20 && vh > 20) {
-          const c = document.createElement('canvas');
-          const targetW = Math.min(vw, 640);
-          const targetH = Math.round(targetW * (vh / vw));
-          c.width = targetW;
-          c.height = targetH;
-          const ctx = c.getContext('2d');
-          if (ctx) {
-            ctx.drawImage(mainVideoEl, 0, 0, targetW, targetH);
-            const dUrl = c.toDataURL('image/jpeg', 0.85);
-            if (dUrl && dUrl.length > 500 && !dUrl.startsWith('data:,')) {
-              frameData = dUrl;
-            }
-          }
-        }
-      } catch (e) {
-        // Fallback to webview.capturePage
-      }
-    }
-
-    // Video bounding rect for webview compositor frame capture
-    let videoRect: { x: number; y: number; width: number; height: number } | null = null;
-    if (mainVideoEl) {
-      const r = mainVideoEl.getBoundingClientRect();
-      if (r.width > 40 && r.height > 40) {
-        videoRect = {
-          x: Math.round(r.left),
-          y: Math.round(r.top),
-          width: Math.round(r.width),
-          height: Math.round(r.height)
-        };
-      }
-    }
-    if (!videoRect) {
-      const playerContainer = document.querySelector(
-        '#video-player-bg, #html5video, #video-player, .video-player, #player, .player-container, #main-player, .video-container, #video-container, .media-player, [class*="player-wrap"], [class*="video-wrap"], .plyr, .jwplayer, .vjs-tech'
-      );
-      if (playerContainer) {
-        const pr = playerContainer.getBoundingClientRect();
-        if (pr.width > 200 && pr.height > 120) {
-          videoRect = {
-            x: Math.round(pr.left),
-            y: Math.round(pr.top),
-            width: Math.round(pr.width),
-            height: Math.round(pr.height)
-          };
-        }
-      }
-    }
-
-    // 8. Clean Page Title bypassing age-verification & generic site titles
-    const isAgeBanner = (t: string) => {
-      if (!t || typeof t !== 'string') return true;
-      return /verify\s*(your)?\s*age|confirm\s*(your)?\s*age|age\s*verification|18\s*\+|adult\s*content|sign\s*in\s*to\s*confirm/i.test(t);
-    };
-    const isGenericTitle = (t: string) => {
-      if (!t || typeof t !== 'string') return true;
-      const trimmed = t.trim();
-      return /^(free\s*movies?|watch\s*(movies?|online|free)|online\s*movies?|movies?|video\s*stream|web\s*video|home|stream|player|free\s*streaming|full\s*movie|watch\s*hd|hd\s*movies?|free\s*videos?|movie\s*stream|streaming)$/i.test(trimmed);
-    };
-    const isBadTitle = (t: string) => isAgeBanner(t) || isGenericTitle(t);
-
-    const isPlayerOverlayText = (t: string) => {
-      if (!t || typeof t !== 'string') return false;
-      const l = t.toLowerCase();
-      if (l.includes('previewing') || l.includes('unlock full access') ||
-          l.includes('go premium') || l.includes('unlock access') ||
-          l.includes('sign up free') || l.includes('join now') ||
-          l.includes('subscribe now') || l.includes('get premium') ||
-          l.includes('upgrade now') || l.includes('free trial') ||
-          l.includes('start watching') || l.includes('remove ads')) return true;
-      if (/\d{1,2}:\d{2}\s*\/\s*\d{1,2}:\d{2}/.test(t)) return true;
-      if (/\b(480p|720p|1080p|dualsub|english\s+off)\b/i.test(l) && l.length > 30) return true;
-      if (t.length > 100) return true;
-      return false;
-    };
-
-    let resolvedTitle = '';
-    const ogTitle = document.querySelector('meta[property="og:title"]')?.getAttribute('content');
-    const twTitle = document.querySelector('meta[name="twitter:title"]')?.getAttribute('content');
-    const specificTitleEl = document.querySelector(
-      '.page-title, #main h2, .video-title, h2.title, .video-tags + h2, .video-detail h1, ' +
-      '.movie-title, .film-title, .media-title, .content-title, ' +
-      '.video-info h1, .video-info h2, .detail-title, .detail h1, ' +
-      '[class*="title"][class*="movie"]'
-    ) as HTMLElement | null;
-    const specificTitle = specificTitleEl ? (specificTitleEl.innerText || '').trim() : '';
-    const docTitle = document.title || '';
-    let h1 = '';
-    const allH1s = Array.from(document.querySelectorAll('h1'));
-    for (const el of allH1s) {
-      const txt = (el.innerText || '').trim();
-      if (!txt || txt.length < 2) continue;
-      if (el.closest('.video-player, #player, .player, [class*="player"], [class*="video-container"]')) continue;
-      if (!isPlayerOverlayText(txt) && !isBadTitle(txt)) {
-        h1 = txt;
-        break;
-      }
-    }
-
-    for (const cand of [specificTitle, h1, ogTitle, twTitle, docTitle]) {
-      if (cand && !isBadTitle(cand) && !isPlayerOverlayText(cand)) {
-        resolvedTitle = cand;
-        break;
-      }
-    }
-
-    if (resolvedTitle) {
-      resolvedTitle = resolvedTitle
-        .replace(/\s*[-–|]\s*(xvideos|pornhub|spankbang|redtube|youporn|youtube|dailymotion|vimeo|moviebox|fzmovies|mzfl|free\s*movies?).*$/i, '')
-        .trim();
-      if (isGenericTitle(resolvedTitle)) resolvedTitle = '';
-    }
-
-    if (!resolvedTitle || isBadTitle(resolvedTitle)) {
-      try {
-        const parts = window.location.pathname.split('/').filter(Boolean);
-        const skipWords = ['spa', 'videoplaypage', 'movies', 'movie', 'watch', 'video', 'play', 'v', 'embed', 'stream', 'page'];
-        for (let i = parts.length - 1; i >= 0; i--) {
-          const p = parts[i];
-          if (skipWords.includes(p.toLowerCase())) continue;
-          if (p && p.length > 1) {
-            const cleaned = decodeURIComponent(p)
-              .replace(/[-_][a-zA-Z0-9]{6,25}$/, '')
-              .replace(/[-_]+/g, ' ')
-              .trim();
-            if (cleaned.length > 1 && !/^[a-f0-9]{20,}$/i.test(cleaned)) {
-              resolvedTitle = cleaned.replace(/\b\w/g, c => c.toUpperCase());
-              break;
-            }
-          }
-        }
-      } catch (e) {}
-    }
-
-    return { mediaUrl, title: resolvedTitle || 'Web Video Stream', duration, currentTime, poster, videoRect, frameData };
-  } catch (err) {
-    return { mediaUrl: '', title: document.title || 'Web Video Stream', duration: 0, currentTime: 0, poster: '', videoRect: null, frameData: null };
-  }
-}
-
-interface ErrorBoundaryProps {
-  children: ReactNode;
-  componentName?: string;
-}
-
-interface ErrorBoundaryState {
-  hasError: boolean;
-  error: Error | null;
-}
-
-class PlayerErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error: Error, errorInfo: any) {
-    console.error(`[${this.props.componentName || 'Component'}] Error:`, error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div style={{
-          height: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: '#09090e',
-          color: '#fff',
-          fontFamily: "'Outfit', 'Inter', sans-serif",
-          padding: '24px',
-          textAlign: 'center'
-        }}>
-          <div style={{
-            background: 'rgba(239, 68, 68, 0.12)',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-            borderRadius: '16px',
-            padding: '28px 36px',
-            maxWidth: '500px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '16px'
-          }}>
-            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#f87171' }}>
-              Media Player Encountered an Issue
-            </div>
-            <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.7)', lineHeight: '1.5' }}>
-              {this.state.error?.message || 'An unexpected rendering error occurred.'}
-            </div>
-            <button
-              onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
-              style={{
-                background: 'var(--primary, #6366f1)',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '8px',
-                padding: '8px 20px',
-                fontWeight: '600',
-                cursor: 'pointer'
-              }}
-            >
-              Reload Player
-            </button>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
 
 export default function App() {
   const { mode, pathParam, titleParam } = (() => {
@@ -749,43 +104,9 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<'downloads' | 'queues' | 'settings' | 'integration' | 'browser'>('downloads');
 
-  useEffect(() => {
-    if (!electron) return;
-    const openConverter = () => {
-      electron.ipcRenderer.invoke('open-converter-window').catch((error: unknown) => {
-        console.error('Failed to open Converter Pro:', error);
-      });
-    };
-    electron.ipcRenderer.on('converter-open-request', openConverter);
-    return () => electron.ipcRenderer.removeListener('converter-open-request', openConverter);
-  }, []);
+  const { converterQueueCount, converterState } = useConverterState();
 
-  // Track Converter Pro queue and in-progress conversion state to highlight the menu item
-  const [converterQueueCount, setConverterQueueCount] = useState<number>(() => {
-    try {
-      return getQueue().length;
-    } catch {
-      return 0;
-    }
-  });
-  const [converterState, setConverterState] = useState<any>(null);
-
-  useEffect(() => {
-    return subscribeQueue((items) => setConverterQueueCount(items.length));
-  }, []);
-
-  useEffect(() => {
-    if (!electron) return;
-    const bridge = electron;
-    const handler = (_event: any, state: any) => setConverterState(state);
-    bridge.ipcRenderer.on('converter-state-changed', handler);
-    bridge.ipcRenderer.invoke('get-converter-minimize-state').then((state: any) => {
-      if (state) setConverterState(state);
-    }).catch(() => {});
-    return () => { bridge.ipcRenderer.removeListener('converter-state-changed', handler); };
-  }, []);
-
-  // ─── Custom Hooks ────────────────────────────────────────────────
+  // â”€â”€â”€ Custom Hooks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const {
     downloads, setDownloads,
     selectedTaskId, setSelectedTaskId,
@@ -862,7 +183,7 @@ export default function App() {
     setWebviewRef,
   } = useBrowser();
 
-  // ─── Archive + PIN ───────────────────────────────────────────────
+  // â”€â”€â”€ Archive + PIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const {
     archivePaths: _archivePaths, setArchivePaths,
     settingsArchivePin, setSettingsArchivePin,
@@ -878,7 +199,7 @@ export default function App() {
   } = useArchive();
 
 
-  // ─── Updater ─────────────────────────────────────────────────────
+  // â”€â”€â”€ Updater â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const {
     showReleaseDialog, setShowReleaseDialog,
     releaseCheckStatus, setReleaseCheckStatus,
@@ -897,185 +218,27 @@ export default function App() {
   } = useUpdater();
 
 
-  // ─── App-level constants ─────────────────────────────────────────
+  // â”€â”€â”€ App-level constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const APP_VERSION = '1.0.1';
   const [helpSubTab, setHelpSubTab] = useState<'guide' | 'license'>('guide');
   const [browserUrl] = useState('https://www.youtube.com');
-  const loadedSettingsRef = useRef(false);
 
 
-  const downloadsTableRef = useRef<HTMLDivElement>(null);
-
-  // Clean campaign/preview/interstitial links into authentic direct broadcaster streams
-  const cleanStreamUrl = (rawUrl: string): string => {
-    if (!rawUrl || typeof rawUrl !== 'string') return rawUrl;
-    try {
-      const trimmed = rawUrl.trim();
-      if (!trimmed) return rawUrl;
-      const urlObj = new URL(trimmed.startsWith('http') ? trimmed : `https://${trimmed}`);
-      const host = urlObj.hostname.toLowerCase();
-
-      // 1. Chaturbate campaign / preview / interstitial links -> Original direct broadcaster room
-      if (host.includes('chaturbate.com')) {
-        const room = urlObj.searchParams.get('room');
-        if (room && (urlObj.pathname.includes('livecampreview') || urlObj.pathname.includes('/in/') || urlObj.searchParams.has('campaign'))) {
-          return `https://chaturbate.com/${encodeURIComponent(room)}/`;
-        }
-      }
-
-      // 2. Stripchat campaign / embed links -> Original direct model room
-      if (host.includes('stripchat.com')) {
-        const model = urlObj.searchParams.get('model') || urlObj.searchParams.get('room');
-        if (model && (urlObj.pathname.includes('/promo') || urlObj.pathname.includes('/embed') || urlObj.searchParams.has('campaign'))) {
-          return `https://stripchat.com/${encodeURIComponent(model)}/`;
-        }
-      }
-
-      // 3. CamSoda campaign / embed links
-      if (host.includes('camsoda.com')) {
-        const model = urlObj.searchParams.get('model') || urlObj.searchParams.get('room');
-        if (model) {
-          return `https://www.camsoda.com/${encodeURIComponent(model)}`;
-        }
-      }
-
-      // 4. BongaCams campaign / embed links
-      if (host.includes('bongacams.com')) {
-        const model = urlObj.searchParams.get('model') || urlObj.searchParams.get('room');
-        if (model) {
-          return `https://bongacams.com/${encodeURIComponent(model)}/`;
-        }
-      }
-    } catch (e) {}
-    return rawUrl;
-  };
-
-  const tableWheelCleanupRef = useRef<(() => void) | null>(null);
-
-  // Allow horizontal scrolling on Active Downloads:
-  // 1. Hovering directly over the bottom horizontal scrollbar -> mouse wheel scrolls horizontally
-  // 2. Mouse inside active download records -> Ctrl + scroll wheel (or Shift + wheel) scrolls horizontally
-  const setDownloadsTableRef = useCallback((node: HTMLDivElement | null) => {
-    if (tableWheelCleanupRef.current) {
-      tableWheelCleanupRef.current();
-      tableWheelCleanupRef.current = null;
-    }
-
-    (downloadsTableRef as any).current = node;
-
-    if (node) {
-      const handleTableWheel = (e: WheelEvent) => {
-        const rect = node.getBoundingClientRect();
-        // Mouse hovering over the horizontal scrollbar area at the bottom edge (within 24px)
-        const isOverHorizontalScrollbar = (
-          e.clientY >= rect.bottom - 24 &&
-          e.clientY <= rect.bottom + 6 &&
-          e.clientX >= rect.left &&
-          e.clientX <= rect.right
-        );
-
-        if (isOverHorizontalScrollbar || e.ctrlKey || e.shiftKey) {
-          if (node.scrollWidth > node.clientWidth) {
-            e.preventDefault();
-            let delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
-            if (e.deltaMode === 1) {
-              delta *= 28; // DOM_DELTA_LINE
-            } else if (e.deltaMode === 2) {
-              delta *= node.clientWidth; // DOM_DELTA_PAGE
-            }
-            node.scrollLeft += delta;
-          }
-        }
-      };
-
-      node.addEventListener('wheel', handleTableWheel, { passive: false });
-      tableWheelCleanupRef.current = () => {
-        node.removeEventListener('wheel', handleTableWheel);
-      };
-    }
-  }, []);
-
-  // Stream sites state (Facebook & Instagram removed as requested for future integration)
-  const DEFAULT_STREAM_SITES = [
-    { name: 'YouTube', url: 'https://www.youtube.com', color: '#ff0000' },
-    { name: 'Moviebox', url: 'https://moviebox.ph/', color: '#fbbf24' },
-    { name: 'TikTok', url: 'https://www.tiktok.com', color: '#010101' }
-  ];
-
-  const getSiteIcon = (site: any) => {
-    if (site.showIcon === false) return null;
-
-    if (site.favicon) {
-      return (
-        <img
-          src={site.favicon}
-          alt=""
-          style={{ width: '13px', height: '13px', borderRadius: '2px', objectFit: 'contain', flexShrink: 0 }}
-          onError={(e) => {
-            (e.currentTarget as HTMLElement).style.display = 'none';
-          }}
-        />
-      );
-    }
-
-    if (site.customIcon) {
-      switch (site.customIcon) {
-        case 'film': return <Film size={12} style={{ color: site.color || '#a855f7', flexShrink: 0 }} />;
-        case 'tv': return <Tv size={12} style={{ color: site.color || '#3b82f6', flexShrink: 0 }} />;
-        case 'play': return <PlaySquare size={12} style={{ color: site.color || '#fbbf24', flexShrink: 0 }} />;
-        case 'video': return <Video size={12} style={{ color: site.color || '#06b6d4', flexShrink: 0 }} />;
-        case 'music': return <Music size={12} style={{ color: site.color || '#ec4899', flexShrink: 0 }} />;
-        case 'flame': return <Flame size={12} style={{ color: site.color || '#ef4444', flexShrink: 0 }} />;
-        case 'sparkles': return <Sparkles size={12} style={{ color: site.color || '#f59e0b', flexShrink: 0 }} />;
-        case 'heart': return <Heart size={12} style={{ color: site.color || '#f43f5e', flexShrink: 0 }} />;
-        case 'star': return <Star size={12} style={{ color: site.color || '#eab308', flexShrink: 0 }} />;
-        case 'globe':
-        default:
-          return <Globe size={12} style={{ color: site.color || 'var(--primary)', flexShrink: 0 }} />;
-      }
-    }
-
-    const name = site.name.toLowerCase();
-    if (name.includes('youtube')) {
-      return (
-        <svg viewBox="0 0 24 24" width="12" height="12" fill={site.color || '#ff0000'} style={{ flexShrink: 0 }}>
-          <path d="M23.498 6.163a3.003 3.003 0 0 0-2.11-2.11C19.518 3.545 12 3.545 12 3.545s-7.518 0-9.388.508a3.003 3.003 0 0 0-2.11 2.11C0 8.033 0 12 0 12s0 3.967.502 5.837a3.003 3.003 0 0 0 2.11 2.11c1.87.508 9.388.508 9.388.508s7.518 0 9.388-.508a3.002 3.002 0 0 0 2.11-2.11C24 15.967 24 12 24 12s0-3.967-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-        </svg>
-      );
-    }
-    if (name.includes('facebook')) {
-      return (
-        <svg viewBox="0 0 24 24" width="12" height="12" fill={site.color || '#1877f2'} style={{ flexShrink: 0 }}>
-          <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-        </svg>
-      );
-    }
-    if (name.includes('tiktok')) {
-      return (
-        <svg viewBox="0 0 24 24" width="12" height="12" fill="#fff" style={{ flexShrink: 0, background: '#000', borderRadius: '2px', padding: '1px' }}>
-          <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.97v7.57c0 2.21-.73 4.41-2.22 6.02-1.89 2.05-4.78 2.87-7.46 2.2-2.74-.68-4.99-2.79-5.74-5.52-.89-3.21.36-6.84 3.08-8.62 1.62-1.07 3.63-1.46 5.53-1.09v4.08c-1.2-.38-2.58-.2-3.62.53-1.12.78-1.68 2.21-1.39 3.56.27 1.31 1.41 2.37 2.74 2.53 1.75.21 3.51-.83 3.96-2.53.1-.38.13-.77.13-1.16V0z" />
-        </svg>
-      );
-    }
-    if (name.includes('instagram')) {
-      return (
-        <svg viewBox="0 0 24 24" width="12" height="12" fill={site.color || '#e1306c'} style={{ flexShrink: 0 }}>
-          <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.051C.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z" />
-        </svg>
-      );
-    }
-    if (name.includes('moviebox')) {
-      return <PlaySquare size={12} style={{ color: site.color || '#fbbf24', flexShrink: 0 }} />;
-    }
-    return <Globe size={12} style={{ color: 'var(--primary)', flexShrink: 0 }} />;
-  };
+  const {
+    downloadsTableRef,
+    setDownloadsTableRef,
+    formatBytes,
+    formatSpeed,
+    formatEta,
+    getPercentage,
+  } = useDownloadFormatting();
 
 
 
   // Clear History Modal state
   // Context Menu state
   // Mini-player state (when player window is minimized to sidebar)
-  // ─── Mini Player ─────────────────────────────────────────────────
+  // â”€â”€â”€ Mini Player â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const {
     miniPlayerState, setMiniPlayerState,
     miniPlayerHovered, setMiniPlayerHovered,
@@ -1092,10 +255,10 @@ export default function App() {
     electron?.ipcRenderer.invoke('player-restore', curTime);
   }, [miniVideoRef]);
 
-  // ─── Real-time network speed (provided by useNetworkStatus above) ─
+  // â”€â”€â”€ Real-time network speed (provided by useNetworkStatus above) â”€
 
 
-  // ─── Format Picker + Playlist ─────────────────────────────────────────────
+  // â”€â”€â”€ Format Picker + Playlist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const { fetchFormats, handleCloseFormatsModal, handleDownloadPlaylist } = useFormatPicker({
     setIsYoutubeCheck, setAddUrl, setFormatLoading, setExtractError,
     setExtractProgress, setShowFormatModal, setYoutubeInfo,
@@ -1111,71 +274,29 @@ export default function App() {
 
 
 
-  const handleToggleSelect = (taskId: string) => {
-    setSelectedDownloadIds(prev =>
-      prev.includes(taskId) ? prev.filter(id => id !== taskId) : [...prev, taskId]
-    );
-  };
-
-  const handleToggleSelectAll = (filteredDownloadsList: AppTask[]) => {
-    if (selectedDownloadIds.length === filteredDownloadsList.length) {
-      setSelectedDownloadIds([]);
-    } else {
-      setSelectedDownloadIds(filteredDownloadsList.map(t => t.id));
-    }
-  };
-
-  const handleBulkPause = async () => {
-    if (!electron) return;
-    for (const id of selectedDownloadIds) {
-      await electron.ipcRenderer.invoke('pause-download', id);
-    }
-    setSelectedDownloadIds([]);
-  };
-
-  const handleBulkResume = async () => {
-    if (!electron) return;
-    for (const id of selectedDownloadIds) {
-      await electron.ipcRenderer.invoke('resume-download', id);
-    }
-    setSelectedDownloadIds([]);
-  };
-
-  const handleBulkDelete = () => {
-    if (selectedDownloadIds.length === 0) return;
-    const hasCompleted = downloads.some(t => selectedDownloadIds.includes(t.id) && t.status === 'completed');
-    setDeleteConfirmTarget({
-      type: 'bulk-tasks',
-      title: 'Remove Selected Downloads',
-      message: `Are you sure you want to remove the ${selectedDownloadIds.length} selected tasks?`,
-      taskIds: selectedDownloadIds,
-      showDeleteFileOption: hasCompleted,
-      onConfirm: async (deleteFilesOption) => {
-        if (!electron) return;
-        for (const id of selectedDownloadIds) {
-          await electron.ipcRenderer.invoke('delete-download', { taskId: id, deleteFile: deleteFilesOption });
-        }
-        const list = await electron.ipcRenderer.invoke('get-downloads');
-        setDownloads(list);
-        setSelectedDownloadIds([]);
-        setSelectedTaskId(null);
-        syncLibrary();
-      }
-    });
-  };
-
-  const handleClearHistory = async (filterType: string) => {
-    if (!electron) return;
-    const res = await electron.ipcRenderer.invoke('clear-downloads', { filterType });
-    setDownloads(res);
-    setShowClearHistoryModal(false);
-  };
+  const {
+    handleToggleSelect,
+    handleToggleSelectAll,
+    handleBulkPause,
+    handleBulkResume,
+    handleBulkDelete,
+    handleClearHistory,
+  } = useBulkDownloadActions({
+    downloads,
+    selectedDownloadIds,
+    setSelectedDownloadIds,
+    setSelectedTaskId,
+    setDeleteConfirmTarget,
+    setDownloads,
+    setShowClearHistoryModal,
+    syncLibrary,
+  });
 
   // YouTube Playlist modal state is provided by useModals() above
 
   // Application Settings (provided by useSettings hook)
 
-  // ─── Binary Installer ─────────────────────────────────────────────
+  // â”€â”€â”€ Binary Installer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const {
     binariesInstalled,
     installingBinaries,
@@ -1186,111 +307,45 @@ export default function App() {
     cancelInstall: handleCancelInstall,
   } = useBinaryInstaller();
 
-  // ─── Toast Notifications ──────────────────────────────────────────
+  // â”€â”€â”€ Toast Notifications â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const { toasts, addToast } = useToasts();
 
 
-  // resolveDuplicate was removed — duplicate resolution is handled via handleResolveDuplicates (physical delete)
+  // resolveDuplicate was removed â€” duplicate resolution is handled via handleResolveDuplicates (physical delete)
 
-  const performDeleteFile = async (filePath: string) => {
-    if (!electron) return { success: false, error: 'Electron not available' };
+  const {
+    performDeleteFile,
+    handleResolveDuplicates,
+    deleteDownload,
+    openFile,
+    openFolder,
+  } = useFileOperations({
+    downloads,
+    setDownloads,
+    selectedTaskId,
+    setSelectedTaskId,
+    selectedLibraryPath,
+    setSelectedLibraryPath,
+    duplicateDeletePaths,
+    setDuplicateDeletePaths,
+    setDeleteConfirmTarget,
+    syncLibrary,
+  });
 
-    // Find if this path matches a completed or any task in downloads
-    const matchingTask = downloads.find(t => {
-      const taskPath = t.saveDir + '\\' + t.filename;
-      const taskPathAlt = t.saveDir + '/' + t.filename;
-      return taskPath === filePath || taskPathAlt === filePath || t.filename === filePath.split(/[\\/]/).pop();
-    });
+  useAppStartupListeners({
+    setDownloads,
+    setAppSettings,
+    setAddSaveDir,
+    syncLibrary,
+    setAddUrl,
+    setAddFilename,
+    setIsYoutubeCheck,
+    setInterceptedHeaders,
+    setShowAddModal,
+    addToast,
+  });
 
-    let res;
-    if (matchingTask) {
-      // Delete download task from history, and delete file
-      const list = await electron.ipcRenderer.invoke('delete-download', { taskId: matchingTask.id, deleteFile: true });
-      setDownloads(list);
-      if (selectedTaskId === matchingTask.id) setSelectedTaskId(null);
-      res = { success: true };
-    } else {
-      // Just delete the physical file
-      res = await electron.ipcRenderer.invoke('delete-file', filePath);
-    }
-
-    if (selectedLibraryPath === filePath) {
-      setSelectedLibraryPath(null);
-    }
-
-    syncLibrary();
-    return res;
-  };
-
-  // toggleDuplicateDelete is provided by useLibrary()
-
-  const handleResolveDuplicates = async () => {
-    for (const path of duplicateDeletePaths) {
-      await performDeleteFile(path);
-    }
-    setDuplicateDeletePaths([]);
-    syncLibrary();
-  };
-
-
-  // syncLibrary is provided by useLibrary()
-
-  // ─── Startup IPC listeners (downloads + settings + native intercept + toast) ─
-  useEffect(() => {
-    if (!electron) return;
-
-    // Get downloads list on startup
-    electron.ipcRenderer.invoke('get-downloads').then((list: AppTask[]) => {
-      setDownloads(list);
-    });
-
-    // Get settings on startup
-    electron.ipcRenderer.invoke('get-settings').then((s: AppSettings) => {
-      setAppSettings(s);
-      setAddSaveDir(s.downloadDir);
-      loadedSettingsRef.current = true;
-    });
-
-    // IPC: live download list updates
-    const handleDownloadsUpdated = (_event: any, list: AppTask[]) => {
-      setDownloads(list);
-      syncLibrary();
-    };
-    electron.ipcRenderer.on('downloads-updated', handleDownloadsUpdated);
-
-    // IPC: browser-intercepted download link
-    const handleNativeDownloadReceived = (_event: any, data: any) => {
-      setAddUrl(data.url);
-      setAddFilename(data.filename || '');
-      setIsYoutubeCheck(data.isYoutube || isExtractorUrl(data.url));
-      setInterceptedHeaders(data.headers || {});
-      setShowAddModal(true);
-    };
-    electron.ipcRenderer.on('native-download-received', handleNativeDownloadReceived);
-
-    // IPC: completed download toast (now via useToasts)
-    const handleDownloadCompletedToast = (_event: any, filename: string) => {
-      addToast(`Completed: ${filename}`);
-    };
-    electron.ipcRenderer.on('download-completed-toast', handleDownloadCompletedToast);
-
-    // IPC: settings changed from another window
-    const handleSettingsChanged = (_event: any, newSettings: AppSettings) => {
-      setAppSettings(newSettings);
-      setAddSaveDir(newSettings.downloadDir);
-      syncLibrary();
-    };
-    electron.ipcRenderer.on('settings-changed', handleSettingsChanged);
-
-    return () => {
-      electron.ipcRenderer.removeListener('downloads-updated', handleDownloadsUpdated);
-      electron.ipcRenderer.removeListener('native-download-received', handleNativeDownloadReceived);
-      electron.ipcRenderer.removeListener('download-completed-toast', handleDownloadCompletedToast);
-      electron.ipcRenderer.removeListener('settings-changed', handleSettingsChanged);
-    };
-  }, []);
-
-  // ─── Keyboard Shortcuts + Context Menu ─────────────────────────────────────
+  // â”€â”€â”€ Keyboard Shortcuts + Context Menu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useKeyboardShortcuts({
     selectedLibraryPath,
     selectedTaskId,
@@ -1348,114 +403,34 @@ export default function App() {
     setContextMenu({ x: e.clientX, y: e.clientY, visible: true, type: 'file', targetPath: filePath });
   };
 
-  const handleAppDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.dataTransfer) {
-      e.dataTransfer.dropEffect = 'copy';
-    }
-  };
+  const { handleAppDragOver, handleAppDrop } = useAppDragDrop();
 
-  const handleAppDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
-    const file = e.dataTransfer.files[0];
-
-    // Resolve file path using multiple fallback strategies
-    let filePath = '';
-    try {
-      if ((window as any).electronWebUtils?.getPathForFile) {
-        filePath = (window as any).electronWebUtils.getPathForFile(file);
-      }
-    } catch (err) {}
-    if (!filePath) {
-      try {
-        if (electron?.webUtils?.getPathForFile) {
-          filePath = electron.webUtils.getPathForFile(file);
-        }
-      } catch (err) {}
-    }
-    if (!filePath) {
-      filePath = (file as any).path || '';
-    }
-    if (!filePath) return;
-
-    const ext = '.' + (filePath.split('.').pop()?.toLowerCase() || '');
-    const isMedia = ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.ts', '.m4v', '.flv', '.mpg', '.mpeg', '.3gp', '.wmv', '.vob', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg', '.opus', '.wma'].includes(ext);
-    if (isMedia) {
-      electron?.ipcRenderer.invoke('open-player-window', { filePath, filename: file.name });
-    }
-  };
-
-  // handleInstallBinaries → useBinaryInstaller().startInstall (already aliased above)
-  // handleDownloadPlaylist → useFormatPicker().handleDownloadPlaylist (already wired above)
-
-  const handleAddDownload = async () => {
-    if (!electron || !addUrl) return;
-
-    const isExtractor = isYoutubeCheck || isExtractorUrl(addUrl);
-
-    // If it's flagged as a playlist, check it first
-    if (isExtractor && (addUrl.includes('playlist?list=') || addUrl.includes('&list='))) {
-      setShowAddModal(false);
-      handleDownloadPlaylist(addUrl);
-      return;
-    }
-
-    // Intercept single YouTube/Extractor videos to fetch formats and sizes first
-    if (isExtractor) {
-      setShowAddModal(false);
-      setFormatsSource('add_modal');
-      fetchFormats(addUrl);
-      return;
-    }
-
-    // Intercept direct media URLs (.m3u8, .mp4, .webm, etc.) to show format picker
-    const directMediaExts = ['.m3u8', '.mp4', '.m4v', '.webm', '.mkv', '.mov', '.mp3', '.m4a', '.wav', '.flac'];
-    const cleanUrlLower = addUrl.split('?')[0].toLowerCase();
-    if (directMediaExts.some(ext => cleanUrlLower.endsWith(ext))) {
-      setShowAddModal(false);
-      setFormatsSource('add_modal');
-      fetchFormats(addUrl);
-      return;
-    }
-
-    setShowAddModal(false);
-
-    // Normal download
-    await electron.ipcRenderer.invoke('add-download', {
-      url: addUrl,
-      filename: addFilename,
-      saveDir: addSaveDir || appSettings.downloadDir,
-      startImmediately,
-      isYoutube: isExtractor,
-      headers: interceptedHeaders
-    });
-
-    setAddUrl('');
-    setAddFilename('');
-    setInterceptedHeaders({});
-    setActiveTab('downloads');
-  };
-
-  const handleBrowseDir = async () => {
-    if (!electron) return;
-    const dir = await electron.ipcRenderer.invoke('select-directory');
-    if (dir) {
-      setAddSaveDir(dir);
-    }
-  };
-
-  const handleSettingsBrowseDir = async () => {
-    if (!electron) return;
-    const dir = await electron.ipcRenderer.invoke('select-directory');
-    if (dir) {
-      const nextSettings = { ...appSettings, downloadDir: dir };
-      setAppSettings(nextSettings);
-      await electron.ipcRenderer.invoke('save-settings', nextSettings);
-    }
-  };
+  const {
+    handleAddDownload,
+    handleBrowseDir,
+    handleSettingsBrowseDir,
+    handleConfirmPlaylist,
+  } = useAddDownloadHandler({
+    addUrl,
+    addFilename,
+    addSaveDir,
+    startImmediately,
+    isYoutubeCheck,
+    interceptedHeaders,
+    appSettings,
+    setShowAddModal,
+    setAddUrl,
+    setAddFilename,
+    setInterceptedHeaders,
+    setActiveTab,
+    setFormatsSource: setFormatsSource as (src: 'add_modal' | 'browser' | null) => void,
+    fetchFormats,
+    handleDownloadPlaylist,
+    setAddSaveDir,
+    setAppSettings,
+    setShowPlaylistModal,
+    setPlaylistInfo,
+  });
 
   const handleRegisterBrowserIntegration = async () => {
     if (!electron) return;
@@ -1465,54 +440,6 @@ export default function App() {
     } else {
       alert('Failed to register integration: ' + res.error);
     }
-  };
-
-  const handleConfirmPlaylist = async (items: { url: string; title: string; duration?: number }[], _options: { compress: boolean }) => {
-    if (!electron) return;
-    setShowPlaylistModal(false);
-
-    // Add all playlist videos in queued state (sequential download)
-    for (const item of items) {
-      const sanitizedTitle = item.title.replace(/[\\/:*?"<>|]/g, '_');
-      await electron.ipcRenderer.invoke('add-download', {
-        url: item.url,
-        filename: `${sanitizedTitle}_720p.mp4`,
-        saveDir: appSettings.downloadDir,
-        startImmediately: false, // Queue them
-        isYoutube: true,
-        duration: item.duration || 0
-      });
-    }
-    setPlaylistInfo(null);
-    setActiveTab('downloads');
-  };
-
-  const deleteDownload = (id: string, deleteFile = false) => {
-    const task = downloads.find(t => t.id === id);
-    const filename = task ? task.filename : 'this download';
-    setDeleteConfirmTarget({
-      type: 'download',
-      title: 'Remove Download History',
-      message: `Are you sure you want to remove "${filename}" from download history?`,
-      taskId: id,
-      showDeleteFileOption: deleteFile || (task && task.status === 'completed'),
-      onConfirm: async (deleteFileFromDisk) => {
-        if (electron) {
-          const list = await electron.ipcRenderer.invoke('delete-download', { taskId: id, deleteFile: deleteFileFromDisk });
-          setDownloads(list);
-          if (selectedTaskId === id) setSelectedTaskId(null);
-          syncLibrary();
-        }
-      }
-    });
-  };
-
-  const openFile = (task: AppTask) => {
-    if (electron) electron.ipcRenderer.invoke('open-file', { saveDir: task.saveDir, filename: task.filename });
-  };
-
-  const openFolder = (task: AppTask) => {
-    if (electron) electron.ipcRenderer.invoke('open-folder', task.saveDir);
   };
 
   useEffect(() => {
@@ -1527,46 +454,6 @@ export default function App() {
       setRightPanelTab('details');
     }
   }, [selectedTaskId]);
-
-  // Helper formatting functions
-  const formatBytes = (bytes: number) => {
-    if (bytes <= 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
-  const formatSpeed = (bytesPerSec: number) => {
-    if (bytesPerSec <= 0) return '0 B/s';
-    const k = 1024;
-    const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
-    const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
-    return parseFloat((bytesPerSec / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-  };
-
-  const formatEta = (seconds: number) => {
-    if (seconds <= 0) return '—';
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    return [
-      h > 0 ? h : null,
-      m < 10 ? '0' + m : m,
-      s < 10 ? '0' + s : s
-    ].filter(x => x !== null).join(':');
-  };
-
-  const getPercentage = (task: AppTask) => {
-    if (task.isYoutube || (task as any).useYtDlp || task.displayProgress !== undefined) {
-      return task.displayProgress !== undefined ? task.displayProgress : 0;
-    }
-    if (task.totalBytes <= 0) return 0;
-    const raw = Math.round((task.downloadedBytes / task.totalBytes) * 100);
-    // Cap at 99% while the file is still being assembled (merging/compressing)
-    if ((task.status === 'merging' || task.status === 'compressing') && raw >= 100) return 99;
-    return raw;
-  };
 
   // Active download count for smart filtering (excluding archived items)
   const activeDownloadCount = useMemo(() => downloads.filter(t => {
@@ -1587,7 +474,7 @@ export default function App() {
     return matchesSearch;
   }), [downloads, searchQuery, activeDownloadCount, isItemArchived]);
 
-  // Virtualizer for downloads table — only renders visible rows
+  // Virtualizer for downloads table â€” only renders visible rows
   const downloadsVirtualizer = useVirtualizer({
     count: filteredDownloads.length,
     getScrollElement: () => downloadsTableRef.current,
@@ -1600,99 +487,14 @@ export default function App() {
   // First run binary downloader screen
   if (!binariesInstalled) {
     return (
-      <div style={{
-        height: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        backgroundImage: `linear-gradient(rgba(7, 7, 10, 0.75), rgba(7, 7, 10, 0.75)), url(${playerBg})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat'
-      }}>
-        <div className="titlebar">
-          <div className="titlebar-logo" style={{ display: 'flex', flexDirection: 'column', gap: '2px', lineHeight: 1.1, WebkitAppRegion: 'drag' } as any}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 'bold', fontSize: '13px' }}>
-              <img 
-                src="favicon.svg" 
-                style={{ width: '16px', height: '16px', objectFit: 'contain' }} 
-                alt="" 
-                onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'player.ico'; }}
-              /> Panamedia
-            </div>
-            <span style={{ fontSize: '8px', color: 'var(--text-muted)', fontWeight: 'normal', paddingLeft: '22px' }}>All in One media manager</span>
-          </div>
-        </div>
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="glass-panel setup-panel">
-            <div className="setup-title">System Initialization</div>
-            <div className="setup-desc">
-              To support fast YouTube playlist downloading and H.265/HEVC video compression, we need to configure <strong>yt-dlp.exe</strong> and <strong>ffmpeg.exe</strong>. Click below to download these static binaries automatically.
-            </div>
-
-            {!installingBinaries ? (
-              <button className="btn-primary" onClick={handleInstallBinaries} style={{ padding: '12px 28px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 auto' }}>
-                <Download size={16} /> Configure Runtimes
-              </button>
-            ) : (
-              <div className="setup-progress-container">
-                {installProgress.error ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--danger)', fontWeight: 'bold', fontSize: '14px' }}>
-                      <AlertCircle size={18} /> Setup Failed
-                    </div>
-                    <div style={{ fontSize: '12px', color: '#ff8888', textAlign: 'center', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '10px 14px', borderRadius: '10px', width: '100%', maxWidth: '400px', wordBreak: 'break-all' }}>
-                      {getFriendlyErrorMessage(installProgress.error)}
-                    </div>
-                    <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
-                      <button className="btn-primary" onClick={handleResumeBinaries} style={{ padding: '8px 16px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <Play size={12} /> Retry / Resume
-                      </button>
-                      <button className="titlebar-btn" onClick={handleCancelInstall} style={{ padding: '8px 16px', fontSize: '12px', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', height: 'auto', width: 'auto' }}>
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    <div style={{ display: 'flex', justifySelf: 'space-between', justifyContent: 'space-between', fontSize: '13px' }}>
-                      <span className="setup-status">
-                        {installProgress.isPaused ? 'Paused' : (installProgress.status.replace('_', ' ') + '...')}
-                      </span>
-                      <span>{Math.round(installProgress.progress)}% of 100%</span>
-                    </div>
-                    <div className="progress-bar-bg" style={{ height: '8px' }}>
-                      <div className="progress-bar-fill" style={{ width: `${installProgress.progress}%` }}></div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px' }}>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        {!installProgress.isPaused ? (
-                          <>
-                            <Loader2 size={12} className="animate-spin" /> This may take a moment depending on your bandwidth
-                          </>
-                        ) : (
-                          <>
-                            <Pause size={12} /> Download paused
-                          </>
-                        )}
-                      </div>
-                      
-                      {!installProgress.isPaused ? (
-                        <button onClick={handlePauseBinaries} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', padding: '4px 12px', borderRadius: '6px', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <Pause size={10} /> Pause
-                        </button>
-                      ) : (
-                        <button onClick={handleResumeBinaries} style={{ background: 'var(--primary)', border: 'none', color: '#fff', padding: '4px 12px', borderRadius: '6px', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <Play size={10} /> Resume
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+      <BinarySetupScreen
+        installingBinaries={installingBinaries}
+        installProgress={installProgress}
+        onInstall={handleInstallBinaries}
+        onResume={handleResumeBinaries}
+        onPause={handlePauseBinaries}
+        onCancel={handleCancelInstall}
+      />
     );
   }
 
@@ -2074,7 +876,7 @@ export default function App() {
             })()}
           </div>
 
-          {/* Live Network Speed Widget — always visible in sidebar footer */}
+          {/* Live Network Speed Widget â€” always visible in sidebar footer */}
           <div className="glass-panel" style={{
             padding: '10px 12px',
             borderRadius: '12px',
@@ -2093,7 +895,7 @@ export default function App() {
                 fontFamily: 'var(--font-title)',
                 color: netSpeed > 100 * 1024 ? '#22c55e' : netSpeed > 0 ? '#f59e0b' : 'var(--text-muted)'
               }}>
-                {netSpeed > 0 ? formatSpeed(netSpeed) : '— B/s'}
+                {netSpeed > 0 ? formatSpeed(netSpeed) : 'â€” B/s'}
               </span>
             </div>
             {downloads.some(t => t.status === 'downloading') && (
@@ -2247,7 +1049,7 @@ export default function App() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 2px' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden', flex: 1, marginRight: '6px' }}>
                     <span style={{ fontSize: '9px', color: 'var(--primary)', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      {miniPlayerState.playing ? '▶ Now Playing' : '⏸ Paused'}
+                      {miniPlayerState.playing ? 'â–¶ Now Playing' : 'â¸ Paused'}
                     </span>
                     <span style={{ fontSize: '10px', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: '500' }} title={miniPlayerState.filename}>
                       {miniPlayerState.filename}
@@ -2567,10 +1369,10 @@ export default function App() {
                               {/* Size */}
                               <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center', fontSize: '11px' }}>
                                 {task.status === 'completed'
-                                  ? (task.totalBytes > 0 ? formatBytes(task.totalBytes) : '—')
+                                  ? (task.totalBytes > 0 ? formatBytes(task.totalBytes) : 'â€”')
                                   : (task.totalBytes > 0
                                     ? <><span style={{ color: 'var(--primary)', fontWeight: '600' }}>{formatBytes(task.downloadedBytes)}</span><span style={{ color: 'var(--text-muted)', fontSize: '10px' }}> / {formatBytes(task.totalBytes)}</span></>
-                                    : (task.isYoutube && task.displaySize ? task.displaySize : '—'))
+                                    : (task.isYoutube && task.displaySize ? task.displaySize : 'â€”'))
                                 }
                               </div>
 
@@ -2589,14 +1391,14 @@ export default function App() {
 
                               {/* Speed */}
                               <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center', fontSize: '11px', fontFamily: 'var(--font-title)' }}>
-                                {task.isYoutube && task.displaySpeed ? task.displaySpeed : (task.status === 'downloading' ? formatSpeed(task.speed) : '—')}
+                                {task.isYoutube && task.displaySpeed ? task.displaySpeed : (task.status === 'downloading' ? formatSpeed(task.speed) : 'â€”')}
                               </div>
 
                               {/* Duration */}
                               <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center', fontSize: '11px' }}>
                                 {task.duration && task.duration > 0
                                   ? (() => { const m = Math.floor(task.duration / 60); const s = Math.floor(task.duration % 60); return `${m}:${s < 10 ? '0' : ''}${s}`; })()
-                                  : (task.isYoutube && task.displayEta ? task.displayEta : (task.status === 'downloading' ? formatEta(task.eta) : '—'))
+                                  : (task.isYoutube && task.displayEta ? task.displayEta : (task.status === 'downloading' ? formatEta(task.eta) : 'â€”'))
                                 }
                               </div>
 
@@ -2710,7 +1512,7 @@ export default function App() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', flex: 1, overflowY: 'auto', marginTop: '14px', paddingRight: '4px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifySelf: 'space-between', justifyContent: 'space-between' }}>
                       <h3 style={{ fontSize: '14px', fontWeight: 'bold' }}>Download Details</h3>
-                      <button className="modal-close-btn" style={{ fontSize: '12px' }} onClick={() => setSelectedTaskId(null)}>✕</button>
+                      <button className="modal-close-btn" style={{ fontSize: '12px' }} onClick={() => setSelectedTaskId(null)}>âœ•</button>
                     </div>
 
                     <div className="detail-row">
@@ -2893,7 +1695,7 @@ export default function App() {
                   /* LIBRARY TAB CONTENT */
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1, minHeight: 0, marginTop: '12px' }}>
 
-                    {/* ── Category icon+text tabs (Primary, Videos, Audios, Docx, Files) ── */}
+                    {/* â”€â”€ Category icon+text tabs (Primary, Videos, Audios, Docx, Files) â”€â”€ */}
                     <div style={{ display: 'flex', gap: '2px', background: 'rgba(255,255,255,0.02)', padding: '2px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
                       {([
                         { id: 'recent' as const,  label: 'Primary', icon: <Activity size={11} /> },
@@ -2969,7 +1771,7 @@ export default function App() {
                           style={{ background: 'transparent', border: 'none', color: 'var(--primary)', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', padding: '0 2px' }}
                           title={librarySortOrder === 'asc' ? 'Ascending' : 'Descending'}
                         >
-                          {librarySortOrder === 'asc' ? '▲' : '▼'}
+                          {librarySortOrder === 'asc' ? 'â–²' : 'â–¼'}
                         </button>
                       </div>
 
@@ -3003,7 +1805,7 @@ export default function App() {
                     {/* Sync Items List */}
                     <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', paddingRight: '2px' }}>
 
-                      {/* ── Duplicates Tab ── */}
+                      {/* â”€â”€ Duplicates Tab â”€â”€ */}
                       {(libraryCategory as string) === 'duplicates' ? (() => {
                         // Build duplicate groups from libraryFiles using normalized name
                         const nameMap = new Map<string, any[]>();
@@ -3043,10 +1845,10 @@ export default function App() {
                                     onClick={() => setExpandedDupGroups(prev => ({ ...prev, [normName]: !isExpanded }))}
                                     style={{ padding: '7px 10px', background: 'rgba(239,68,68,0.06)', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', userSelect: 'none' }}
                                   >
-                                    <span style={{ fontSize: '9px', color: isExpanded ? '#ef4444' : 'var(--text-muted)', transition: 'transform 0.15s', display: 'inline-block', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
+                                    <span style={{ fontSize: '9px', color: isExpanded ? '#ef4444' : 'var(--text-muted)', transition: 'transform 0.15s', display: 'inline-block', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>â–¶</span>
                                     <Copy size={10} style={{ color: '#ef4444', flexShrink: 0 }} />
                                     <span style={{ fontSize: '10px', fontWeight: '600', color: '#fff', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={groupTitle}>{groupTitle}</span>
-                                    {markedInGroup > 0 && <span style={{ fontSize: '9px', color: '#ef4444', background: 'rgba(239,68,68,0.15)', padding: '1px 5px', borderRadius: '4px', flexShrink: 0 }}>🗑 {markedInGroup}</span>}
+                                    {markedInGroup > 0 && <span style={{ fontSize: '9px', color: '#ef4444', background: 'rgba(239,68,68,0.15)', padding: '1px 5px', borderRadius: '4px', flexShrink: 0 }}>ðŸ—‘ {markedInGroup}</span>}
                                     <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.04)', padding: '1px 5px', borderRadius: '4px', flexShrink: 0 }}>{files.length} copies</span>
                                   </div>
                                   {/* Expanded file list */}
@@ -3065,13 +1867,13 @@ export default function App() {
                                           <div style={{ fontSize: '9px', color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.path}>{f.path}</div>
                                           <div style={{ display: 'flex', gap: '6px', fontSize: '8px', color: 'rgba(255,255,255,0.4)', marginTop: '2px', flexWrap: 'wrap' }}>
                                             <span>{formatBytes(f.size)}</span>
-                                            <span>•</span>
+                                            <span>â€¢</span>
                                             <span>{f.mtime ? new Date(f.mtime).toLocaleDateString() : '?'}</span>
                                             {isOldest && <span style={{ color: '#f59e0b', fontWeight: '700' }}>oldest</span>}
                                           </div>
                                         </div>
                                         <span style={{ fontSize: '9px', color: checked ? '#ef4444' : '#4ade80', fontWeight: '700', flexShrink: 0 }}>
-                                          {checked ? '✕ Del' : '✓ Keep'}
+                                          {checked ? 'âœ• Del' : 'âœ“ Keep'}
                                         </span>
                                       </div>
                                     );
@@ -3090,7 +1892,7 @@ export default function App() {
                           </>
                         );
                       })() : (
-                        <>{/* ── Normal Categories ── */}
+                        <>{/* â”€â”€ Normal Categories â”€â”€ */}
                           {(() => {
                             const rawItems = libraryCategory === 'recent'
                               ? downloads
@@ -3526,13 +2328,13 @@ export default function App() {
                                       </div>
                                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9px', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
                                         <span>{file.displaySize ? file.displaySize : formatBytes(file.size)}</span>
-                                        <span>•</span>
+                                        <span>â€¢</span>
                                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', background: 'rgba(255,255,255,0.04)', padding: '1px 4px', borderRadius: '4px', color: '#a855f7' }}>
                                           <Folder size={8} /> {getParentFolderName(file.path)}
                                         </span>
-                                        <span>•</span>
+                                        <span>â€¢</span>
                                         <span>{new Date(file.mtime).toLocaleDateString()}</span>
-                                        <span>•</span>
+                                        <span>â€¢</span>
                                         <span style={{ textTransform: 'uppercase', color: 'var(--primary)', fontWeight: 'bold' }}>{file.ext.replace('.', '')}</span>
                                       </div>
                                     </div>
@@ -3906,7 +2708,7 @@ export default function App() {
               {settingsSubTab === 'security' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
-                  {/* ── Main Two-Column Layout ── */}
+                  {/* â”€â”€ Main Two-Column Layout â”€â”€ */}
                   <div className="glass-panel" style={{
                     padding: '0',
                     display: 'grid',
@@ -3915,7 +2717,7 @@ export default function App() {
                     marginTop: '8px'
                   }}>
 
-                    {/* ── LEFT: Status & Info Panel ── */}
+                    {/* â”€â”€ LEFT: Status & Info Panel â”€â”€ */}
                     <div style={{
                       padding: '28px 24px',
                       display: 'flex',
@@ -3964,7 +2766,7 @@ export default function App() {
                             ? '1px solid rgba(34,197,94,0.3)'
                             : '1px solid rgba(239,68,68,0.3)'
                         }}>
-                          {settingsArchivePin ? '● Protected' : '○ Unprotected'}
+                          {settingsArchivePin ? 'â— Protected' : 'â—‹ Unprotected'}
                         </span>
                       </div>
 
@@ -4013,7 +2815,7 @@ export default function App() {
                       )}
                     </div>
 
-                    {/* ── RIGHT: PIN Entry Form ── */}
+                    {/* â”€â”€ RIGHT: PIN Entry Form â”€â”€ */}
                     <div style={{
                       padding: '28px',
                       display: 'flex',
@@ -4041,7 +2843,7 @@ export default function App() {
                               {settingsArchivePin ? 'Change Archive PIN' : 'Set New Archive PIN'}
                             </div>
                             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '1px' }}>
-                              4–8 digit numeric passcode
+                              4â€“8 digit numeric passcode
                             </div>
                           </div>
                         </div>
@@ -4092,7 +2894,7 @@ export default function App() {
                               <input
                                 type={showNewPin ? 'text' : 'password'}
                                 inputMode="numeric"
-                                placeholder="••••"
+                                placeholder="â€¢â€¢â€¢â€¢"
                                 maxLength={8}
                                 value={newSettingsPin}
                                 onFocus={() => setNewPinFocused(true)}
@@ -4176,7 +2978,7 @@ export default function App() {
                               <input
                                 type={showConfirmPin ? 'text' : 'password'}
                                 inputMode="numeric"
-                                placeholder="••••"
+                                placeholder="â€¢â€¢â€¢â€¢"
                                 maxLength={8}
                                 value={confirmSettingsPin}
                                 onFocus={() => setConfirmPinFocused(true)}
@@ -4247,7 +3049,7 @@ export default function App() {
                             }}>
                               {newSettingsPin === confirmSettingsPin && newSettingsPin.length >= 4 ? (
                                 <span style={{ color: '#4ade80', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                                  <Check size={13} /> PINs match — ready to save
+                                  <Check size={13} /> PINs match â€” ready to save
                                 </span>
                               ) : (
                                 <span style={{ color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -4339,7 +3141,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* ── Reset PIN Confirmation Modal ── */}
+                  {/* â”€â”€ Reset PIN Confirmation Modal â”€â”€ */}
                   {showResetPinModal && (
                     <div
                       style={{
@@ -4650,7 +3452,7 @@ export default function App() {
                             }}
                             title="Remove Site"
                           >
-                            ✕
+                            âœ•
                           </button>
                         )}
                       </div>
@@ -5032,7 +3834,7 @@ export default function App() {
           <div className="glass-panel modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Add New Download</h2>
-              <button className="modal-close-btn" onClick={() => setShowAddModal(false)}>✕</button>
+              <button className="modal-close-btn" onClick={() => setShowAddModal(false)}>âœ•</button>
             </div>
 
             <div className="form-group">
@@ -5122,7 +3924,7 @@ export default function App() {
           <div className="glass-panel modal-content" style={{ width: '560px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>YouTube Playlist Analyzer</h2>
-              <button className="modal-close-btn" onClick={() => { setShowPlaylistModal(false); setPlaylistInfo(null); }}>✕</button>
+              <button className="modal-close-btn" onClick={() => { setShowPlaylistModal(false); setPlaylistInfo(null); }}>âœ•</button>
             </div>
 
             {playlistLoading ? (
@@ -5152,7 +3954,7 @@ export default function App() {
           <div className="glass-panel modal-content" style={{ width: '680px', maxWidth: '95%' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Select Media Format</h2>
-              <button className="modal-close-btn" onClick={handleCloseFormatsModal}>✕</button>
+              <button className="modal-close-btn" onClick={handleCloseFormatsModal}>âœ•</button>
             </div>
 
             {formatLoading ? (
@@ -5256,7 +4058,7 @@ export default function App() {
           <div className="glass-panel modal-content" style={{ width: '480px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>File Details</h2>
-              <button className="modal-close-btn" onClick={() => setShowFileDetailsModal(false)}>✕</button>
+              <button className="modal-close-btn" onClick={() => setShowFileDetailsModal(false)}>âœ•</button>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '8px 0' }}>
@@ -5344,7 +4146,7 @@ export default function App() {
           <div className="glass-panel modal-content" style={{ width: '420px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Clear History</h2>
-              <button className="modal-close-btn" onClick={() => setShowClearHistoryModal(false)}>✕</button>
+              <button className="modal-close-btn" onClick={() => setShowClearHistoryModal(false)}>âœ•</button>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '8px 0' }}>
@@ -5590,7 +4392,7 @@ export default function App() {
               onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#fff'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
             >
-              ✕
+              âœ•
             </button>
 
             {/* 1. CHECKING STATE */}
@@ -5816,7 +4618,7 @@ export default function App() {
               </div>
             )}
 
-            {/* 5. DOWNLOAD COMPLETE STATE — Install Button */}
+            {/* 5. DOWNLOAD COMPLETE STATE â€” Install Button */}
             {releaseCheckStatus === 'download-complete' && (
               <div style={{ zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
                 <div style={{
@@ -5967,273 +4769,6 @@ export default function App() {
           </div>
         </div>
       )}
-
-    </div>
-  );
-}
-
-interface FormatPickerContentProps {
-  info: {
-    id?: string;
-    title: string;
-    thumbnail: string;
-    duration: number;
-    isYoutube?: boolean;
-    isDirectMedia?: boolean;
-    videoFormats: Array<{ label: string, size: number, formatId: string, directUrl?: string }>;
-    audioFormats: Array<{ label: string, format: string, size: number, bitrate?: number, isRaw?: boolean, formatId?: string, directUrl?: string }>;
-  };
-  saveDir: string;
-  onCancel: () => void;
-  onDownload: (options: { filename: string, totalBytes?: number, youtubeOptions: any, directUrl?: string }) => void;
-}
-
-function FormatPickerContent({ info, onCancel, onDownload }: FormatPickerContentProps) {
-  const [activeSubTab, setActiveSubTab] = useState<'video' | 'audio'>('video');
-  const [isPlayingPreview, setIsPlayingPreview] = useState(false);
-
-  const formatBytes = (bytes: number) => {
-    if (bytes <= 0) return 'Unknown';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
-  const sanitizeFilename = (name: string) => {
-    return name.replace(/[\\/:*?"<>|]/g, '_');
-  };
-
-  const formatDuration = (seconds?: number) => {
-    if (!seconds || isNaN(seconds) || seconds <= 0) return 'N/A';
-    const totalSecs = Math.round(seconds);
-    const h = Math.floor(totalSecs / 3600);
-    const m = Math.floor((totalSecs % 3600) / 60);
-    const s = Math.floor(totalSecs % 60);
-    if (h > 0) {
-      return `${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
-    }
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
-  };
-
-  return (
-    <div style={{ display: 'flex', gap: '20px', width: '100%', height: '400px' }}>
-
-      {/* Left Column: Preview */}
-      <div style={{ width: '280px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        <div className="glass-panel" style={{ width: '100%', aspectRatio: '16/9', overflow: 'hidden', borderRadius: '12px', position: 'relative', border: '1px solid var(--panel-border)', background: '#000' }}>
-          {isPlayingPreview && info.isYoutube ? (
-            <iframe
-              src={`https://www.youtube.com/embed/${info.id}?autoplay=1`}
-              title="YouTube video player"
-              frameBorder="0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-              style={{ width: '100%', height: '100%' }}
-            />
-          ) : (
-            <>
-              {info.thumbnail ? (
-                <img
-                  src={info.thumbnail}
-                  alt="thumbnail"
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  onError={(e) => {
-                    // Hide broken image and show placeholder
-                    (e.currentTarget as HTMLImageElement).style.display = 'none';
-                    const parent = (e.currentTarget as HTMLImageElement).parentElement;
-                    if (parent) {
-                      const placeholder = parent.querySelector('.thumb-placeholder') as HTMLElement;
-                      if (placeholder) placeholder.style.display = 'flex';
-                    }
-                  }}
-                />
-              ) : info.isYoutube && info.id ? (
-                <img
-                  src={`https://i.ytimg.com/vi/${info.id}/hqdefault.jpg`}
-                  alt="thumbnail"
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  onError={(e) => {
-                    const img = e.currentTarget as HTMLImageElement;
-                    if (!img.src.includes('mqdefault.jpg')) {
-                      img.src = `https://i.ytimg.com/vi/${info.id}/mqdefault.jpg`;
-                    } else {
-                      img.style.display = 'none';
-                    }
-                  }}
-                />
-              ) : null}
-              {/* Clean video placeholder when no thumbnail */}
-              <div className="thumb-placeholder" style={{
-                display: info.thumbnail || (info.isYoutube && info.id) ? 'none' : 'flex',
-                position: 'absolute', inset: 0,
-                background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
-                flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px'
-              }}>
-                <Film size={36} style={{ color: 'rgba(99, 102, 241, 0.6)' }} />
-                <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', fontWeight: '600', letterSpacing: '0.5px' }}>VIDEO STREAM</span>
-              </div>
-              {info.isYoutube && (
-                <button
-                  onClick={() => setIsPlayingPreview(true)}
-                  style={{
-                    position: 'absolute',
-                    top: '50%',
-                    left: '50%',
-                    transform: 'translate(-50%, -50%)',
-                    background: 'rgba(99, 102, 241, 0.9)',
-                    border: 'none',
-                    borderRadius: '50%',
-                    width: '54px',
-                    height: '54px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    color: '#fff',
-                    boxShadow: '0 4px 15px rgba(99, 102, 241, 0.4)',
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.transform = 'translate(-50%, -50%) scale(1.1)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.transform = 'translate(-50%, -50%) scale(1)'; }}
-                >
-                  <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
-                    <path d="M8 5v14l11-7z" />
-                  </svg>
-                </button>
-              )}
-            </>
-          )}
-        </div>
-
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px', minHeight: 0 }}>
-          <div style={{ fontWeight: '700', fontSize: '14px', color: '#fff', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: '1.4' }}>
-            {info.title}
-          </div>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', gap: '10px' }}>
-            <span>Duration: {formatDuration(info.duration)}</span>
-            <span>{info.isYoutube ? 'YouTube Stream' : 'Web Video Stream'}</span>
-          </div>
-        </div>
-
-        <button className="btn-secondary" style={{ width: '100%', justifyContent: 'center' }} onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-
-      {/* Right Column: Tabbed Selector */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        {/* Tabs switcher */}
-        <div style={{ display: 'flex', borderBottom: '1px solid var(--panel-border)', marginBottom: '12px' }}>
-          <button
-            style={{
-              padding: '10px 20px',
-              background: 'transparent',
-              border: 'none',
-              borderBottom: activeSubTab === 'audio' ? '2.5px solid #ec4899' : '2.5px solid transparent',
-              color: activeSubTab === 'audio' ? '#fff' : 'var(--text-muted)',
-              fontWeight: '600',
-              cursor: 'pointer',
-              fontSize: '13px'
-            }}
-            onClick={() => setActiveSubTab('audio')}
-          >
-            Audio (MP3)
-          </button>
-          <button
-            style={{
-              padding: '10px 20px',
-              background: 'transparent',
-              border: 'none',
-              borderBottom: activeSubTab === 'video' ? '2.5px solid #ec4899' : '2.5px solid transparent',
-              color: activeSubTab === 'video' ? '#fff' : 'var(--text-muted)',
-              fontWeight: '600',
-              cursor: 'pointer',
-              fontSize: '13px'
-            }}
-            onClick={() => setActiveSubTab('video')}
-          >
-            Video (MP4)
-          </button>
-        </div>
-
-        {/* Formats table */}
-        <div className="glass-panel" style={{ flex: 1, overflowY: 'auto', border: '1px solid var(--panel-border)', borderRadius: '12px' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-            <thead>
-              <tr style={{ background: 'rgba(10, 10, 16, 0.3)', borderBottom: '1px solid var(--panel-border)' }}>
-                <th style={{ padding: '10px 14px', textAlign: 'left', color: 'var(--text-muted)', fontSize: '11px', fontWeight: 'bold' }}>File type</th>
-                <th style={{ padding: '10px 14px', textAlign: 'left', color: 'var(--text-muted)', fontSize: '11px', fontWeight: 'bold' }}>Size</th>
-                <th style={{ padding: '10px 14px', textAlign: 'right', color: 'var(--text-muted)', fontSize: '11px', fontWeight: 'bold' }}>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {activeSubTab === 'video' ? (
-                info.videoFormats.length === 0 ? (
-                  <tr>
-                    <td colSpan={3} style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No MP4 formats found</td>
-                  </tr>
-                ) : (
-                  info.videoFormats.map(fmt => {
-                    const effectiveSize = fmt.size > 0 ? fmt.size : (info.duration > 0 ? Math.round((2200 * 1000 * info.duration) / 8) : 450 * 1024 * 1024);
-                    return (
-                      <tr key={fmt.label} style={{ borderBottom: '1px solid var(--panel-border)' }}>
-                        <td style={{ padding: '12px 14px', fontWeight: '600' }}>{fmt.label}</td>
-                        <td style={{ padding: '12px 14px', color: 'var(--text-muted)' }}>{formatBytes(effectiveSize)}</td>
-                        <td style={{ padding: '8px 14px', textAlign: 'right' }}>
-                          <button
-                            className="btn-primary"
-                            style={{ background: '#10b981', padding: '6px 12px', borderRadius: '8px', fontSize: '12px', boxShadow: 'none' }}
-                            onClick={() => onDownload({
-                              filename: `${sanitizeFilename(info.title)}_${fmt.label}.mp4`,
-                              totalBytes: effectiveSize,
-                              directUrl: fmt.directUrl,
-                              youtubeOptions: {
-                                format: fmt.formatId
-                              }
-                            })}
-                          >
-                            <Download size={12} /> Download
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )
-              ) : (
-                info.audioFormats.map(fmt => {
-                  const effectiveSize = fmt.size > 0 ? fmt.size : (info.duration > 0 ? Math.round((192 * 1000 * info.duration) / 8) : 45 * 1024 * 1024);
-                  return (
-                    <tr key={fmt.label} style={{ borderBottom: '1px solid var(--panel-border)' }}>
-                      <td style={{ padding: '12px 14px', fontWeight: '600' }}>{fmt.label}</td>
-                      <td style={{ padding: '12px 14px', color: 'var(--text-muted)' }}>{formatBytes(effectiveSize)}</td>
-                      <td style={{ padding: '8px 14px', textAlign: 'right' }}>
-                        <button
-                          className="btn-primary"
-                          style={{ background: '#10b981', padding: '6px 12px', borderRadius: '8px', fontSize: '12px', boxShadow: 'none' }}
-                          onClick={() => onDownload({
-                            filename: `${sanitizeFilename(info.title)}.${fmt.format}`,
-                            totalBytes: effectiveSize,
-                            directUrl: fmt.directUrl,
-                            youtubeOptions: {
-                              isAudioOnly: true,
-                              isRaw: fmt.isRaw || false,
-                              format: fmt.formatId || 'bestaudio/best',
-                              bitrate: fmt.bitrate || 128
-                            }
-                          })}
-                        >
-                          <Download size={12} /> Download
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
 
     </div>
   );

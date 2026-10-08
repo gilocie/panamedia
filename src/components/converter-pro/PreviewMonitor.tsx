@@ -218,7 +218,7 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
         electron.ipcRenderer.on('release-media-file', ipcHandler);
         removeIpc = () => {
           try {
-            electron.ipcRenderer.removeListener('release-media-file', ipcHandler);
+            electron?.ipcRenderer.removeListener('release-media-file', ipcHandler);
           } catch {}
         };
       }
