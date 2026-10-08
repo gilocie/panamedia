@@ -27,6 +27,7 @@ interface PreviewMonitorProps {
   onPlaybackStateChange?: (path: string, playing: boolean) => void;
   isMinimized?: boolean;
   hotkeysEnabled?: boolean;
+  isSuspended?: boolean;
 }
 
 export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
@@ -38,7 +39,8 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
   appPlayerState,
   onPlaybackStateChange,
   isMinimized,
-  hotkeysEnabled = true
+  hotkeysEnabled = true,
+  isSuspended = false
 }) => {
   const isVideo = isVideoFile(currentFile);
   const hasCurrentFile = Boolean(currentFile);
@@ -59,14 +61,40 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
   const lastPlayRequestRef = useRef(0);
+
+  // When suspended (e.g. CutTrimTool is open), release the video decoder and stop playback completely
+  useEffect(() => {
+    if (isSuspended && mediaRef.current) {
+      mediaRef.current.pause();
+      mediaRef.current.removeAttribute('src');
+      mediaRef.current.load();
+      setIsPlaying(false);
+    } else if (!isSuspended && mediaRef.current && currentFile) {
+      const url = `http://127.0.0.1:${activePort}/stream?path=${encodeURIComponent(currentFile)}`;
+      if (mediaRef.current.getAttribute('src') !== url) {
+        mediaRef.current.src = url;
+        mediaRef.current.load();
+      }
+    }
+  }, [isSuspended, currentFile, activePort]);
   const keepsRange = trimRange?.strategy === 'keep';
   const trimStart = keepsRange ? Math.max(0, trimRange?.startSec || 0) : 0;
   const trimEnd = keepsRange && Number.isFinite(trimRange?.endSec)
     ? Math.max(trimStart, trimRange!.endSec)
     : 0;
 
-  // Volume state brought from original player
+  // Volume state brought from cut/trim and original player
   const [volume, setVolume] = useState<number>(() => {
+    if (currentFile) {
+      try {
+        const fileKey = `converter_cut_volume:${encodeURIComponent(currentFile.toLowerCase())}`;
+        const raw = localStorage.getItem(fileKey);
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (typeof parsed?.volume === 'number') {
+          return Math.max(0, Math.min(1, parsed.volume));
+        }
+      } catch (e) {}
+    }
     if (appPlayerState?.volume !== undefined && typeof appPlayerState.volume === 'number') {
       return appPlayerState.volume > 1 ? appPlayerState.volume / 100 : appPlayerState.volume;
     }
@@ -79,13 +107,71 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
     } catch (e) {}
     return 1;
   });
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [isMuted, setIsMuted] = useState<boolean>(() => {
+    if (currentFile) {
+      try {
+        const fileKey = `converter_cut_volume:${encodeURIComponent(currentFile.toLowerCase())}`;
+        const raw = localStorage.getItem(fileKey);
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (typeof parsed?.muted === 'boolean') {
+          return parsed.muted;
+        }
+      } catch (e) {}
+    }
+    return false;
+  });
+  const lastAudibleVolume = useRef<number>(volume || 1);
   const [showVolumeSlider, setShowVolumeSlider] = useState<boolean>(false);
   const hasInitializedTime = useRef<boolean>(false);
   const volumeContainerRef = useRef<HTMLDivElement | null>(null);
   const audioThumbnailUrl = `http://127.0.0.1:${activePort}/thumbnail?path=${encodeURIComponent(thumbnailPath || currentFile)}`;
   const volumePercent = isMuted ? 0 : Math.round(volume * 100);
   const volumeRingColor = volumePercent >= 100 ? '#a78bfa' : '#38bdf8';
+
+  // Synchronize volume when selecting another file
+  useEffect(() => {
+    if (!currentFile) return;
+    try {
+      const fileKey = `converter_cut_volume:${encodeURIComponent(currentFile.toLowerCase())}`;
+      const raw = localStorage.getItem(fileKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed?.volume === 'number') {
+          const v = Math.max(0, Math.min(1, parsed.volume));
+          setVolume(v);
+          if (v > 0) lastAudibleVolume.current = v;
+          if (mediaRef.current) mediaRef.current.volume = v;
+        }
+        if (typeof parsed?.muted === 'boolean') {
+          setIsMuted(parsed.muted);
+          if (mediaRef.current) mediaRef.current.muted = parsed.muted;
+        }
+      }
+    } catch (e) {}
+  }, [currentFile]);
+
+  // Synchronize live with Cut/Trim tool and other converter tools
+  useEffect(() => {
+    const handleVolumeSync = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail) {
+        const { file, volume: syncVol, muted: syncMuted } = customEvent.detail;
+        if (!file || !currentFile || file.toLowerCase() === currentFile.toLowerCase()) {
+          if (typeof syncVol === 'number') {
+            setVolume(syncVol);
+            if (syncVol > 0) lastAudibleVolume.current = syncVol;
+            if (mediaRef.current) mediaRef.current.volume = syncVol;
+          }
+          if (typeof syncMuted === 'boolean') {
+            setIsMuted(syncMuted);
+            if (mediaRef.current) mediaRef.current.muted = syncMuted;
+          }
+        }
+      }
+    };
+    window.addEventListener('converter-volume-change', handleVolumeSync);
+    return () => window.removeEventListener('converter-volume-change', handleVolumeSync);
+  }, [currentFile]);
 
   useEffect(() => {
     setAudioThumbnailFailed(false);
@@ -101,6 +187,48 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
       }
     }
   }, [appPlayerState?.volume]);
+
+  // Handle immediate release of media files when deleted in converter
+  useEffect(() => {
+    const releaseMedia = (paths?: string[]) => {
+      if (!paths || (currentFile && paths.some(p => p.toLowerCase() === currentFile.toLowerCase()))) {
+        if (mediaRef.current) {
+          mediaRef.current.pause();
+          mediaRef.current.removeAttribute('src');
+          mediaRef.current.load();
+        }
+        setIsPlaying(false);
+      }
+    };
+
+    const handleCustomRelease = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const paths = customEvent.detail?.paths as string[] | undefined;
+      releaseMedia(paths);
+    };
+
+    window.addEventListener('converter-release-media', handleCustomRelease);
+
+    let removeIpc: (() => void) | undefined;
+    try {
+      if (electron?.ipcRenderer?.on) {
+        const ipcHandler = (_event: any, filePath: string) => {
+          releaseMedia(filePath ? [filePath] : undefined);
+        };
+        electron.ipcRenderer.on('release-media-file', ipcHandler);
+        removeIpc = () => {
+          try {
+            electron.ipcRenderer.removeListener('release-media-file', ipcHandler);
+          } catch {}
+        };
+      }
+    } catch {}
+
+    return () => {
+      window.removeEventListener('converter-release-media', handleCustomRelease);
+      removeIpc?.();
+    };
+  }, [currentFile]);
 
   // Reset playback and stay paused by default when selecting another file
   useEffect(() => {
@@ -281,49 +409,61 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
     setCurrentTime(target);
   };
 
-  // Mute toggle
+  // Mute toggle (matching Cut/Trim behavior)
   const toggleMute = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     const video = mediaRef.current;
-    if (!video) return;
-
-    if (isMuted) {
-      const restoreVol = volume === 0 ? 0.8 : volume;
-      video.muted = false;
-      video.volume = restoreVol;
-      setIsMuted(false);
-      setVolume(restoreVol);
-      try {
-        localStorage.setItem('player_volume', String(Math.round(restoreVol * 100)));
-      } catch (err) {}
-      if (electron) {
-        electron.ipcRenderer.send('player-remote-command', 'volume', Math.round(restoreVol * 100));
+    const shouldMute = !isMuted && volume > 0;
+    const restoredVolume = shouldMute ? volume : (volume > 0 ? volume : lastAudibleVolume.current);
+    setIsMuted(shouldMute);
+    if (!shouldMute) {
+      setVolume(restoredVolume);
+    }
+    if (video) {
+      video.muted = shouldMute;
+      if (!shouldMute) video.volume = restoredVolume;
+    }
+    const volPct = Math.round(restoredVolume * 100);
+    try {
+      localStorage.setItem('player_volume', String(volPct));
+      if (currentFile) {
+        const fileKey = `converter_cut_volume:${encodeURIComponent(currentFile.toLowerCase())}`;
+        localStorage.setItem(fileKey, JSON.stringify({ volume: restoredVolume, muted: shouldMute }));
       }
-    } else {
-      video.muted = true;
-      setIsMuted(true);
-      if (electron) {
-        electron.ipcRenderer.send('player-remote-command', 'volume', 0);
-      }
+      window.dispatchEvent(new CustomEvent('converter-volume-change', {
+        detail: { file: currentFile, volume: restoredVolume, muted: shouldMute }
+      }));
+    } catch (err) {}
+    if (electron) {
+      electron.ipcRenderer.send('player-remote-command', 'volume', shouldMute ? 0 : volPct);
     }
   };
 
-  // Direct Volume Change
+  // Direct Volume Change with bidirectional sync
   const handleVolumeChange = (newValPercent: number) => {
     const video = mediaRef.current;
     const newVol = Math.max(0, Math.min(1, newValPercent / 100));
     setVolume(newVol);
     const muted = newVol === 0;
     setIsMuted(muted);
+    if (newVol > 0) lastAudibleVolume.current = newVol;
     if (video) {
       video.volume = newVol;
       video.muted = muted;
     }
+    const volPct = Math.round(newVol * 100);
     try {
-      localStorage.setItem('player_volume', String(Math.round(newVol * 100)));
+      localStorage.setItem('player_volume', String(volPct));
+      if (currentFile) {
+        const fileKey = `converter_cut_volume:${encodeURIComponent(currentFile.toLowerCase())}`;
+        localStorage.setItem(fileKey, JSON.stringify({ volume: newVol, muted }));
+      }
+      window.dispatchEvent(new CustomEvent('converter-volume-change', {
+        detail: { file: currentFile, volume: newVol, muted }
+      }));
     } catch (err) {}
     if (electron) {
-      electron.ipcRenderer.send('player-remote-command', 'volume', Math.round(newVol * 100));
+      electron.ipcRenderer.send('player-remote-command', 'volume', volPct);
     }
   };
 
@@ -398,7 +538,7 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
         alignItems: 'center',
         justifyContent: 'center'
       }}>
-        {!hasCurrentFile ? (
+        {!hasCurrentFile || isSuspended ? (
           <div style={{
             width: '100%',
             height: '100%',
@@ -414,7 +554,7 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
         ) : isVideo ? (
           <video
             ref={(element) => { mediaRef.current = element; }}
-            src={`http://127.0.0.1:${activePort}/stream?path=${encodeURIComponent(currentFile)}`}
+            src={isSuspended ? undefined : `http://127.0.0.1:${activePort}/stream?path=${encodeURIComponent(currentFile)}`}
             crossOrigin="anonymous"
             style={{
               width: '100%',
@@ -433,7 +573,7 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
           <div style={{ position: 'absolute', inset: 0 }}>
             <audio
               ref={(element) => { mediaRef.current = element; }}
-              src={`http://127.0.0.1:${activePort}/stream?path=${encodeURIComponent(currentFile)}`}
+              src={isSuspended ? undefined : `http://127.0.0.1:${activePort}/stream?path=${encodeURIComponent(currentFile)}`}
               preload="metadata"
               onLoadedMetadata={handleLoadedMetadata}
               onTimeUpdate={handleTimeUpdate}
@@ -662,34 +802,84 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
 
             <button
               type="button"
-              className="pw-icon-btn"
               onClick={(e) => {
+                e.stopPropagation();
+                toggleMute(e);
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
                 e.stopPropagation();
                 setShowVolumeSlider(prev => !prev);
               }}
               style={{
-                width: '26px',
+                width: '100%',
                 height: '26px',
-                background: 'transparent',
+                background: 'rgba(255,255,255,0.05)',
                 border: 'none',
                 borderRadius: '4px',
-                overflow: 'visible',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: 'pointer',
-                color: isMuted ? '#f87171' : '#fff',
+                position: 'relative',
+                color: '#fff',
                 transition: 'all 0.15s ease'
               }}
-              title={`Volume: ${isMuted ? '0% (Muted)' : `${Math.round(volume * 100)}%`} • Click or Hover to adjust • Scroll wheel to change`}
+              title={`${isMuted ? 'Click to unmute' : 'Click to mute'} · ${volumePercent}% (scroll to adjust, right-click for slider)`}
             >
-              <span
-                className="pw-volume-ring"
-                style={{ '--volume-progress': `${volumePercent}%`, '--volume-ring-color': volumeRingColor } as React.CSSProperties}
-                aria-hidden="true"
-              >
-                {isMuted || volume === 0 ? <VolumeX size={12} /> : volume < 0.5 ? <Volume1 size={12} /> : <Volume2 size={12} />}
-              </span>
+              <div style={{
+                position: 'relative',
+                width: '20px',
+                height: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 20 20"
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    pointerEvents: 'none'
+                  }}
+                  aria-hidden="true"
+                >
+                  <circle
+                    cx="10"
+                    cy="10"
+                    r="8"
+                    fill="none"
+                    stroke="rgba(255, 255, 255, 0.18)"
+                    strokeWidth="1.75"
+                  />
+                  <circle
+                    cx="10"
+                    cy="10"
+                    r="8"
+                    fill="none"
+                    stroke={isMuted ? '#f87171' : volumeRingColor}
+                    strokeWidth="1.75"
+                    strokeDasharray={2 * Math.PI * 8}
+                    strokeDashoffset={(2 * Math.PI * 8) * (1 - (isMuted ? 0 : volumePercent) / 100)}
+                    strokeLinecap="round"
+                    transform="rotate(-90 10 10)"
+                    style={{ transition: 'stroke-dashoffset 0.12s ease, stroke 0.15s ease' }}
+                  />
+                </svg>
+                <Volume2
+                  size={10}
+                  style={{
+                    position: 'relative',
+                    zIndex: 2,
+                    color: isMuted ? '#f87171' : (volumePercent === 0 ? 'rgba(255,255,255,0.4)' : '#fff')
+                  }}
+                />
+              </div>
             </button>
           </div>
         </div>

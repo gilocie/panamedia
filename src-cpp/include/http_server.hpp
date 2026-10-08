@@ -67,7 +67,7 @@ namespace Panamedia {
         std::condition_variable m_connCV;
         
         std::string m_ffmpegPath;
-        static const int MAX_CONCURRENT_CLIENTS = 8; // limit to 8 concurrent streaming threads
+        static const int MAX_CONCURRENT_CLIENTS = 32; // limit to 32 concurrent streaming threads
     };
 
 } // namespace Panamedia

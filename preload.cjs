@@ -53,7 +53,7 @@ if (isTrustedAppDocument) {
     'downloads-updated', 'library-synced', 'media-path-removed', 'native-download-received',
     'network-speed-update', 'player-control-mute', 'player-control-play-pause',
     'player-fullscreen-changed', 'player-open-file', 'player-remote-command',
-    'player-state-changed', 'settings-changed', 'streaming-port-ready',
+    'player-state-changed', 'release-media-file', 'settings-changed', 'streaming-port-ready',
     'synced-folders-updated', 'update-download-progress'
   ]);
 

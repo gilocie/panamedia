@@ -16,6 +16,7 @@ import { SegmentVisualizer } from './components/SegmentVisualizer';
 import { PlaylistSelector } from './components/PlaylistSelector';
 import { SendToFlashModal } from './components/SendToFlashModal';
 import { PanamediaPlayer } from './components/panamediaPlayer';
+import { getQueue, subscribeQueue } from './components/panamedia/converterQueue';
 const DuplicatesPanel = lazy(() => import('./components/DuplicatesPanel').then(m => ({ default: m.DuplicatesPanel })));
 import { AddStreamSiteModal, type NewStreamSiteData } from './components/AddStreamSiteModal';
 import { hashPin } from './components/panamedia/utils/pinSecurity';
@@ -757,6 +758,31 @@ export default function App() {
     };
     electron.ipcRenderer.on('converter-open-request', openConverter);
     return () => electron.ipcRenderer.removeListener('converter-open-request', openConverter);
+  }, []);
+
+  // Track Converter Pro queue and in-progress conversion state to highlight the menu item
+  const [converterQueueCount, setConverterQueueCount] = useState<number>(() => {
+    try {
+      return getQueue().length;
+    } catch {
+      return 0;
+    }
+  });
+  const [converterState, setConverterState] = useState<any>(null);
+
+  useEffect(() => {
+    return subscribeQueue((items) => setConverterQueueCount(items.length));
+  }, []);
+
+  useEffect(() => {
+    if (!electron) return;
+    const bridge = electron;
+    const handler = (_event: any, state: any) => setConverterState(state);
+    bridge.ipcRenderer.on('converter-state-changed', handler);
+    bridge.ipcRenderer.invoke('get-converter-minimize-state').then((state: any) => {
+      if (state) setConverterState(state);
+    }).catch(() => {});
+    return () => { bridge.ipcRenderer.removeListener('converter-state-changed', handler); };
   }, []);
 
   // ─── Custom Hooks ────────────────────────────────────────────────
@@ -1925,16 +1951,127 @@ export default function App() {
             >
               <Tv /> Player
             </div>
-            <div
-              className="sidebar-item"
-              onClick={() => {
-                electron?.ipcRenderer.invoke('open-converter-window')
-                  .catch((error: unknown) => console.error('Failed to open Converter Pro:', error));
-              }}
-              title="Open Converter Pro in its own window"
-            >
-              <Sparkles /> Converter
-            </div>
+            {(() => {
+              const isConverterConverting = Boolean(converterState?.converting);
+              const isConverterPaused = Boolean(converterState?.isPaused);
+              const activeConverterQueueCount = converterState?.queueCount !== undefined && converterState.queueCount !== null
+                ? Math.max(converterQueueCount, converterState.queueCount)
+                : converterQueueCount;
+              const hasConverterActiveProject = activeConverterQueueCount > 0 || isConverterConverting;
+
+              return (
+                <div
+                  className={`sidebar-item ${hasConverterActiveProject ? 'sidebar-item--converter-active' : ''}`}
+                  onClick={() => {
+                    electron?.ipcRenderer.invoke('open-converter-window')
+                      .catch((error: unknown) => console.error('Failed to open Converter Pro:', error));
+                  }}
+                  title={
+                    isConverterConverting
+                      ? `Converter Pro: Conversion in progress (${activeConverterQueueCount} item${activeConverterQueueCount === 1 ? '' : 's'})`
+                      : activeConverterQueueCount > 0
+                        ? `Converter Pro: ${activeConverterQueueCount} pending item${activeConverterQueueCount === 1 ? '' : 's'} queued`
+                        : 'Open Converter Pro in its own window'
+                  }
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+                    position: 'relative',
+                    cursor: 'pointer',
+                    ...(hasConverterActiveProject ? {
+                      background: isConverterConverting
+                        ? 'linear-gradient(135deg, rgba(6, 182, 212, 0.28) 0%, rgba(99, 102, 241, 0.25) 100%)'
+                        : isConverterPaused
+                          ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.25) 0%, rgba(217, 119, 6, 0.2) 100%)'
+                          : 'linear-gradient(135deg, rgba(99, 102, 241, 0.26) 0%, rgba(6, 182, 212, 0.2) 100%)',
+                      border: isConverterConverting
+                        ? '1px solid rgba(6, 182, 212, 0.7)'
+                        : isConverterPaused
+                          ? '1px solid rgba(245, 158, 11, 0.7)'
+                          : '1px solid rgba(99, 102, 241, 0.65)',
+                      color: '#fff',
+                      animation: isConverterPaused
+                        ? 'converterMenuBlinkAmber 1.6s ease-in-out infinite'
+                        : 'converterMenuBlink 1.4s ease-in-out infinite',
+                    } : {})
+                  }}
+                >
+                  <Sparkles
+                    size={18}
+                    style={{
+                      color: isConverterConverting
+                        ? '#67e8f9'
+                        : isConverterPaused
+                          ? '#fbbf24'
+                          : hasConverterActiveProject
+                            ? '#a5b4fc'
+                            : 'inherit',
+                      filter: hasConverterActiveProject ? 'drop-shadow(0 0 6px rgba(6,182,212,0.65))' : 'none',
+                      transition: 'color 0.2s ease',
+                      flexShrink: 0
+                    }}
+                  />
+                  <span style={{ fontWeight: hasConverterActiveProject ? 700 : 500 }}>Converter</span>
+                  {hasConverterActiveProject && (
+                    <span
+                      style={{
+                        marginLeft: 'auto',
+                        background: isConverterConverting
+                          ? 'rgba(6, 182, 212, 0.25)'
+                          : isConverterPaused
+                            ? 'rgba(245, 158, 11, 0.25)'
+                            : 'rgba(99, 102, 241, 0.28)',
+                        color: isConverterConverting
+                          ? '#67e8f9'
+                          : isConverterPaused
+                            ? '#fef3c7'
+                            : '#c7d2fe',
+                        fontSize: '9.5px',
+                        fontWeight: 800,
+                        letterSpacing: '0.4px',
+                        padding: '2px 7px',
+                        borderRadius: '10px',
+                        border: isConverterConverting
+                          ? '1px solid rgba(6, 182, 212, 0.6)'
+                          : isConverterPaused
+                            ? '1px solid rgba(245, 158, 11, 0.6)'
+                            : '1px solid rgba(99, 102, 241, 0.5)',
+                        whiteSpace: 'nowrap',
+                        boxShadow: isConverterConverting
+                          ? '0 0 8px rgba(6, 182, 212, 0.4)'
+                          : 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
+                    >
+                      {isConverterConverting && !isConverterPaused && (
+                        <span
+                          style={{
+                            width: '6px',
+                            height: '6px',
+                            borderRadius: '50%',
+                            background: '#67e8f9',
+                            boxShadow: '0 0 6px #67e8f9',
+                            display: 'inline-block',
+                            animation: 'pulse 1s infinite'
+                          }}
+                        />
+                      )}
+                      {isConverterConverting
+                        ? (converterState?.progress && converterState.progress > 0
+                            ? `${converterState.progress}%`
+                            : `${activeConverterQueueCount} active`)
+                        : isConverterPaused
+                          ? 'PAUSED'
+                          : `${activeConverterQueueCount}`}
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {/* Live Network Speed Widget — always visible in sidebar footer */}

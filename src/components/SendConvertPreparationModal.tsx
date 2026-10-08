@@ -6,6 +6,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { AlertCircle, Trash2, X } from 'lucide-react';
 import './converter-pro/features/featureTools.css';
 import './converter-pro/features/proWorkspace.css';
 import { electron } from './panamedia/types';
@@ -492,8 +493,23 @@ export function SendConvertPreparationModal({
 
   const handleOutputFilesDeleted = (paths: string[]) => {
     removeOutputs(paths);
+    setOutputPreview((current) => (current && paths.includes(current.path) ? null : current));
+    setPlayingOutputPath((current) => (current && paths.includes(current) ? null : current));
     refreshOutputFiles();
   };
+
+  useEffect(() => {
+    const handleRelease = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const paths = customEvent.detail?.paths as string[] | undefined;
+      if (paths && Array.isArray(paths)) {
+        setOutputPreview((current) => (current && paths.includes(current.path) ? null : current));
+        setPlayingOutputPath((current) => (current && paths.includes(current) ? null : current));
+      }
+    };
+    window.addEventListener('converter-release-media', handleRelease);
+    return () => window.removeEventListener('converter-release-media', handleRelease);
+  }, []);
 
   // Conversions run in the parent, so this component never saw a completion
   // event -- it only refreshed on mount, on tab change and on folder change.
@@ -788,6 +804,35 @@ export function SendConvertPreparationModal({
     setSelectedFileIdx(0);
   };
 
+  // Close confirmation state for active converter projects
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+
+  const performFullClose = useCallback(() => {
+    setIsMinimized(false);
+    if (standaloneWindow && electron) {
+      electron.ipcRenderer.send('window-close');
+    } else if (onClose) {
+      onClose();
+    } else if (onBack) {
+      onBack();
+    }
+  }, [standaloneWindow, onClose, onBack]);
+
+  const handleCloseAction = useCallback(() => {
+    const hasActiveProject = localQueue.length > 0 || isConverting;
+    if (hasActiveProject) {
+      setShowCloseConfirm(true);
+    } else {
+      performFullClose();
+    }
+  }, [localQueue.length, isConverting, performFullClose]);
+
+  const handleConfirmCloseAndClear = useCallback(() => {
+    handleClearAll();
+    setShowCloseConfirm(false);
+    performFullClose();
+  }, [handleClearAll, performFullClose]);
+
   const handleRemoveSelected = () => {
     if (selectedIndices.size === 0) return;
     if (selectedIndices.size === localQueue.length) {
@@ -958,8 +1003,7 @@ export function SendConvertPreparationModal({
       handleProceed();
     };
     const handleCloseRequest = () => {
-      setIsMinimized(false);
-      onClose();
+      handleCloseAction();
     };
     bridge.ipcRenderer.on('converter-run-request', handleRunRequest);
     bridge.ipcRenderer.on('converter-close-request', handleCloseRequest);
@@ -967,7 +1011,7 @@ export function SendConvertPreparationModal({
       bridge.ipcRenderer.removeListener('converter-run-request', handleRunRequest);
       bridge.ipcRenderer.removeListener('converter-close-request', handleCloseRequest);
     };
-  }, [handleProceed, onClose]);
+  }, [handleProceed, handleCloseAction]);
 
 
   return (
@@ -1004,9 +1048,9 @@ export function SendConvertPreparationModal({
         draggable={standaloneWindow}
         useHwAccel={useHwAccel}
         onToggleExpand={handleToggleExpand}
-        onMinimize={standaloneWindow ? (() => electron?.ipcRenderer.send('window-minimize')) : (onClose || onBack || (() => {}))}
-        onBack={standaloneWindow || isConverting ? handleMinimizeModal : (onClose || onBack || (() => {}))}
-        onClose={isConverting ? handleMinimizeModal : (onClose || onBack || (() => {}))}
+        onMinimize={handleMinimizeModal}
+        onBack={handleMinimizeModal}
+        onClose={handleCloseAction}
       />
 
       {/* Phase G: speak up before starting rather than failing during.
@@ -1169,6 +1213,7 @@ export function SendConvertPreparationModal({
             }}
             isMinimized={isMinimized}
             hotkeysEnabled={!activeTool || activeTool.id !== 'cut'}
+            isSuspended={Boolean(activeTool && TOOL_STUDIO_IDS.includes(activeTool.id))}
           />
 
           {/* Export Settings Panel */}
@@ -1377,6 +1422,7 @@ export function SendConvertPreparationModal({
             {activeTool.id === 'split' && (
               <SplitTool
                 fileName={currentFile}
+                streamingPort={streamingPort}
                 duration={currentDuration}
                 onApply={(splitSettings) => {
                   applyToolSettings(currentFile, 'split', splitSettings);
@@ -1394,6 +1440,173 @@ export function SendConvertPreparationModal({
           fileName={currentFile}
           onClose={closeStudio}
         />
+      )}
+
+      {/* Confirmation Dialog when closing Converter Pro with an active project */}
+      {showCloseConfirm && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 99999,
+            background: 'rgba(0, 0, 0, 0.8)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            animation: 'panamediaFadeIn 0.18s ease-out'
+          }}
+          onClick={() => setShowCloseConfirm(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '450px',
+              maxWidth: '94vw',
+              background: 'linear-gradient(180deg, #18192a 0%, #0d0e19 100%)',
+              border: '1px solid rgba(239, 68, 68, 0.45)',
+              borderRadius: '16px',
+              boxShadow: '0 25px 70px rgba(0, 0, 0, 0.95), 0 0 35px rgba(239, 68, 68, 0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              animation: 'panamediaMenuPop 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
+            }}
+          >
+            {/* Header */}
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'rgba(239, 68, 68, 0.08)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '8px',
+                  background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#fff',
+                  boxShadow: '0 2px 10px rgba(239, 68, 68, 0.4)'
+                }}>
+                  <AlertCircle size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#fff' }}>
+                    Close Converter Pro?
+                  </h3>
+                  <span style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.6)' }}>
+                    Active project will be discarded
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCloseConfirm(false)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'rgba(255, 255, 255, 0.5)',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: '6px',
+                  transition: 'all 0.15s ease'
+                }}
+                title="Cancel and keep working"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <p style={{ margin: 0, fontSize: '13px', lineHeight: '1.5', color: 'rgba(255, 255, 255, 0.85)' }}>
+                You have an active converter project with{' '}
+                <strong style={{ color: '#fff' }}>
+                  {localQueue.length} {localQueue.length === 1 ? 'item' : 'items'}
+                </strong>
+                {isConverting ? (
+                  <span style={{ color: '#38bdf8' }}> (conversion is currently in progress)</span>
+                ) : (
+                  ' queued'
+                )}
+                .
+              </p>
+              <div style={{
+                padding: '10px 14px',
+                borderRadius: '8px',
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                fontSize: '12px',
+                color: '#fca5a5',
+                lineHeight: '1.4'
+              }}>
+                Closing will cancel all ongoing conversions, clear the queue, and remove the project completely from Converter Pro.
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div style={{
+              padding: '14px 20px',
+              borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'rgba(255, 255, 255, 0.02)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              gap: '10px'
+            }}>
+              <button
+                type="button"
+                onClick={() => setShowCloseConfirm(false)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  color: 'rgba(255, 255, 255, 0.8)',
+                  fontSize: '12.5px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                Keep Working
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCloseAndClear}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  background: 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)',
+                  border: '1px solid rgba(239, 68, 68, 0.6)',
+                  color: '#fff',
+                  fontSize: '12.5px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 15px rgba(239, 68, 68, 0.4)',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <Trash2 size={14} />
+                <span>Close & Empty Project</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

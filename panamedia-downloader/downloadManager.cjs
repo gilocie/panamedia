@@ -138,12 +138,17 @@ function broadcast() {
 
 function notifyDownloadCompleted(task) {
   const main = getMainWindow();
-  if (!main || main.isDestroyed()) return;
-  // Deduplicate: same file completing within 10 seconds should only show one toast
-  const key = `${task.filename}|${task.completedAt || 0}`;
-  if (completionToastSentKeys.has(key)) return;
+  if (!main || main.isDestroyed() || !task) return;
+  // Deduplicate: same download task or filename completing within 10 seconds should only show one toast
+  const normFilename = (task.filename || '').toLowerCase().trim();
+  const key = task.id ? `id:${task.id}` : `file:${normFilename}`;
+  if (completionToastSentKeys.has(key) || (normFilename && completionToastSentKeys.has(`file:${normFilename}`))) return;
   completionToastSentKeys.add(key);
-  setTimeout(() => completionToastSentKeys.delete(key), 10000);
+  if (normFilename) completionToastSentKeys.add(`file:${normFilename}`);
+  setTimeout(() => {
+    completionToastSentKeys.delete(key);
+    if (normFilename) completionToastSentKeys.delete(`file:${normFilename}`);
+  }, 10000);
   main.webContents.send('download-completed-toast', task.filename);
 }
 

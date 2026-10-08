@@ -983,6 +983,39 @@ namespace Panamedia {
             return;
         }
 
+        std::hash<std::string> hasher;
+        std::string hashStr = std::to_string(hasher(decodedPath));
+        std::string thumbDir = findThumbnailCacheDir();
+        std::filesystem::path timelineDir = std::filesystem::path(thumbDir) / "timeline" / hashStr;
+        std::error_code ec;
+        std::filesystem::create_directories(timelineDir, ec);
+
+        int timeTenths = static_cast<int>(std::round(timeSec * 10.0));
+        std::filesystem::path cacheFile = timelineDir / (std::to_string(timeTenths) + ".jpg");
+
+        // Serve from persistent disk cache immediately if it already exists (0ms, 0% CPU)
+        if (std::filesystem::exists(cacheFile, ec) && std::filesystem::file_size(cacheFile, ec) > 0) {
+            std::ifstream file(cacheFile, std::ios::binary);
+            if (file.is_open()) {
+                uint64_t size = std::filesystem::file_size(cacheFile, ec);
+                std::stringstream headers;
+                headers << "HTTP/1.1 200 OK\r\n"
+                        << "Content-Type: image/jpeg\r\n"
+                        << "Content-Length: " << size << "\r\n"
+                        << "Access-Control-Allow-Origin: *\r\n"
+                        << "Cache-Control: public, max-age=86400\r\n"
+                        << "Connection: close\r\n\r\n";
+                std::string hStr = headers.str();
+                sendAll(client, hStr.c_str(), hStr.length());
+
+                std::vector<char> buf(32768);
+                while (file.read(buf.data(), buf.size()) || file.gcount() > 0) {
+                    if (!sendAll(client, buf.data(), static_cast<int>(file.gcount()))) break;
+                }
+                return;
+            }
+        }
+
         std::string ffmpegExe = findFFmpegExecutable();
         std::stringstream cmd;
         cmd << escapeArg(ffmpegExe)
@@ -1028,12 +1061,19 @@ namespace Panamedia {
                 CloseHandle(pi.hThread);
 
                 if (!imgData.empty()) {
+                    // Persist to disk cache so subsequent views and scrubbing take 0ms
+                    std::ofstream outFile(cacheFile, std::ios::binary);
+                    if (outFile.is_open()) {
+                        outFile.write(imgData.data(), imgData.size());
+                        outFile.close();
+                    }
+
                     std::stringstream headers;
                     headers << "HTTP/1.1 200 OK\r\n"
                             << "Content-Type: image/jpeg\r\n"
                             << "Content-Length: " << imgData.size() << "\r\n"
                             << "Access-Control-Allow-Origin: *\r\n"
-                            << "Cache-Control: public, max-age=3600\r\n"
+                            << "Cache-Control: public, max-age=86400\r\n"
                             << "Connection: close\r\n\r\n";
                     std::string headerStr = headers.str();
                     sendAll(client, headerStr.c_str(), headerStr.length());

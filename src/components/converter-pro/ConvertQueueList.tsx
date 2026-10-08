@@ -366,37 +366,56 @@ export const ConvertQueueList: React.FC<ConvertQueueListProps> = ({
                         onToggleMediaType(fPath);
                       }}
                       style={{
-                        display: 'flex',
+                        display: 'inline-flex',
                         alignItems: 'center',
-                        gap: '5px',
-                        padding: '4px 9px',
-                        borderRadius: '6px',
-                        fontSize: '10.5px',
+                        justifyContent: 'center',
+                        gap: '4px',
+                        height: '18px',
+                        minHeight: '18px',
+                        maxHeight: '18px',
+                        lineHeight: '18px',
+                        padding: '0 6px',
+                        margin: 0,
+                        borderRadius: '4px',
+                        fontSize: '9px',
                         fontWeight: 700,
                         cursor: 'pointer',
                         border: isCardVideo ? '1px solid rgba(99, 102, 241, 0.6)' : '1px solid rgba(236, 72, 153, 0.6)',
                         background: isCardVideo ? 'rgba(99, 102, 241, 0.22)' : 'rgba(236, 72, 153, 0.22)',
                         color: isCardVideo ? '#c7d2fe' : '#fbcfe8',
+                        boxSizing: 'border-box',
+                        flexShrink: 0,
+                        outline: 'none',
                         transition: 'all 0.15s ease'
                       }}
                       title="Click to toggle Media Type (Video vs Audio)"
                     >
-                      {isCardVideo ? <Film size={11} /> : <Music size={11} />}
-                      <span>{isCardVideo ? 'Video' : 'Audio'}</span>
+                      {isCardVideo ? <Film size={9} style={{ display: 'block', flexShrink: 0 }} /> : <Music size={9} style={{ display: 'block', flexShrink: 0 }} />}
+                      <span style={{ lineHeight: 1 }}>{isCardVideo ? 'Video' : 'Audio'}</span>
                     </button>
 
                     {hasTrim && (
                       <span
                         title="Cut / Trim will be applied when conversion starts"
                         style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          height: '18px',
+                          minHeight: '18px',
+                          maxHeight: '18px',
+                          lineHeight: '18px',
+                          padding: '0 6px',
+                          margin: 0,
+                          borderRadius: '4px',
                           fontSize: '9px',
                           fontWeight: 800,
                           letterSpacing: '0.35px',
                           color: '#67e8f9',
                           background: 'rgba(6, 182, 212, 0.13)',
                           border: '1px solid rgba(6, 182, 212, 0.36)',
-                          padding: '2px 5px',
-                          borderRadius: '4px',
+                          boxSizing: 'border-box',
+                          flexShrink: 0,
                           whiteSpace: 'nowrap'
                         }}
                       >

@@ -98,6 +98,13 @@ export const OutputHistoryList: React.FC<OutputHistoryListProps> = ({
     setPendingDeleteItems(null);
     setIsDeleting(true);
     setDeleteError('');
+
+    // Pre-emptively signal all player and preview monitors to release media handles
+    window.dispatchEvent(new CustomEvent('converter-release-media', {
+      detail: { paths: targets.map((t) => t.path) }
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
     const deleted: string[] = [];
     const failures: string[] = [];
     try {

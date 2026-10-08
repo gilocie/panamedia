@@ -1119,7 +1119,13 @@ function createWindow(forceMode = null) {
 // IPC Handling for Dialogs & UI actions (works dynamically for any window)
 ipcMain.on('window-minimize', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
-  if (win) win.minimize();
+  if (win) {
+    if (converterWindow && !converterWindow.isDestroyed() && win === converterWindow) {
+      win.hide();
+    } else {
+      win.minimize();
+    }
+  }
 });
 
 ipcMain.on('window-maximize', (event) => {
@@ -1135,21 +1141,26 @@ ipcMain.on('window-maximize', (event) => {
 
 ipcMain.on('window-close', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
-  if (win) win.close();
+  if (win) {
+    if (converterWindow && !converterWindow.isDestroyed() && win === converterWindow) {
+      converterWindow = null;
+    }
+    win.close();
+  }
 });
 
 ipcMain.handle('open-converter-window', () => {
   if (converterWindow && !converterWindow.isDestroyed()) {
     if (converterWindow.isMinimized()) converterWindow.restore();
-    converterWindow.show();
+    if (!converterWindow.isVisible()) converterWindow.show();
     converterWindow.focus();
+    try {
+      converterWindow.webContents.send('converter-restore-request');
+    } catch (e) {}
     return { success: true, windowId: converterWindow.id };
   }
 
   converterWindow = new BrowserWindow({
-    // Keep the converter as a distinct, independently movable window while
-    // keeping it in front of the main Panamedia window that launched it.
-    ...(mainWindow && !mainWindow.isDestroyed() ? { parent: mainWindow, modal: false } : {}),
     width: 1440,
     height: 900,
     minWidth: 1024,
@@ -2918,9 +2929,23 @@ ipcMain.handle('trash-converter-output', async (_event, filePath) => {
   try {
     const normalizedTarget = path.resolve(filePath).toLowerCase();
 
-    // Stop an encoder that is still writing this output before asking Windows
-    // to move it to the Recycle Bin. Otherwise shell.trashItem commonly fails
-    // with "Operation was aborted" for an open/locked zero-byte output.
+    // 1. Tell all UI windows to release any active audio/video elements or streams holding this file
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('release-media-file', filePath);
+      }
+      for (const pWin of getActivePlayerWindows()) {
+        if (pWin && !pWin.isDestroyed()) {
+          pWin.webContents.send('player-remote-command', 'pause');
+          pWin.webContents.send('release-media-file', filePath);
+        }
+      }
+    } catch (uiErr) {
+      console.warn('[Converter] Could not broadcast media release to UI:', uiErr);
+    }
+
+    // 2. Stop an encoder that is still writing this output before asking Windows
+    // to move it to the Recycle Bin.
     try {
       const coreClient = require('./electron/core-client.cjs');
       const activeJobs = await coreClient.call('convert_list', {}, 3000);
@@ -2941,7 +2966,20 @@ ipcMain.handle('trash-converter-output', async (_event, filePath) => {
       console.warn('[Converter] Could not cancel local output writer:', cancelError);
     }
 
-    await new Promise(resolve => setTimeout(resolve, 120));
+    // 3. Strip read-only, hidden, or system flags that prevent deletion in Windows/OneDrive
+    if (process.platform === 'win32') {
+      try {
+        const { execFile } = require('child_process');
+        await new Promise((resolve) => {
+          execFile('attrib', ['-r', '-h', '-s', filePath], { windowsHide: true }, () => resolve());
+        });
+      } catch {}
+    }
+    try {
+      await fs.promises.chmod(filePath, 0o666);
+    } catch {}
+
+    await new Promise(resolve => setTimeout(resolve, 100));
     let stat;
     try { stat = await fs.promises.stat(filePath); }
     catch (err) {
@@ -2953,10 +2991,10 @@ ipcMain.handle('trash-converter-output', async (_event, filePath) => {
     try {
       await shell.trashItem(filePath);
     } catch (trashError) {
-      // Windows shell trash can abort on outputs in synced folders or partial
-      // files. The user explicitly requested Delete, so fall back to unlink.
+      // Windows shell trash can abort on outputs in synced folders (e.g. OneDrive) or busy handles.
+      // The user explicitly requested delete, so take control and delete the output directly.
       let unlinkError = null;
-      for (let attempt = 0; attempt < 5; attempt++) {
+      for (let attempt = 0; attempt < 8; attempt++) {
         try {
           await fs.promises.unlink(filePath);
           unlinkError = null;
@@ -2967,17 +3005,60 @@ ipcMain.handle('trash-converter-output', async (_event, filePath) => {
             break;
           }
           unlinkError = err;
-          if (!['EPERM', 'EBUSY', 'EACCES'].includes(err.code) || attempt === 4) break;
-          await new Promise(resolve => setTimeout(resolve, 150));
+          if (!['EPERM', 'EBUSY', 'EACCES'].includes(err.code) || attempt === 7) break;
+          await new Promise(resolve => setTimeout(resolve, 100 + attempt * 75));
         }
       }
-      if (unlinkError) throw unlinkError;
-      console.warn('[Converter] Recycle Bin move failed; permanently deleted output instead:', trashError.message);
+
+      // If Node's unlink encounters Windows EBUSY / EPERM, apply Windows system force-delete
+      if (unlinkError && process.platform === 'win32') {
+        try {
+          await new Promise((resolve, reject) => {
+            const { exec } = require('child_process');
+            exec(`cmd.exe /c del /f /q /a "${filePath}"`, { windowsHide: true }, (cmdErr) => {
+              if (!fs.existsSync(filePath)) {
+                unlinkError = null;
+                resolve();
+              } else {
+                reject(cmdErr || new Error('cmd del failed'));
+              }
+            });
+          });
+        } catch (cmdErr) {
+          try {
+            await new Promise((resolve, reject) => {
+              const { execFile } = require('child_process');
+              const escaped = filePath.replace(/'/g, "''");
+              execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', `Remove-Item -LiteralPath '${escaped}' -Force -ErrorAction Stop`], { windowsHide: true }, (psErr) => {
+                if (!fs.existsSync(filePath)) {
+                  unlinkError = null;
+                  resolve();
+                } else {
+                  reject(psErr || new Error('powershell delete failed'));
+                }
+              });
+            });
+          } catch (psErr) {}
+        }
+
+        // If still held by a process with FILE_SHARE_DELETE, rename out of output folder immediately
+        if (unlinkError && fs.existsSync(filePath)) {
+          try {
+            const tempDeleteName = path.join(path.dirname(filePath), `.trash_${Date.now()}_${path.basename(filePath)}`);
+            await fs.promises.rename(filePath, tempDeleteName);
+            unlinkError = null;
+            fs.promises.unlink(tempDeleteName).catch(() => {});
+          } catch (renameErr) {}
+        }
+      }
+
+      if (unlinkError && fs.existsSync(filePath)) throw unlinkError;
+      console.warn('[Converter] Recycle Bin move bypassed; file deleted directly:', trashError.message);
     }
     return { success: true };
   } catch (err) {
     if (err.code === 'ENOENT') return { success: true };
-    console.error('[Converter] Failed to move output to Recycle Bin:', err);
+    console.error('[Converter] Failed to delete output file:', err);
     return { success: false, error: err.message };
   }
 });
