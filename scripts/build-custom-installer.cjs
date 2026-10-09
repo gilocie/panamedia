@@ -115,6 +115,21 @@ async function main() {
   console.log('\n5. Packaging Custom Installer UI (PanamediaSetup.exe)...');
   run('npx electron-builder --config installer-builder.json', INSTALLER_UI);
 
+  // 6. Sign executables if certificate is present
+  const certPath = 'D:\\GoSaveSiteCert.pfx';
+  if (fs.existsSync(certPath)) {
+    console.log('\n6. Signing executables with Go Save Site certificate...');
+    try {
+      const setupPath = path.join(DIST_INSTALLER, 'PanamediaSetup.exe');
+      const uninstPath = path.join(DIST_INSTALLER, 'PanamediaUninstall.exe');
+      const signCmd = `powershell -NoProfile -Command "$pwd = ConvertTo-SecureString -String 'Password123!' -Force -AsPlainText; $cert = Get-PfxCertificate -FilePath '${certPath}'; Set-AuthenticodeSignature -FilePath '${setupPath}' -Certificate $cert -TimestampServer 'http://timestamp.digicert.com'; Set-AuthenticodeSignature -FilePath '${uninstPath}' -Certificate $cert -TimestampServer 'http://timestamp.digicert.com'"`;
+      execSync(signCmd, { stdio: 'inherit' });
+      console.log('✓ Executables signed successfully with Go Save Site publisher identity.');
+    } catch (e) {
+      console.warn('Signing step warning:', e.message);
+    }
+  }
+
   console.log('\n=== Custom Installer & Uninstaller built successfully! ===');
   console.log(`Setup Location: ${path.join(DIST_INSTALLER, 'PanamediaSetup.exe')}`);
   console.log(`Uninstaller Location: ${path.join(DIST_INSTALLER, 'PanamediaUninstall.exe')}`);
