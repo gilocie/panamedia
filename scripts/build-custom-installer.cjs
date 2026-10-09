@@ -132,13 +132,13 @@ async function main() {
   run('npx electron-builder --config installer-builder.json', INSTALLER_UI);
 
   // 6. Sign executables if certificate is present
-  const certPath = 'D:\\GoSaveSiteCert.pfx';
-  if (fs.existsSync(certPath)) {
+  const signScript = path.join(ROOT, 'scripts', 'sign-installer.ps1');
+  if (fs.existsSync(signScript)) {
     console.log('\n6. Signing executables with Go Save Site certificate...');
     try {
       const setupPath = path.join(DIST_INSTALLER, 'PanamediaSetup.exe');
       const uninstPath = path.join(DIST_INSTALLER, 'PanamediaUninstall.exe');
-      const signCmd = `powershell -NoProfile -Command "$pwd = ConvertTo-SecureString -String 'Password123!' -Force -AsPlainText; $cert = Get-PfxCertificate -FilePath '${certPath}'; Set-AuthenticodeSignature -FilePath '${setupPath}' -Certificate $cert -TimestampServer 'http://timestamp.digicert.com'; Set-AuthenticodeSignature -FilePath '${uninstPath}' -Certificate $cert -TimestampServer 'http://timestamp.digicert.com'"`;
+      const signCmd = `powershell -ExecutionPolicy Bypass -File "${signScript}" -SetupPath "${setupPath}" -UninstallPath "${uninstPath}"`;
       execSync(signCmd, { stdio: 'inherit' });
       console.log('✓ Executables signed successfully with Go Save Site publisher identity.');
     } catch (e) {
