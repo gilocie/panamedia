@@ -33,7 +33,6 @@
     }
   ],
   "win": {
-    "publisherName": "Go Save Site",
     "target": [
       {
         "target": "portable",
