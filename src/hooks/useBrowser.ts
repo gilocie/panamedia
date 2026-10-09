@@ -31,6 +31,42 @@ export function useBrowser() {
   });
 
   const webviewRef = useRef<any>(null);
+  const browserScreenActiveRef = useRef(false);
+
+  const setBrowserScreenActive = useCallback((active: boolean) => {
+    browserScreenActiveRef.current = active;
+    const webview = webviewRef.current;
+    if (!webview?.executeJavaScript) return;
+
+    webview.executeJavaScript(`
+      (() => {
+        window.__panamediaScreenActive = ${active ? 'true' : 'false'};
+        if (window.__panamediaSkipAdInterval) {
+          clearInterval(window.__panamediaSkipAdInterval);
+          window.__panamediaSkipAdInterval = null;
+        }
+        if (!window.__panamediaScreenActive) {
+          document.querySelectorAll('video, audio').forEach((media) => {
+            if (!media.paused) {
+              media.dataset.panamediaPausedForInactiveScreen = 'true';
+              media.pause();
+            }
+          });
+          return;
+        }
+        const skipVideoAds = () => {
+          document.querySelectorAll('.ytp-ad-skip-button, .ytp-skip-ad-button, .videoAdUiSkipButton, .ytp-ad-skip-button-modern')
+            .forEach((button) => { try { button.click(); } catch (e) {} });
+        };
+        window.__panamediaSkipAdInterval = setInterval(skipVideoAds, 1000);
+        document.querySelectorAll('video[data-panamedia-paused-for-inactive-screen="true"], audio[data-panamedia-paused-for-inactive-screen="true"]')
+          .forEach((media) => {
+            delete media.dataset.panamediaPausedForInactiveScreen;
+            media.play().catch(() => {});
+          });
+      })();
+    `).catch(() => {});
+  }, []);
 
   useEffect(() => {
     setUrlInput(currentBrowserUrl);
@@ -120,16 +156,9 @@ export function useBrowser() {
           (() => {
             try {
               window.open = function() { return null; };
-              const skipVideoAds = () => {
-                const skipBtns = document.querySelectorAll(
-                  '.ytp-ad-skip-button, .ytp-skip-ad-button, .videoAdUiSkipButton, .ytp-ad-skip-button-modern'
-                );
-                skipBtns.forEach(b => { try { b.click(); } catch(e) {} });
-              };
-              setInterval(skipVideoAds, 1000);
             } catch (e) {}
           })();
-        `)?.catch?.(() => {});
+        `)?.then?.(() => setBrowserScreenActive(browserScreenActiveRef.current)).catch?.(() => {});
       } catch {}
     };
 
@@ -168,7 +197,7 @@ export function useBrowser() {
     el.addEventListener('did-fail-load', handleStopLoad);
     el.addEventListener('dom-ready', handleDomReady);
     el.addEventListener('new-window', handleNewWindow);
-  }, []);
+  }, [setBrowserScreenActive]);
 
   return {
     currentBrowserUrl, setCurrentBrowserUrl,
@@ -177,6 +206,7 @@ export function useBrowser() {
     isDetectingStream, setIsDetectingStream,
     streamSites, setStreamSites,
     webviewRef,
+    setBrowserScreenActive,
     navigateBrowser,
     deleteStreamSite,
     setWebviewRef,

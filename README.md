@@ -1,4 +1,4 @@
-﻿# Panamedia Pro
+# Panamedia Pro
 
 > **Version 1.0.1**
 > *The All-in-One Professional Media Player, Transcoder, YouTube/Web Downloader & Flash Drive Dispatcher.*
@@ -190,6 +190,39 @@ Each tool opens a focused modal and bakes its settings into the FFmpeg pipeline 
 
 ---
 
+#### Cut / Trim Studio — Precision Trimmer & Slicer
+
+The **Cut / Trim Studio** provides a non-linear, frame-accurate trimming and cutting workspace embedded directly within Converter Pro:
+
+- **Interactive Timeline Stage & Multi-Track Scrubbing**:
+  - Live waveform-style scrub track with responsive playhead tracking.
+  - Multi-scale Timeline Zoom (from 0.25x wide overview to 4x micro-frame precision).
+  - Dynamic timecode ruler with horizontal drag-to-scrub and synchronized playhead positioning.
+  - Left and right boundary drag handles with visual in-out range highlighting.
+
+- **Dual Trim Strategies**:
+  - **Keep Range (`keep`)**: Extracts the selected segment between Start and End boundaries (ideal for extracting highlights, scene clips, and short audio samples).
+  - **Delete Range (`delete`)**: Cuts out the highlighted section (e.g., intros, ads, silences, or bloopers) and splices the remainder together.
+
+- **One-Click Side-Cuts & Safeguards**:
+  - **Cut Left**: Instantly trims all footage preceding the current playhead marker.
+  - **Cut Right**: Instantly trims all footage following the current playhead marker.
+  - Interactive confirmation dialog prevents accidental loss of footage during destructive cuts.
+
+- **Frame-Accurate Telemetry & Manual Inputs**:
+  - Precise numerical `HH:MM:SS.Tenths` input fields for exact manual boundary entry.
+  - Live net duration calculation showing exact trimmed output length and percentage reduced.
+
+- **Non-Destructive Editing & History**:
+  - Multi-step **Undo** (`Ctrl+Z`) and **Redo** history stack for all boundary shifts and cuts.
+  - Reset to original bounds with a single click.
+
+- **FFmpeg Stream Pipeline**:
+  - Lossless fast cut via stream copy (`-c copy`) when no transcoding is requested.
+  - Frame-accurate re-encoding when combined with video filters, cropping, or format conversions.
+
+---
+
 #### Export Settings Panel
 
 | Option | Description |
@@ -292,7 +325,12 @@ panamedia-pro/
     │   │   ├── ConverterBottomDock.tsx  # Tool picker + convert button
     │   │   ├── TopTabsBar.tsx           # Convert / Video Output / Audio Output tabs
     │   │   └── features/
-    │   │       ├── CutTrimTool.tsx
+    │   │       ├── cut-trim/
+    │   │       │   ├── CutTrimTool.tsx
+    │   │       │   ├── TrimTimelineTracks.tsx
+    │   │       │   ├── TrimTransportBar.tsx
+    │   │       │   ├── TrimTelemetryPanel.tsx
+    │   │       │   └── TrimSideCutModal.tsx
     │   │       ├── CropTool.tsx
     │   │       ├── SubtitleTool.tsx
     │   │       ├── EffectTool.tsx

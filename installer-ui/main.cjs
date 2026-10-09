@@ -15,10 +15,11 @@ app.commandLine.appendSwitch('no-sandbox');
 const isDev = !app.isPackaged;
 
 const cliArgs = process.argv.slice(1);
+const portableExe = process.env.PORTABLE_EXECUTABLE_FILE || '';
 const isUninstall = cliArgs.some(a => {
   const l = a.toLowerCase();
   return l === '--uninstall' || l === '/uninstall' || l === '-uninstall' || l.includes('uninstall');
-}) || path.basename(process.execPath).toLowerCase().includes('uninstall');
+}) || path.basename(process.execPath).toLowerCase().includes('uninstall') || (portableExe && path.basename(portableExe).toLowerCase().includes('uninstall'));
 
 let passedInstallDir = '';
 for (const arg of cliArgs) {
@@ -35,24 +36,37 @@ function getDefaultInstallDir() {
 
 function resolveInstalledDir() {
   if (passedInstallDir && fs.existsSync(passedInstallDir)) return passedInstallDir;
-  const exeDir = path.dirname(process.execPath);
-  if (fs.existsSync(path.join(exeDir, 'Panamedia.exe')) || fs.existsSync(path.join(exeDir, 'resources'))) {
-    return exeDir;
+
+  if (!isDev) {
+    // If running from portable launcher in install dir
+    if (process.env.PORTABLE_EXECUTABLE_DIR && fs.existsSync(process.env.PORTABLE_EXECUTABLE_DIR)) {
+      const pDir = process.env.PORTABLE_EXECUTABLE_DIR;
+      if (fs.existsSync(path.join(pDir, 'Panamedia.exe')) || fs.existsSync(path.join(pDir, 'Uninstall Panamedia.exe'))) {
+        return pDir;
+      }
+    }
+
+    const exeDir = path.dirname(process.execPath);
+    if (fs.existsSync(path.join(exeDir, 'Panamedia.exe'))) {
+      return exeDir;
+    }
   }
+
   const defaultDir = getDefaultInstallDir();
   if (fs.existsSync(defaultDir)) return defaultDir;
   return defaultDir;
 }
 
-// In uninstall mode, if running from inside the install directory, relocate to %TEMP%
+// In packaged uninstall mode, if running from inside the install directory, relocate to %TEMP%
 // so that the install folder is not locked and can be deleted cleanly.
-if (isUninstall && !process.env.__PANAMEDIA_UNINSTALL_TEMP) {
-  const currentExeDir = path.resolve(path.dirname(process.execPath)).toLowerCase();
+if (!isDev && isUninstall && !process.env.__PANAMEDIA_UNINSTALL_TEMP) {
+  const actualExePath = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+  const currentExeDir = path.resolve(path.dirname(actualExePath)).toLowerCase();
   const targetDir = path.resolve(resolveInstalledDir()).toLowerCase();
-  if (currentExeDir.startsWith(targetDir)) {
+  if (currentExeDir.startsWith(targetDir) && fs.existsSync(actualExePath)) {
     const tempExe = path.join(os.tmpdir(), 'PanamediaUninstall_' + Date.now() + '.exe');
     try {
-      fs.copyFileSync(process.execPath, tempExe);
+      fs.copyFileSync(actualExePath, tempExe);
       const child = spawn(tempExe, ['--uninstall', `--install-dir=${resolveInstalledDir()}`], {
         detached: true,
         stdio: 'ignore',
@@ -60,7 +74,9 @@ if (isUninstall && !process.env.__PANAMEDIA_UNINSTALL_TEMP) {
       });
       child.unref();
       process.exit(0);
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Could not relocate uninstaller to temp:', e);
+    }
   }
 }
 
@@ -118,6 +134,7 @@ function createInstallerWindow() {
     resizable: true,
     frame: false,
     center: true,
+    title: isUninstall ? 'Panamedia Uninstall' : 'Panamedia Setup',
     backgroundColor: '#09090e',
     webPreferences: {
       nodeIntegration: true,
@@ -293,7 +310,10 @@ ipcMain.handle('run-install', async (event, installDir) => {
           if (fs.existsSync(targetDir)) {
             const uninstallerDest = path.join(targetDir, 'PanamediaUninstall.exe');
             try {
-              fs.copyFileSync(process.execPath, uninstallerDest);
+              const actualExe = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+              if (!fs.existsSync(uninstallerDest) && fs.existsSync(actualExe)) {
+                fs.copyFileSync(actualExe, uninstallerDest);
+              }
             } catch (copyErr) {
               console.warn('Could not copy custom uninstaller exe:', copyErr);
             }
@@ -306,7 +326,8 @@ ipcMain.handle('run-install', async (event, installDir) => {
               $dest = '${escapedDest}';
               $keys = @(
                 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\com.panamedia.app',
-                'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\com.panamedia.app'
+                'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\com.panamedia.app',
+                'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\com.panamedia.app'
               );
               foreach ($k in $keys) {
                 if (Test-Path $k) {
@@ -315,7 +336,7 @@ ipcMain.handle('run-install', async (event, installDir) => {
                   Set-ItemProperty -Path $k -Name 'ModifyPath' -Value "\\"$dest\\" --uninstall";
                 }
               }
-              Get-ChildItem -Path @('HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall') -ErrorAction SilentlyContinue | Where-Object { $_.GetValue('DisplayName') -like '*Panamedia*' } | ForEach-Object {
+              Get-ChildItem -Path @('HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall') -ErrorAction SilentlyContinue | Where-Object { $_.GetValue('DisplayName') -like '*Panamedia*' } | ForEach-Object {
                 Set-ItemProperty -Path $_.PSPath -Name 'UninstallString' -Value "\\"$dest\\" --uninstall";
                 Set-ItemProperty -Path $_.PSPath -Name 'QuietUninstallString' -Value "\\"$dest\\" --uninstall";
                 Set-ItemProperty -Path $_.PSPath -Name 'ModifyPath' -Value "\\"$dest\\" --uninstall";
@@ -421,7 +442,8 @@ ipcMain.handle('run-uninstall', async (event, options = {}) => {
           const regCleanPs = `
             Remove-Item -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\com.panamedia.app' -Recurse -Force -ErrorAction SilentlyContinue;
             Remove-Item -Path 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\com.panamedia.app' -Recurse -Force -ErrorAction SilentlyContinue;
-            Get-ChildItem -Path @('HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall') -ErrorAction SilentlyContinue | Where-Object { $_.GetValue('DisplayName') -like '*Panamedia*' } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue;
+            Remove-Item -Path 'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\com.panamedia.app' -Recurse -Force -ErrorAction SilentlyContinue;
+            Get-ChildItem -Path @('HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall') -ErrorAction SilentlyContinue | Where-Object { $_.GetValue('DisplayName') -like '*Panamedia*' } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue;
           `.trim();
           execSync(`powershell -NoProfile -Command "${regCleanPs.replace(/\r?\n\s*/g, ' ')}"`, { stdio: 'ignore' });
         } catch (regErr) {}

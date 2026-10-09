@@ -27,6 +27,19 @@ function initConverterManager(options) {
   } catch (e) {}
 
   setupIpcHandlers();
+
+  // Flush the debounced state synchronously on quit so the last half second
+  // of progress isn't lost.
+  app.on('before-quit', () => {
+    if (stateSaveTimer) {
+      clearTimeout(stateSaveTimer);
+      stateSaveTimer = null;
+      try {
+        const sf = getConverterStateFilePath();
+        if (sf && converterMinimizedState) fs.writeFileSync(sf, JSON.stringify(converterMinimizedState, null, 2), 'utf8');
+      } catch (e) {}
+    }
+  });
 }
 
 function broadcastConverterState(state) {
@@ -44,12 +57,27 @@ function broadcastConverterState(state) {
     }
   }
 
+  scheduleStatePersist();
+}
+
+// Debounced async persist: this used to be a synchronous pretty-printed
+// writeFileSync on every progress tick (~2/s during any conversion), which
+// blocked the whole main process and every IPC reply behind it.
+let stateSaveTimer = null;
+function persistStateNow() {
   try {
     const sf = getConverterStateFilePath();
-    if (sf) {
-      fs.writeFileSync(sf, JSON.stringify(state, null, 2), 'utf8');
+    if (sf && converterMinimizedState) {
+      fs.writeFile(sf, JSON.stringify(converterMinimizedState, null, 2), 'utf8', () => {});
     }
   } catch (e) {}
+}
+function scheduleStatePersist() {
+  if (stateSaveTimer) return; // writes the latest state when it fires
+  stateSaveTimer = setTimeout(() => {
+    stateSaveTimer = null;
+    persistStateNow();
+  }, 500);
 }
 
 function setupIpcHandlers() {

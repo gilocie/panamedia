@@ -67,7 +67,11 @@ namespace Panamedia {
         std::condition_variable m_connCV;
         
         std::string m_ffmpegPath;
-        static const int MAX_CONCURRENT_CLIENTS = 32; // limit to 32 concurrent streaming threads
+        // Each connection thread may own an ffmpeg child (/transcode,
+        // /preview, /thumbnail), so this doubles as a process cap. 32
+        // concurrent ffmpeg children is lethal on a 2 GB machine; Chromium
+        // only opens ~6 connections per host anyway.
+        static const int MAX_CONCURRENT_CLIENTS = 6;
     };
 
 } // namespace Panamedia

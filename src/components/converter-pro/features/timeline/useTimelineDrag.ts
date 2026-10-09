@@ -34,6 +34,12 @@ export const useTimelineDrag = ({
   const [dragging, setDragging] = useState<DragTarget | null>(null);
   const activeRef = useRef<DragTarget | null>(null);
   const fractionRef = useRef(0);
+  // Latest pointer fraction and a pending animation frame, so a 120 Hz
+  // mouse produces at most one onDrag per display frame. Without this,
+  // every raw pointermove issued a video seek + full tool re-render, which
+  // is what made Cut/Trim jam on weak machines.
+  const pendingFractionRef = useRef(0);
+  const rafRef = useRef<number | null>(null);
 
   // Latest callbacks without re-binding the window listeners on every render.
   const onDragRef = useRef(onDrag);
@@ -62,11 +68,25 @@ export const useTimelineDrag = ({
       event.preventDefault();
       const fraction = fractionFromClientX(event.clientX);
       fractionRef.current = fraction;
-      if (activeRef.current) onDragRef.current(activeRef.current, fraction);
+      pendingFractionRef.current = fraction;
+      // Coalesce to one callback per frame: pointermove can fire 60-120
+      // times a second, and each onDrag does a seek + state write.
+      if (rafRef.current !== null) return;
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        if (activeRef.current) onDragRef.current(activeRef.current, pendingFractionRef.current);
+      });
     };
 
     const handleUp = () => {
       const target = activeRef.current;
+      // If a frame is still pending, cancel it and apply its value directly
+      // so the handle can never end one frame behind the pointer.
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+        if (target) onDragRef.current(target, fractionRef.current);
+      }
       if (target) onCommitRef.current?.(target, fractionRef.current);
       activeRef.current = null;
       setDragging(null);
@@ -82,6 +102,10 @@ export const useTimelineDrag = ({
       window.removeEventListener('pointermove', handleMove);
       window.removeEventListener('pointerup', handleUp);
       window.removeEventListener('pointercancel', handleUp);
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
     };
   }, [dragging, fractionFromClientX]);
 

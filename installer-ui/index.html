@@ -871,7 +871,7 @@
   <div id="titlebar">
     <div id="titlebar-name">
       <div id="header-logo-container" style="width:14px;height:14px;display:flex;opacity:0.85;"></div>
-      Panamedia — Setup Wizard
+      <span id="titlebar-text">Panamedia — Setup Wizard</span>
     </div>
     <div class="titlebar-controls">
       <button class="titlebar-btn" id="minimize-btn" title="Minimize">
@@ -1655,8 +1655,11 @@
     ipcRenderer.invoke('get-app-mode').then(async (mode) => {
       if (mode === 'uninstall') {
         appMode = 'uninstall';
-        const dragTitle = document.getElementById('drag-title');
+        const dragTitle = document.getElementById('drag-title') || document.getElementById('titlebar-text');
         if (dragTitle) dragTitle.textContent = 'Panamedia — Uninstall Wizard';
+
+        const closeBtn = document.getElementById('close-btn');
+        if (closeBtn) closeBtn.title = 'Exit Uninstaller';
 
         const subEl = document.querySelector('.sidebar-sub');
         if (subEl) subEl.textContent = 'Uninstall Wizard';

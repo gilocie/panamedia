@@ -13,9 +13,12 @@ process.on('unhandledRejection', (reason) => {
 app.commandLine.appendSwitch('disable-direct-composition-video-overlays');
 app.commandLine.appendSwitch('disable-features', 'DirectCompositionVideoOverlays,DirectCompositionLetterboxing,PlatformHEVCDecoderSupport,PreloadMediaEngagementData,AutoplayIgnoreWebAudio');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
-app.commandLine.appendSwitch('disable-background-timer-throttling');
-app.commandLine.appendSwitch('disable-renderer-backgrounding');
-app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+// NOTE: do NOT re-add disable-background-timer-throttling /
+// disable-renderer-backgrounding / disable-backgrounding-occluded-windows here.
+// They are global and defeat each window's `backgroundThrottling` setting, so
+// every hidden renderer (main + converter + N players) kept running timers,
+// React renders and IPC at full speed. On low-RAM machines that alone could
+// consume a gigabyte while the user only looked at one window.
 // Fix "Unable to create cache" error: set an explicit, writable cache directory
 // and cap its size to 256 MB so it doesn't grow unbounded on disk.
 app.commandLine.appendSwitch('disk-cache-size', String(256 * 1024 * 1024));
@@ -1035,6 +1038,7 @@ function createWindow(forceMode = null) {
         nodeIntegration: false,
         contextIsolation: true,
         sandbox: true,
+        backgroundThrottling: true,
         webviewTag: true, // enable in-app browser webviews
         preload: path.join(__dirname, 'preload.cjs')
       }
@@ -1174,6 +1178,7 @@ ipcMain.handle('open-converter-window', () => {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      backgroundThrottling: true,
       preload: path.join(__dirname, 'preload.cjs')
     }
   });
@@ -1875,7 +1880,25 @@ ipcMain.handle('convert-media-file', async (event, { filePath, targetDir, destin
       }
     }
 
+    // Progress coalescing: the copy path emits one tick per 64 KB (≈16,000
+    // per GB copied) and the encoder path one per ffmpeg progress line.
+    // Every tick sends `copy-progress` to the renderer and broadcasts
+    // converter state to all windows, each triggering full-tree re-renders.
+    // Coalesce to ~2.5 Hz while keeping status changes (pause/complete/fail)
+    // immediate so buttons and toasts never lag.
+    const PROGRESS_SEND_INTERVAL_MS = 400;
+    let lastProgressSentAt = 0;
+    let lastProgressStatus = null;
     const result = await convertMediaFile(filePath, outputPath, options, (progressData) => {
+      const status = progressData.status;
+      const terminal = status === 'completed' || status === 'failed' || status === 'error';
+      const now = Date.now();
+      if (!terminal && status === lastProgressStatus && now - lastProgressSentAt < PROGRESS_SEND_INTERVAL_MS) {
+        return;
+      }
+      lastProgressSentAt = now;
+      lastProgressStatus = status;
+
       const pct = Math.round((progressData.progress || 0) * 100);
       if (event && event.sender && !event.sender.isDestroyed()) {
         event.sender.send('copy-progress', {
@@ -1889,19 +1912,32 @@ ipcMain.handle('convert-media-file', async (event, { filePath, targetDir, destin
       // Broadcast live progress to all player and main windows
       try {
         const { broadcastConverterState } = require('./electron/converter-manager.cjs');
-        broadcastConverterState({
-          converting: progressData.status === 'converting' || progressData.status === 'paused',
-          isPaused: progressData.status === 'paused',
-          progress: pct,
-          currentFile: path.basename(filePath),
-          status: progressData.status,
-          statusText: progressData.status === 'completed'
-            ? 'Conversion Complete!'
-            : `Converting (${pct}%)`
-        });
+        if (progressData.status === 'cancelled') {
+          broadcastConverterState({
+            converting: false,
+            isPaused: false,
+            progress: 0,
+            currentFile: '',
+            status: 'idle',
+            statusText: 'Idle'
+          });
+        } else {
+          broadcastConverterState({
+            converting: progressData.status === 'converting' || progressData.status === 'paused',
+            isPaused: progressData.status === 'paused',
+            progress: pct,
+            currentFile: path.basename(filePath),
+            status: progressData.status,
+            statusText: progressData.status === 'completed'
+              ? 'Conversion Complete!'
+              : progressData.status === 'paused'
+              ? 'Conversion Paused'
+              : `Converting (${pct}%)`
+          });
+        }
       } catch (e) {}
     });
-    return { success: true, outputPath, ...result };
+    return { success: !result?.cancelled, outputPath, ...result };
   } catch (err) {
     console.error('[convert-media-file error]:', err);
     if (event && event.sender && !event.sender.isDestroyed()) {
@@ -2468,17 +2504,37 @@ ipcMain.handle('remove-media-path', async (_event, filePath) => {
 
 const dirCache = new Map();
 const cacheFile = path.join(dataDir, 'dirCache.json');
+// Bounded directory cache: entries are full file lists, so an unbounded Map
+// pins tens of MB of strings for the whole session. 600 dirs is far more
+// than the app's tracked folders; beyond that the oldest entries are evicted.
+const DIR_CACHE_MAX = 600;
 
-function saveDirCache() {
-  try {
-    const obj = {};
-    for (const [key, val] of dirCache.entries()) {
-      obj[key] = val;
-    }
-    fs.writeFileSync(cacheFile, JSON.stringify(obj, null, 2), 'utf8');
-  } catch (e) {
-    console.error('Failed to save dir cache', e);
+function trimDirCache() {
+  while (dirCache.size > DIR_CACHE_MAX) {
+    const oldest = dirCache.keys().next().value;
+    if (oldest === undefined) break;
+    dirCache.delete(oldest);
   }
+}
+
+let dirCacheSaveTimer = null;
+function scheduleDirCacheSave() {
+  if (dirCacheSaveTimer) return;
+  dirCacheSaveTimer = setTimeout(() => {
+    dirCacheSaveTimer = null;
+    try {
+      const obj = {};
+      for (const [key, val] of dirCache.entries()) {
+        obj[key] = val;
+      }
+      fs.writeFile(cacheFile, JSON.stringify(obj, null, 2), 'utf8', () => {});
+    } catch (e) {
+      console.error('Failed to save dir cache', e);
+    }
+  }, 1500);
+}
+function saveDirCache() {
+  scheduleDirCacheSave();
 }
 
 function loadDirCache() {
@@ -2501,6 +2557,7 @@ function loadDirCache() {
           }
           dirCache.set(key, entry);
         }
+        trimDirCache();
       }
     } catch (e) {
       console.warn('Failed to load dir cache, resetting corrupted cache file:', e.message);
@@ -2618,6 +2675,7 @@ function scanDirRecursive(dir, fileList, scannedPaths, depth = 0) {
     files: directFiles,
     subdirs: directSubdirs
   });
+  trimDirCache();
 }
 
 /**
@@ -2644,20 +2702,43 @@ function pruneMissingFromList(list, getPath) {
  * against the filesystem, removes missing ones from all storage systems,
  * and notifies all windows with the pruned result + removed list.
  */
+let validationThrottleUntil = 0;
 ipcMain.handle('validate-library-files', async (event, filePaths) => {
   if (!Array.isArray(filePaths)) return { valid: [], removed: [] };
+
+  // Rate-guard: every window arms its own 30-minute (or per-sync) validation,
+  // so N windows used to fire N overlapping $existsSync storms. One pass per
+  // 60 s is plenty — anything more just multiplies main-process stat work.
+  const now = Date.now();
+  if (now < validationThrottleUntil) return { valid: [], removed: [] };
+  validationThrottleUntil = now + 60000;
 
   const norm = p => p.replace(/[\\/]/g, '/').toLowerCase();
   const removed = [];
   const valid = [];
 
-  for (const p of filePaths) {
-    if (p && fs.existsSync(p)) {
-      valid.push(p);
-    } else if (p) {
-      removed.push(p);
+  // Async, bounded-concurrency stat: the old loop did a synchronous
+  // fs.existsSync per path on the main thread — tens of thousands of stat
+  // calls froze the app for the whole pass.
+  const CONCURRENCY = 32;
+  let index = 0;
+  const worker = async () => {
+    while (index < filePaths.length) {
+      const p = filePaths[index++];
+      if (!p) continue;
+      try {
+        await fs.promises.access(p);
+        valid.push(p);
+      } catch (_) {
+        removed.push(p);
+      }
+      // Yield to the event loop periodically so IPC replies keep flowing.
+      if (index % 256 === 0) await new Promise(resolve => setImmediate(resolve));
     }
-  }
+  };
+  const workers = [];
+  for (let i = 0; i < Math.min(CONCURRENCY, filePaths.length || 1); i++) workers.push(worker());
+  await Promise.all(workers);
 
   if (removed.length === 0) return { valid, removed };
 

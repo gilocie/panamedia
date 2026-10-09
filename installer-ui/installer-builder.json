@@ -1,7 +1,7 @@
 {
   "appId": "com.panamedia.installer",
   "productName": "PanamediaSetup",
-  "copyright": "Copyright © 2026 Panamedia",
+  "copyright": "Copyright © 2026 Go Save Site",
   "icon": "panamedia.ico",
   "directories": {
     "output": "../dist-installer",
@@ -37,6 +37,7 @@
     }
   ],
   "win": {
+    "publisherName": "Go Save Site",
     "target": [
       {
         "target": "portable",

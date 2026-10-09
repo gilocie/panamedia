@@ -7,7 +7,7 @@
   "main": "electron.cjs",
   "type": "module",
   "author": {
-    "name": "Panamedia",
+    "name": "Go Save Site",
     "email": "gilocie@gmail.com"
   },
   "scripts": {
@@ -22,8 +22,9 @@
     "dist-installer": "node scripts/build-custom-installer.cjs",
     "dist:installer": "node scripts/build-custom-installer.cjs",
     "dist:dir": "npm run build && npx electron-builder --config electron-builder.json --dir",
-    "installer": "node scripts/build-custom-installer.cjs",
-    "test:installer": "electron installer-ui/main.cjs"
+    "test:installer": "electron installer-ui/main.cjs",
+    "test:uninstaller": "electron installer-ui/main.cjs --uninstall",
+    "build:uninstaller": "npx electron-builder --config installer-ui/uninstaller-builder.json"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.13",

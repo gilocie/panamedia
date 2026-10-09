@@ -8,6 +8,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <filesystem>
 #include <map>
@@ -91,6 +92,38 @@ namespace Panamedia {
 #else
         return 0;
 #endif
+    }
+
+    // ── concurrent-job cap ──────────────────────────────────────────────────
+    //
+    // The core enforces its own limit on simultaneously running jobs instead
+    // of trusting the renderer's queue estimate. Unchecked, "add to queue" N
+    // times could mean N ffmpeg processes at once, each with its own x264
+    // frame buffers — the classic out-of-memory path on a 2 GB machine.
+
+    static unsigned maxConcurrentJobs() {
+        const unsigned hw = std::thread::hardware_concurrency();
+        if (hw <= 2) return 1;   // dual-core: one job, all else is thrash
+        if (hw <= 4) return 2;
+        return 3;
+    }
+
+    static std::mutex g_slotMutex;
+    static std::condition_variable g_slotCV;
+    static int g_activeJobs = 0;
+
+    static void acquireJobSlot() {
+        std::unique_lock<std::mutex> lock(g_slotMutex);
+        g_slotCV.wait(lock, [] { return g_activeJobs < maxConcurrentJobs(); });
+        ++g_activeJobs;
+    }
+
+    static void releaseJobSlot() {
+        {
+            std::lock_guard<std::mutex> lock(g_slotMutex);
+            --g_activeJobs;
+        }
+        g_slotCV.notify_all();
     }
 
     // ── argument construction ────────────────────────────────────────────────
@@ -333,7 +366,9 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
 }
     static std::vector<std::string> buildArgVector(const std::string& inputPath,
                                                   const std::string& outputPath,
-                                                  const std::string& optionsJson) {
+                                                  const std::string& optionsJson,
+                                                  const std::string& codecOverride = std::string(),
+                                                  bool* usedHwEncoder = nullptr) {
         json opts = json::parse(optionsJson.empty() ? "{}" : optionsJson);
 
         std::string mode = opts.value("mode", std::string("extract_audio"));
@@ -402,7 +437,27 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
 
         std::vector<std::string> a;
         bool codecIsX264 = false;
+        // Callers use this to learn whether the run that is about to be
+        // spawned chose a fixed-function encoder -- the signal that decides
+        // whether a failed job is worth re-running on the CPU.
+        if (usedHwEncoder) *usedHwEncoder = false;
         a.push_back("-y");
+
+        // Resolve the thread budget up front so the same value can cap the
+        // decoder (as an input option, below), the encoder and the filters.
+        // Without the decoder cap, ffmpeg defaults to one thread per logical
+        // core on top of the encoder threads — double oversubscription on
+        // exactly the small CPUs this app targets.
+        int threadBudget = opts.value("threadBudget", 0);
+        int maxThreads = ConversionSupport::getOptimalThreadCount();
+        if (threadBudget > 0) {
+            threadBudget = std::min(threadBudget, maxThreads);
+            if (threadBudget < 1) threadBudget = 1;
+        } else {
+            threadBudget = maxThreads;
+        }
+        a.push_back("-threads");
+        a.push_back(std::to_string(threadBudget));
 
         // Trim range. Applied before -i so ffmpeg seeks instead of decoding the
         // discarded part.
@@ -447,17 +502,8 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
         a.push_back("pipe:1");
         a.push_back("-nostats");
 
-        // The renderer splits the core budget across the concurrent job
-        // pool and hands each job its share. Fall back to the engine's
-        // own estimate when the caller does not know the pool size.
-        int threadBudget = opts.value("threadBudget", 0);
-        int maxThreads = ConversionSupport::getOptimalThreadCount();
-        if (threadBudget > 0) {
-            threadBudget = std::min(threadBudget, maxThreads);
-            if (threadBudget < 1) threadBudget = 1;
-        } else {
-            threadBudget = maxThreads;
-        }
+        // threadBudget was resolved above so the same cap applies to the
+        // decoder (input side), the encoder (here) and the filters.
         a.push_back("-threads");
         a.push_back(std::to_string(threadBudget));
         a.push_back("-filter_threads");
@@ -646,8 +692,13 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
                 // AAC audio.
                 std::string gpu = "cpu";
                 if (useHw) {
-                    gpu = json::parse(ConversionSupport::detectHardwareAcceleration())
-                              .value("codec", std::string("cpu"));
+                    gpu = codecOverride.empty()
+                        ? json::parse(ConversionSupport::detectHardwareAcceleration())
+                                  .value("codec", std::string("cpu"))
+                        : codecOverride;
+                }
+                if (usedHwEncoder) {
+                    *usedHwEncoder = (gpu == "nvenc" || gpu == "qsv" || gpu == "amf");
                 }
 
                 if (gpu == "nvenc") {
@@ -1086,6 +1137,30 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
         job->stageDir.clear();
     }
 
+    // True when the ffmpeg failure happened at the encoder / output-init
+    // stage -- the failure mode a CPU re-encode can actually fix. Decoder,
+    // input and container errors are deliberately excluded: they fail
+    // identically (and would waste another full pass) with libx264.
+    static bool looksLikeEncoderFailure(const std::string& diagnostics) {
+        std::string d = diagnostics;
+        std::transform(d.begin(), d.end(), d.begin(),
+                       [](unsigned char c) { return (char)std::tolower(c); });
+        static const char* const kPatterns[] = {
+            "initializing output stream",
+            "error while opening encoder",
+            "error while encoding",
+            "could not encode",
+            "device failed",
+            "buffer size too small",
+            "failed to create a mfx session",
+            "nvenc", "qsv", "amf", "mfx",
+        };
+        for (const char* p : kPatterns) {
+            if (d.find(p) != std::string::npos) return true;
+        }
+        return false;
+    }
+
     static void runJob(std::shared_ptr<Job> job) {
         job->startTick = nowTick();
 
@@ -1118,12 +1193,28 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
         double duration = parseDurationSeconds(
             ConversionSupport::probeDuration(job->inputPath));
 
-        std::string cmdLine = quoteArg(BinaryResolver::ffmpeg()) + " " +
-            joinArgList(buildArgVector(job->inputPath, job->outputPath, job->optionsJson));
+        #ifdef _WIN32
+        bool usedHwEncoder = false;
+        DWORD exitCode = 1;
+        uintmax_t outSize = 0;
+        bool wasCancelled = false;
+        std::string failMsg;
+        // ffmpeg runs up to twice: first with the codec the engine normally
+        // picks (hardware when the runtime probe found a usable encoder), then,
+        // only if that attempt failed at the *encoder* stage, once more with
+        // the CPU encoder (libx264). Fixed-function encoders (QSV/NVENC/AMF)
+        // can fail at run time for reasons the probe cannot see -- driver
+        // glitches, odd source geometry, frame-buffer pressure -- and without
+        // this fallback the job would just die. A retry never runs on CPU-only
+        // jobs, on decode/container errors (they fail identically on the CPU)
+        // or after a user cancel.
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            std::string cmdLine = quoteArg(BinaryResolver::ffmpeg()) + " " +
+                joinArgList(buildArgVector(job->inputPath, job->outputPath,
+                                           job->optionsJson, attempt == 1 ? "cpu" : "",
+                                           &usedHwEncoder));
 
-        emitProgress(job, 0.05, "converting");
-
-#ifdef _WIN32
+            emitProgress(job, 0.05, "converting");
         SECURITY_ATTRIBUTES sa;
         sa.nLength = sizeof(sa);
         sa.lpSecurityDescriptor = nullptr;
@@ -1132,8 +1223,8 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
         HANDLE outRd = nullptr, outWr = nullptr, errRd = nullptr, errWr = nullptr;
         if (!CreatePipe(&outRd, &outWr, &sa, 0) ||
             !CreatePipe(&errRd, &errWr, &sa, 0)) {
-            finalizeJob(job, "failed", 0.0, "Failed to create ffmpeg pipes");
-            return;
+            failMsg = "Failed to create ffmpeg pipes";
+            break;
         }
         // Only the write ends may be inherited by the child.
         SetHandleInformation(outRd, HANDLE_FLAG_INHERIT, 0);
@@ -1173,8 +1264,8 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
         if (!spawned) {
             CloseHandle(outRd);
             CloseHandle(errRd);
-            finalizeJob(job, "failed", 0.0, "Failed to launch ffmpeg");
-            return;
+            failMsg = "Failed to launch ffmpeg";
+            break;
         }
 
         {
@@ -1245,7 +1336,6 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
 
         WaitForSingleObject(pi.hProcess, INFINITE);
 
-        DWORD exitCode = 1;
         GetExitCodeProcess(pi.hProcess, &exitCode);
 
         // A suspended process must run again before it can exit or be killed.
@@ -1261,13 +1351,10 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
         errThread.join();
         CloseHandle(errRd);
 
-        bool wasCancelled = job->cancelled.load();
+        wasCancelled = job->cancelled.load();
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
         job->process = nullptr;
-
-        // ffmpeg has exited, so nothing is reading the staged copies.
-        cleanupFilterStaging(job);
 
         std::error_code sec;
         // Split jobs write a numbered series (name000.ext,
@@ -1290,19 +1377,39 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
             std::string ext = checkPath.has_extension() ? ("." + checkPath.extension().u8string()) : "";
             checkPath = checkPath.parent_path() / (stem + "000" + ext);
         }
-        uintmax_t outSize = fs::exists(checkPath, sec) && !sec
+        outSize = fs::exists(checkPath, sec) && !sec
             ? fs::file_size(checkPath, sec) : 0;
+
+        if (wasCancelled) {
+            break;   // user bailed -- never retry
+        }
+        if (exitCode == 0 && outSize > 0) {
+            break;   // done
+        }
+
+        // The attempt failed. Keep the last diagnostic tail for the final
+        // report, and only try the CPU encoder when the failure happened at
+        // the encoder stage -- a decode/container failure would fail
+        // identically (and waste another full pass) with libx264.
+        std::string tail = job->diagnostics;
+        if (tail.size() > 500) tail = tail.substr(tail.size() - 500);
+        failMsg = "Conversion exited with code " + std::to_string(exitCode) +
+                  (tail.empty() ? "" : (". " + tail));
+        if (attempt == 0 && usedHwEncoder && looksLikeEncoderFailure(job->diagnostics)) {
+            continue;   // one retry with the CPU encoder
+        }
+        break;
+        }
+
+        // ffmpeg has exited, so nothing is reading the staged copies.
+        cleanupFilterStaging(job);
 
         if (wasCancelled) {
             finalizeJob(job, "cancelled", 0.0);
         } else if (exitCode == 0 && outSize > 0) {
             finalizeJob(job, "completed", 1.0);
         } else {
-            std::string tail = job->diagnostics;
-            if (tail.size() > 500) tail = tail.substr(tail.size() - 500);
-            finalizeJob(job, "failed", 0.0,
-                "Conversion exited with code " + std::to_string(exitCode) +
-                (tail.empty() ? "" : (". " + tail)));
+            finalizeJob(job, "failed", 0.0, failMsg.empty() ? "Conversion failed" : failMsg);
         }
 
 #else
@@ -1443,7 +1550,20 @@ static std::string buildFilterChain(const json& tools, bool hasVideo) {
 
         // Detached and holding its own shared_ptr: the registry may drop this
         // Job at any time without endangering the running thread.
-        std::thread([job]() { runJob(job); }).detach();
+        //
+        // The slot wait happens inside the thread so `start` still returns
+        // immediately and the IPC reader is never blocked. A job cancelled
+        // while waiting for a slot is finalized as cancelled rather than
+        // starting late.
+        std::thread([job]() {
+            acquireJobSlot();
+            struct SlotGuard { ~SlotGuard() { releaseJobSlot(); } } guard;
+            if (job->cancelled.load()) {
+                finalizeJob(job, "cancelled", 0.0);
+                return;
+            }
+            runJob(job);
+        }).detach();
 
         json res;
         res["jobId"] = jobIdIn;

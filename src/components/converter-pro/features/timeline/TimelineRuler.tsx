@@ -21,6 +21,47 @@ export interface TimelineRulerProps {
   formatTrimTime: (val: number) => string;
 }
 
+/**
+ * The static ruler decoration (up to 500 tick marks + label spans).
+ *
+ * Extracted and memoized so that playhead-only updates — which re-render
+ * TimelineRuler ~4×/s and on every scrub frame — skip the mark/tick diff
+ * entirely and only move the playhead button. The parent memoizes its
+ * marks/ticks arrays on the visible range, so these props are stable.
+ */
+const RulerStaticLayer = React.memo(({
+  rulerMarks,
+  displayedRulerTicks,
+  timelineDuration,
+  visibleStart,
+  visibleDuration,
+  formatTrimTime,
+}: Pick<TimelineRulerProps,
+  'rulerMarks' | 'displayedRulerTicks' | 'timelineDuration' | 'visibleStart' | 'visibleDuration' | 'formatTrimTime'>) => (
+  <>
+    {rulerMarks.map(({ time, major }) => (
+      <i
+        key={`mark-${time}`}
+        aria-hidden="true"
+        className={`pro-timeline__ruler-mark${major ? ' pro-timeline__ruler-mark--major' : ''}`}
+        style={{ left: `${visibleDuration > 0 ? ((time - visibleStart) / visibleDuration) * 100 : 0}%` }}
+      />
+    ))}
+    {displayedRulerTicks.map((tick) => (
+      <span
+        key={tick}
+        className={tick === 0 ? 'pro-timeline__ruler-start' : tick === timelineDuration ? 'pro-timeline__ruler-end' : undefined}
+        style={{ left: `${visibleDuration > 0 ? ((tick - visibleStart) / visibleDuration) * 100 : 0}%` }}
+      >
+        {tick === 0 || tick === timelineDuration
+          ? `${Math.floor(tick / 60)}:${String(Math.floor(tick % 60)).padStart(2, '0')}`
+          : formatTrimTime(tick)}
+      </span>
+    ))}
+  </>
+));
+RulerStaticLayer.displayName = 'RulerStaticLayer';
+
 export const TimelineRuler: React.FC<TimelineRulerProps> = ({
   isRulerZooming,
   setIsRulerZooming,
@@ -69,25 +110,14 @@ export const TimelineRuler: React.FC<TimelineRulerProps> = ({
       title="Scroll over the ruler to zoom the timeline"
     >
       <div className="pro-timeline__ruler-track">
-        {rulerMarks.map(({ time, major }) => (
-          <i
-            key={`mark-${time}`}
-            aria-hidden="true"
-            className={`pro-timeline__ruler-mark${major ? ' pro-timeline__ruler-mark--major' : ''}`}
-            style={{ left: `${visibleDuration > 0 ? ((time - visibleStart) / visibleDuration) * 100 : 0}%` }}
-          />
-        ))}
-        {displayedRulerTicks.map((tick) => (
-          <span
-            key={tick}
-            className={tick === 0 ? 'pro-timeline__ruler-start' : tick === timelineDuration ? 'pro-timeline__ruler-end' : undefined}
-            style={{ left: `${visibleDuration > 0 ? ((tick - visibleStart) / visibleDuration) * 100 : 0}%` }}
-          >
-            {tick === 0 || tick === timelineDuration
-              ? `${Math.floor(tick / 60)}:${String(Math.floor(tick % 60)).padStart(2, '0')}`
-              : formatTrimTime(tick)}
-          </span>
-        ))}
+        <RulerStaticLayer
+          rulerMarks={rulerMarks}
+          displayedRulerTicks={displayedRulerTicks}
+          timelineDuration={timelineDuration}
+          visibleStart={visibleStart}
+          visibleDuration={visibleDuration}
+          formatTrimTime={formatTrimTime}
+        />
         {timelineDuration > 0 && playhead - timelineOrigin >= visibleStart && playhead - timelineOrigin <= visibleEnd && (
           <button
             type="button"

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, lazy, Suspense, useMemo } from 'react';
+import { useEffect, useState, useCallback, useRef, lazy, Suspense, useMemo } from 'react';
 import {
   Download, Pause, Play, Trash2, Plus, Settings, Folder,
   ExternalLink, Globe, CheckCircle2,
@@ -106,7 +106,7 @@ export default function App() {
 
   const { converterQueueCount, converterState } = useConverterState();
 
-  // â”€â”€â”€ Custom Hooks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  //  Custom Hooks 
   const {
     downloads, setDownloads,
     selectedTaskId, setSelectedTaskId,
@@ -181,9 +181,16 @@ export default function App() {
     webviewRef,
     navigateBrowser, deleteStreamSite,
     setWebviewRef,
+    setBrowserScreenActive,
   } = useBrowser();
 
-  // â”€â”€â”€ Archive + PIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // The embedded browser keeps its webview mounted across tabs. Stop hidden
+  // page media and its periodic ad-skip work until the Stream screen is active.
+  useEffect(() => {
+    setBrowserScreenActive(activeTab === 'browser');
+  }, [activeTab, setBrowserScreenActive]);
+
+  // Archive + PIN 
   const {
     archivePaths: _archivePaths, setArchivePaths,
     settingsArchivePin, setSettingsArchivePin,
@@ -199,7 +206,7 @@ export default function App() {
   } = useArchive();
 
 
-  // â”€â”€â”€ Updater â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  //  Updater 
   const {
     showReleaseDialog, setShowReleaseDialog,
     releaseCheckStatus, setReleaseCheckStatus,
@@ -218,7 +225,7 @@ export default function App() {
   } = useUpdater();
 
 
-  // â”€â”€â”€ App-level constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // App-level constants 
   const APP_VERSION = '1.0.1';
   const [helpSubTab, setHelpSubTab] = useState<'guide' | 'license'>('guide');
   const [browserUrl] = useState('https://www.youtube.com');
@@ -238,7 +245,7 @@ export default function App() {
   // Clear History Modal state
   // Context Menu state
   // Mini-player state (when player window is minimized to sidebar)
-  // â”€â”€â”€ Mini Player â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
   const {
     miniPlayerState, setMiniPlayerState,
     miniPlayerHovered, setMiniPlayerHovered,
@@ -250,15 +257,15 @@ export default function App() {
     if (e) e.stopPropagation();
     const curTime = miniVideoRef.current ? miniVideoRef.current.currentTime : undefined;
     if (miniVideoRef.current) {
-      try { miniVideoRef.current.pause(); } catch (err) {}
+      try { miniVideoRef.current.pause(); } catch (err) { }
     }
     electron?.ipcRenderer.invoke('player-restore', curTime);
   }, [miniVideoRef]);
 
-  // â”€â”€â”€ Real-time network speed (provided by useNetworkStatus above) â”€
+  // Real-time network speed (provided by useNetworkStatus above) 
 
 
-  // â”€â”€â”€ Format Picker + Playlist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  //  Format Picker + Playlist 
   const { fetchFormats, handleCloseFormatsModal, handleDownloadPlaylist } = useFormatPicker({
     setIsYoutubeCheck, setAddUrl, setFormatLoading, setExtractError,
     setExtractProgress, setShowFormatModal, setYoutubeInfo,
@@ -296,7 +303,7 @@ export default function App() {
 
   // Application Settings (provided by useSettings hook)
 
-  // â”€â”€â”€ Binary Installer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Binary Installer 
   const {
     binariesInstalled,
     installingBinaries,
@@ -307,11 +314,11 @@ export default function App() {
     cancelInstall: handleCancelInstall,
   } = useBinaryInstaller();
 
-  // â”€â”€â”€ Toast Notifications â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  //  Toast Notifications 
   const { toasts, addToast } = useToasts();
 
 
-  // resolveDuplicate was removed â€” duplicate resolution is handled via handleResolveDuplicates (physical delete)
+  // resolveDuplicate was removed — duplicate resolution is handled via handleResolveDuplicates (physical delete)
 
   const {
     performDeleteFile,
@@ -345,7 +352,7 @@ export default function App() {
     addToast,
   });
 
-  // â”€â”€â”€ Keyboard Shortcuts + Context Menu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Keyboard Shortcuts + Context Menu ─────────────────────────────────────
   useKeyboardShortcuts({
     selectedLibraryPath,
     selectedTaskId,
@@ -474,7 +481,66 @@ export default function App() {
     return matchesSearch;
   }), [downloads, searchQuery, activeDownloadCount, isItemArchived]);
 
-  // Virtualizer for downloads table â€” only renders visible rows
+  // Library file list: hoisted filter + sort so that progress/status re-renders
+  // (which can happen ~2x/sec during conversions/downloads) no longer re-filter
+  // and re-sort thousands of entries on the main thread on every single pass.
+  const libraryFilteredItems = useMemo(() => {
+    const rawItems = libraryCategory === 'recent'
+      ? downloads
+        .filter(t => {
+          const fullPath = t.saveDir ? `${t.saveDir}\\${t.filename}` : t.filename;
+          return t.status === 'completed' && !isItemArchived(fullPath);
+        })
+        .map(t => {
+          const ext = '.' + (t.filename.split('.').pop() || '').toLowerCase();
+          return {
+            name: t.filename,
+            path: t.saveDir + '\\' + t.filename,
+            size: t.totalBytes,
+            displaySize: t.isYoutube && t.displaySize ? t.displaySize : null,
+            mtime: t.addedAt || Date.now(),
+            category: 'recent',
+            ext: ext
+          };
+        })
+      : libraryFiles.filter(f => {
+        if (isItemArchived(f.path)) return false;
+        if (f.category !== libraryCategory) return false;
+        if (libraryCategory === 'videos' || libraryCategory === 'audios') {
+          if (appSettings.downloadDir) {
+            const itemDir = (f.path.substring(0, f.path.lastIndexOf('\\')) || f.path.substring(0, f.path.lastIndexOf('/'))).replace(/[\\/]/g, '/').toLowerCase();
+            const primaryDir = appSettings.downloadDir.replace(/[\\/]/g, '/').toLowerCase();
+            if (itemDir === primaryDir) return false;
+          }
+        }
+        return true;
+      });
+
+    return rawItems
+      .filter(f => f.name.toLowerCase().includes(librarySearch.toLowerCase()))
+      .sort((a, b) => {
+        let comp = 0;
+        if (librarySortBy === 'name') comp = a.name.localeCompare(b.name);
+        else if (librarySortBy === 'date') comp = (a.mtime || 0) - (b.mtime || 0);
+        else if (librarySortBy === 'size') comp = (a.size || 0) - (b.size || 0);
+        return librarySortOrder === 'asc' ? comp : -comp;
+      });
+  }, [libraryCategory, downloads, isItemArchived, libraryFiles,
+      appSettings.downloadDir, librarySearch, librarySortBy, librarySortOrder]);
+
+  const libraryListRef = useRef<HTMLDivElement>(null);
+  // Virtualizer for the library file-list view: only the rows near the visible
+  // viewport are in the DOM, so a 4,000-file library renders ~15 row nodes
+  // instead of 4,000, and stops re-rendering thousands on every state change.
+  const libraryVirtualizer = useVirtualizer({
+    count: libraryFilteredItems.length,
+    getScrollElement: () => libraryListRef.current,
+    estimateSize: () => 88,
+    overscan: 8,
+    gap: 6,
+  });
+
+  // Virtualizer for downloads table — only renders visible rows
   const downloadsVirtualizer = useVirtualizer({
     count: filteredDownloads.length,
     getScrollElement: () => downloadsTableRef.current,
@@ -528,16 +594,16 @@ export default function App() {
       <div className="titlebar">
         <div className="titlebar-logo" style={{ display: 'flex', flexDirection: 'column', gap: '2px', lineHeight: 1.1, WebkitAppRegion: 'drag' } as any}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 'bold', fontSize: '13px' }}>
-            <img 
-              src="favicon.svg" 
-              style={{ width: '16px', height: '16px', objectFit: 'contain', filter: 'drop-shadow(0 0 4px var(--primary))' }} 
-              alt="" 
+            <img
+              src="favicon.svg"
+              style={{ width: '16px', height: '16px', objectFit: 'contain', filter: 'drop-shadow(0 0 4px var(--primary))' }}
+              alt=""
               onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'player.ico'; }}
             /> Panamedia
           </div>
           <span style={{ fontSize: '8px', color: 'var(--text-muted)', fontWeight: 'normal', paddingLeft: '22px' }}>All in One media manager</span>
         </div>
-        
+
         {/* Help Center and New Release Buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginRight: '16px', marginLeft: 'auto', WebkitAppRegion: 'no-drag' } as any}>
           <button
@@ -864,8 +930,8 @@ export default function App() {
                       )}
                       {isConverterConverting
                         ? (converterState?.progress && converterState.progress > 0
-                            ? `${converterState.progress}%`
-                            : `${activeConverterQueueCount} active`)
+                          ? `${converterState.progress}%`
+                          : `${activeConverterQueueCount} active`)
                         : isConverterPaused
                           ? 'PAUSED'
                           : `${activeConverterQueueCount}`}
@@ -876,7 +942,7 @@ export default function App() {
             })()}
           </div>
 
-          {/* Live Network Speed Widget â€” always visible in sidebar footer */}
+          {/* Live Network Speed Widget — always visible in sidebar footer */}
           <div className="glass-panel" style={{
             padding: '10px 12px',
             borderRadius: '12px',
@@ -895,7 +961,7 @@ export default function App() {
                 fontFamily: 'var(--font-title)',
                 color: netSpeed > 100 * 1024 ? '#22c55e' : netSpeed > 0 ? '#f59e0b' : 'var(--text-muted)'
               }}>
-                {netSpeed > 0 ? formatSpeed(netSpeed) : 'â€” B/s'}
+                {netSpeed > 0 ? formatSpeed(netSpeed) : '0 B/s'}
               </span>
             </div>
             {downloads.some(t => t.status === 'downloading') && (
@@ -1049,7 +1115,7 @@ export default function App() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 2px' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden', flex: 1, marginRight: '6px' }}>
                     <span style={{ fontSize: '9px', color: 'var(--primary)', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      {miniPlayerState.playing ? 'â–¶ Now Playing' : 'â¸ Paused'}
+                      {miniPlayerState.playing ? '▶ Now Playing' : '⏸ Paused'}
                     </span>
                     <span style={{ fontSize: '10px', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: '500' }} title={miniPlayerState.filename}>
                       {miniPlayerState.filename}
@@ -1057,7 +1123,11 @@ export default function App() {
                   </div>
                   {/* Close button only */}
                   <button
-                    onClick={(e) => { e.stopPropagation(); electron?.ipcRenderer.send('player-control-close'); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMiniPlayerState(null);
+                      electron?.ipcRenderer.send('player-control-close');
+                    }}
                     style={{
                       background: 'none',
                       border: 'none',
@@ -1096,7 +1166,7 @@ export default function App() {
                       e.stopPropagation();
                       const nextPlaying = !miniPlayerState.playing;
                       if (nextPlaying) {
-                        miniVideoRef.current?.play().catch(() => {});
+                        miniVideoRef.current?.play().catch(() => { });
                         electron?.ipcRenderer.send('player-remote-command', 'play');
                       } else {
                         miniVideoRef.current?.pause();
@@ -1276,165 +1346,165 @@ export default function App() {
                           <div style={{ fontSize: '14px' }}>No downloads to display</div>
                         </div>
                       ) : (
-                    <div
-                      style={{
-                        flex: 1,
-                        overflowY: 'auto',
-                        overflowX: 'hidden',
-                        position: 'relative',
-                        minHeight: 0,
-                        minWidth: '800px',
-                      }}
-                    >
-                      <div style={{ height: `${downloadsVirtualizer.getTotalSize()}px`, position: 'relative', width: '100%' }}>
-                        {downloadsVirtualizer.getVirtualItems().map(virtualRow => {
-                          const task = filteredDownloads[virtualRow.index];
-                          const percentage = getPercentage(task);
-                          const isSelected = selectedTaskId === task.id;
-                          const isRowChecked = selectedDownloadIds.includes(task.id);
+                        <div
+                          style={{
+                            flex: 1,
+                            overflowY: 'auto',
+                            overflowX: 'hidden',
+                            position: 'relative',
+                            minHeight: 0,
+                            minWidth: '800px',
+                          }}
+                        >
+                          <div style={{ height: `${downloadsVirtualizer.getTotalSize()}px`, position: 'relative', width: '100%' }}>
+                            {downloadsVirtualizer.getVirtualItems().map(virtualRow => {
+                              const task = filteredDownloads[virtualRow.index];
+                              const percentage = getPercentage(task);
+                              const isSelected = selectedTaskId === task.id;
+                              const isRowChecked = selectedDownloadIds.includes(task.id);
 
-                          return (
-                            <div
-                              key={task.id}
-                              data-index={virtualRow.index}
-                              ref={downloadsVirtualizer.measureElement}
-                              onClick={() => setSelectedTaskId(isSelected ? null : task.id)}
-                              style={{
-                                display: 'grid',
-                                gridTemplateColumns: '28px minmax(140px,1fr) 58px 78px 150px 78px 68px 78px 86px',
-                                position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                width: '100%',
-                                transform: `translateY(${virtualRow.start}px)`,
-                                cursor: 'pointer',
-                                background: isRowChecked
-                                  ? 'rgba(99, 102, 241, 0.06)'
-                                  : isSelected ? 'rgba(255,255,255,0.02)' : 'transparent',
-                                borderBottom: '1px solid rgba(255,255,255,0.03)',
-                                borderLeft: isSelected ? '3px solid var(--primary)' : '3px solid transparent',
-                                alignItems: 'center',
-                                fontSize: '12px',
-                              }}
-                            >
+                              return (
+                                <div
+                                  key={task.id}
+                                  data-index={virtualRow.index}
+                                  ref={downloadsVirtualizer.measureElement}
+                                  onClick={() => setSelectedTaskId(isSelected ? null : task.id)}
+                                  style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '28px minmax(140px,1fr) 58px 78px 150px 78px 68px 78px 86px',
+                                    position: 'absolute',
+                                    top: 0,
+                                    left: 0,
+                                    width: '100%',
+                                    transform: `translateY(${virtualRow.start}px)`,
+                                    cursor: 'pointer',
+                                    background: isRowChecked
+                                      ? 'rgba(99, 102, 241, 0.06)'
+                                      : isSelected ? 'rgba(255,255,255,0.02)' : 'transparent',
+                                    borderBottom: '1px solid rgba(255,255,255,0.03)',
+                                    borderLeft: isSelected ? '3px solid var(--primary)' : '3px solid transparent',
+                                    alignItems: 'center',
+                                    fontSize: '12px',
+                                  }}
+                                >
 
-                              {/* Checkbox */}
-                              <div style={{ padding: '8px', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={(e) => e.stopPropagation()}>
-                                <input
-                                  type="checkbox"
-                                  checked={isRowChecked}
-                                  onChange={() => handleToggleSelect(task.id)}
-                                  style={{ cursor: 'pointer' }}
-                                />
-                              </div>
-
-                              {/* Filename */}
-                              <div style={{ padding: '8px 12px', overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-                                  {task.thumbnail && !task.thumbnail.toLowerCase().includes('.gif') && !task.thumbnail.toLowerCase().includes('banner') && !task.thumbnail.toLowerCase().includes('sponsor') && !task.thumbnail.toLowerCase().includes('advert') ? (
-                                    <img
-                                      src={task.thumbnail}
-                                      alt="thumb"
-                                      style={{ width: '42px', height: '24px', borderRadius: '4px', objectFit: 'cover', flexShrink: 0, border: '1px solid rgba(255,255,255,0.06)' }}
+                                  {/* Checkbox */}
+                                  <div style={{ padding: '8px', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={(e) => e.stopPropagation()}>
+                                    <input
+                                      type="checkbox"
+                                      checked={isRowChecked}
+                                      onChange={() => handleToggleSelect(task.id)}
+                                      style={{ cursor: 'pointer' }}
                                     />
-                                  ) : (
-                                    <div style={{ width: '42px', height: '24px', borderRadius: '4px', background: 'rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.04)', flexShrink: 0 }}>
-                                      <Globe size={12} style={{ color: 'var(--text-dark)' }} />
+                                  </div>
+
+                                  {/* Filename */}
+                                  <div style={{ padding: '8px 12px', overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                                      {task.thumbnail && !task.thumbnail.toLowerCase().includes('.gif') && !task.thumbnail.toLowerCase().includes('banner') && !task.thumbnail.toLowerCase().includes('sponsor') && !task.thumbnail.toLowerCase().includes('advert') ? (
+                                        <img
+                                          src={task.thumbnail}
+                                          alt="thumb"
+                                          style={{ width: '42px', height: '24px', borderRadius: '4px', objectFit: 'cover', flexShrink: 0, border: '1px solid rgba(255,255,255,0.06)' }}
+                                        />
+                                      ) : (
+                                        <div style={{ width: '42px', height: '24px', borderRadius: '4px', background: 'rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.04)', flexShrink: 0 }}>
+                                          <Globe size={12} style={{ color: 'var(--text-dark)' }} />
+                                        </div>
+                                      )}
+                                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {task.filename || (task.isYoutube ? 'Resolving YouTube Video...' : 'Fetching metadata...')}
+                                      </span>
                                     </div>
-                                  )}
-                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {task.filename || (task.isYoutube ? 'Resolving YouTube Video...' : 'Fetching metadata...')}
-                                  </span>
-                                </div>
-                              </div>
-
-                              {/* Format badge */}
-                              <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center' }}>
-                                {(() => {
-                                  const ext = task.filename.split('.').pop()?.toUpperCase();
-                                  const displayExt = ext && ext.length <= 4 && ext !== 'PARTS' ? ext : (task.isYoutube ? 'MP4' : 'URL');
-                                  let badgeColor = 'rgba(255,255,255,0.08)';
-                                  let textColor = '#fff';
-                                  if (['MP4','MKV','WEBM','AVI','MOV'].includes(displayExt)) { badgeColor = 'rgba(129,140,248,0.15)'; textColor = '#818cf8'; }
-                                  else if (['MP3','M4A','WAV','FLAC'].includes(displayExt)) { badgeColor = 'rgba(236,72,153,0.15)'; textColor = '#ec4899'; }
-                                  else if (['PDF','DOCX','TXT','ZIP','RAR'].includes(displayExt)) { badgeColor = 'rgba(59,130,246,0.15)'; textColor = '#3b82f6'; }
-                                  return (
-                                    <span style={{ fontSize: '10px', fontWeight: 'bold', background: badgeColor, color: textColor, padding: '2px 6px', borderRadius: '4px' }}>
-                                      {displayExt}
-                                    </span>
-                                  );
-                                })()}
-                              </div>
-
-                              {/* Size */}
-                              <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center', fontSize: '11px' }}>
-                                {task.status === 'completed'
-                                  ? (task.totalBytes > 0 ? formatBytes(task.totalBytes) : 'â€”')
-                                  : (task.totalBytes > 0
-                                    ? <><span style={{ color: 'var(--primary)', fontWeight: '600' }}>{formatBytes(task.downloadedBytes)}</span><span style={{ color: 'var(--text-muted)', fontSize: '10px' }}> / {formatBytes(task.totalBytes)}</span></>
-                                    : (task.isYoutube && task.displaySize ? task.displaySize : 'â€”'))
-                                }
-                              </div>
-
-                              {/* Progress */}
-                              <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center' }}>
-                                <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px' }}>
-                                    <span>{percentage}%</span>
-                                    <span>{task.isYoutube ? '' : formatBytes(task.downloadedBytes)}</span>
                                   </div>
-                                  <div className="progress-bar-bg">
-                                    <div className={`progress-bar-fill ${task.status}`} style={{ width: `${percentage}%` }} />
+
+                                  {/* Format badge */}
+                                  <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center' }}>
+                                    {(() => {
+                                      const ext = task.filename.split('.').pop()?.toUpperCase();
+                                      const displayExt = ext && ext.length <= 4 && ext !== 'PARTS' ? ext : (task.isYoutube ? 'MP4' : 'URL');
+                                      let badgeColor = 'rgba(255,255,255,0.08)';
+                                      let textColor = '#fff';
+                                      if (['MP4', 'MKV', 'WEBM', 'AVI', 'MOV'].includes(displayExt)) { badgeColor = 'rgba(129,140,248,0.15)'; textColor = '#818cf8'; }
+                                      else if (['MP3', 'M4A', 'WAV', 'FLAC'].includes(displayExt)) { badgeColor = 'rgba(236,72,153,0.15)'; textColor = '#ec4899'; }
+                                      else if (['PDF', 'DOCX', 'TXT', 'ZIP', 'RAR'].includes(displayExt)) { badgeColor = 'rgba(59,130,246,0.15)'; textColor = '#3b82f6'; }
+                                      return (
+                                        <span style={{ fontSize: '10px', fontWeight: 'bold', background: badgeColor, color: textColor, padding: '2px 6px', borderRadius: '4px' }}>
+                                          {displayExt}
+                                        </span>
+                                      );
+                                    })()}
                                   </div>
+
+                                  {/* Size */}
+                                  <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center', fontSize: '11px' }}>
+                                    {task.status === 'completed'
+                                      ? (task.totalBytes > 0 ? formatBytes(task.totalBytes) : '-')
+                                      : (task.totalBytes > 0
+                                        ? <><span style={{ color: 'var(--primary)', fontWeight: '600' }}>{formatBytes(task.downloadedBytes)}</span><span style={{ color: 'var(--text-muted)', fontSize: '10px' }}> / {formatBytes(task.totalBytes)}</span></>
+                                        : (task.isYoutube && task.displaySize ? task.displaySize : '-'))
+                                    }
+                                  </div>
+
+                                  {/* Progress */}
+                                  <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center' }}>
+                                    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px' }}>
+                                        <span>{percentage}%</span>
+                                        <span>{task.isYoutube ? '' : formatBytes(task.downloadedBytes)}</span>
+                                      </div>
+                                      <div className="progress-bar-bg">
+                                        <div className={`progress-bar-fill ${task.status}`} style={{ width: `${percentage}%` }} />
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Speed */}
+                                  <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center', fontSize: '11px', fontFamily: 'var(--font-title)' }}>
+                                    {task.isYoutube && task.displaySpeed ? task.displaySpeed : (task.status === 'downloading' ? formatSpeed(task.speed) : '0 B/s')}
+                                  </div>
+
+                                  {/* Duration */}
+                                  <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center', fontSize: '11px' }}>
+                                    {task.duration && task.duration > 0
+                                      ? (() => { const m = Math.floor(task.duration / 60); const s = Math.floor(task.duration % 60); return `${m}:${s < 10 ? '0' : ''}${s}`; })()
+                                      : (task.isYoutube && task.displayEta ? task.displayEta : (task.status === 'downloading' ? formatEta(task.eta) : '-'))
+                                    }
+                                  </div>
+
+                                  {/* Status */}
+                                  <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center' }}>
+                                    <span className={`status-badge-gui ${task.status}`}>{task.status}</span>
+                                  </div>
+
+                                  {/* Actions */}
+                                  <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={(e) => e.stopPropagation()}>
+                                    <div style={{ display: 'flex', gap: '4px' }}>
+                                      {task.status === 'downloading' || task.status === 'preparing' ? (
+                                        <button className="btn-secondary" style={{ padding: '4px 6px', borderRadius: '6px', border: 'none', background: 'rgba(255,255,255,0.05)', cursor: 'pointer' }} title="Pause" onClick={() => pauseDownload(task.id)}>
+                                          <Pause size={11} />
+                                        </button>
+                                      ) : task.status === 'completed' ? (
+                                        <button className="btn-primary" style={{ padding: '4px 6px', borderRadius: '6px', border: 'none', cursor: 'pointer', background: '#22c55e' }} title="Play Media"
+                                          onClick={() => { const filePath = task.saveDir + '/' + task.filename; electron?.ipcRenderer.invoke('open-player-window', { filePath, filename: task.filename }); }}>
+                                          <Play size={11} fill="currentColor" />
+                                        </button>
+                                      ) : task.status !== 'merging' && task.status !== 'compressing' ? (
+                                        <button className="btn-primary" style={{ padding: '4px 6px', borderRadius: '6px', border: 'none', cursor: 'pointer', background: 'var(--primary)' }} title="Resume" onClick={() => resumeDownload(task.id)}>
+                                          <Play size={11} fill="currentColor" />
+                                        </button>
+                                      ) : null}
+                                      <button className="btn-secondary" style={{ padding: '4px 6px', borderRadius: '6px', border: 'none', color: 'var(--danger)', background: 'rgba(239,68,68,0.05)', cursor: 'pointer' }} title="Delete" onClick={() => deleteDownload(task.id, false)}>
+                                        <Trash2 size={11} />
+                                      </button>
+                                    </div>
+                                  </div>
+
                                 </div>
-                              </div>
-
-                              {/* Speed */}
-                              <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center', fontSize: '11px', fontFamily: 'var(--font-title)' }}>
-                                {task.isYoutube && task.displaySpeed ? task.displaySpeed : (task.status === 'downloading' ? formatSpeed(task.speed) : 'â€”')}
-                              </div>
-
-                              {/* Duration */}
-                              <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center', fontSize: '11px' }}>
-                                {task.duration && task.duration > 0
-                                  ? (() => { const m = Math.floor(task.duration / 60); const s = Math.floor(task.duration % 60); return `${m}:${s < 10 ? '0' : ''}${s}`; })()
-                                  : (task.isYoutube && task.displayEta ? task.displayEta : (task.status === 'downloading' ? formatEta(task.eta) : 'â€”'))
-                                }
-                              </div>
-
-                              {/* Status */}
-                              <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center' }}>
-                                <span className={`status-badge-gui ${task.status}`}>{task.status}</span>
-                              </div>
-
-                              {/* Actions */}
-                              <div style={{ padding: '8px 6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={(e) => e.stopPropagation()}>
-                                <div style={{ display: 'flex', gap: '4px' }}>
-                                  {task.status === 'downloading' || task.status === 'preparing' ? (
-                                    <button className="btn-secondary" style={{ padding: '4px 6px', borderRadius: '6px', border: 'none', background: 'rgba(255,255,255,0.05)', cursor: 'pointer' }} title="Pause" onClick={() => pauseDownload(task.id)}>
-                                      <Pause size={11} />
-                                    </button>
-                                  ) : task.status === 'completed' ? (
-                                    <button className="btn-primary" style={{ padding: '4px 6px', borderRadius: '6px', border: 'none', cursor: 'pointer', background: '#22c55e' }} title="Play Media"
-                                      onClick={() => { const filePath = task.saveDir + '/' + task.filename; electron?.ipcRenderer.invoke('open-player-window', { filePath, filename: task.filename }); }}>
-                                      <Play size={11} fill="currentColor" />
-                                    </button>
-                                  ) : task.status !== 'merging' && task.status !== 'compressing' ? (
-                                    <button className="btn-primary" style={{ padding: '4px 6px', borderRadius: '6px', border: 'none', cursor: 'pointer', background: 'var(--primary)' }} title="Resume" onClick={() => resumeDownload(task.id)}>
-                                      <Play size={11} fill="currentColor" />
-                                    </button>
-                                  ) : null}
-                                  <button className="btn-secondary" style={{ padding: '4px 6px', borderRadius: '6px', border: 'none', color: 'var(--danger)', background: 'rgba(239,68,68,0.05)', cursor: 'pointer' }} title="Delete" onClick={() => deleteDownload(task.id, false)}>
-                                    <Trash2 size={11} />
-                                  </button>
-                                </div>
-                              </div>
-
-                            </div>
-                            );
-                          })}
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
                       )}
                     </div>
                   </>
@@ -1443,13 +1513,13 @@ export default function App() {
 
               {/* Right Panel Drawer: Details & Media Library */}
               <div className="detail-drawer" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '330px', flexShrink: 0, borderLeft: '1px solid var(--panel-border)', background: 'rgba(10, 10, 16, 0.5)', padding: '16px', minHeight: 0 }}>
-                  {/* Header Switcher */}
-                  <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '12px', gap: '8px', flexShrink: 0 }}>
-                    <button
-                      onClick={() => {
-                        setRightPanelTab('details');
-                        if ((libraryCategory as string) === 'duplicates') setLibraryCategory('recent');
-                      }}
+                {/* Header Switcher */}
+                <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '12px', gap: '8px', flexShrink: 0 }}>
+                  <button
+                    onClick={() => {
+                      setRightPanelTab('details');
+                      if ((libraryCategory as string) === 'duplicates') setLibraryCategory('recent');
+                    }}
                     disabled={!selectedTask}
                     className={`btn-secondary ${rightPanelTab === 'details' ? 'active' : ''}`}
                     style={{
@@ -1507,921 +1577,897 @@ export default function App() {
                 </div>
 
                 <div style={{ display: (libraryCategory as string) === 'duplicates' ? 'none' : 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-                {/* DETAILS TAB CONTENT */}
-                {rightPanelTab === 'details' && selectedTask ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', flex: 1, overflowY: 'auto', marginTop: '14px', paddingRight: '4px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifySelf: 'space-between', justifyContent: 'space-between' }}>
-                      <h3 style={{ fontSize: '14px', fontWeight: 'bold' }}>Download Details</h3>
-                      <button className="modal-close-btn" style={{ fontSize: '12px' }} onClick={() => setSelectedTaskId(null)}>âœ•</button>
-                    </div>
+                  {/* DETAILS TAB CONTENT */}
+                  {rightPanelTab === 'details' && selectedTask ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', flex: 1, overflowY: 'auto', marginTop: '14px', paddingRight: '4px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifySelf: 'space-between', justifyContent: 'space-between' }}>
+                        <h3 style={{ fontSize: '14px', fontWeight: 'bold' }}>Download Details</h3>
+                        <button className="modal-close-btn" style={{ fontSize: '12px' }} onClick={() => setSelectedTaskId(null)}>✕</button>
+                      </div>
 
-                    <div className="detail-row">
-                      <div className="detail-label">File Name</div>
-                      <div className="detail-value" style={{ fontWeight: 'bold', fontSize: '13px', color: '#fff', wordBreak: 'break-all' }}>{selectedTask.filename}</div>
-                    </div>
-
-                    <div className="detail-row">
-                      <div className="detail-label">Source URL</div>
-                      <div className="detail-value" style={{ fontSize: '10px', color: 'var(--primary)', textDecoration: 'underline', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={selectedTask.url}>{selectedTask.url}</div>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                       <div className="detail-row">
-                        <div className="detail-label">Status</div>
-                        <div className="detail-value">
-                          <span className={`status-badge-gui ${selectedTask.status}`} style={{ marginTop: '4px' }}>
-                            {selectedTask.status}
-                          </span>
+                        <div className="detail-label">File Name</div>
+                        <div className="detail-value" style={{ fontWeight: 'bold', fontSize: '13px', color: '#fff', wordBreak: 'break-all' }}>{selectedTask.filename}</div>
+                      </div>
+
+                      <div className="detail-row">
+                        <div className="detail-label">Source URL</div>
+                        <div className="detail-value" style={{ fontSize: '10px', color: 'var(--primary)', textDecoration: 'underline', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={selectedTask.url}>{selectedTask.url}</div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                        <div className="detail-row">
+                          <div className="detail-label">Status</div>
+                          <div className="detail-value">
+                            <span className={`status-badge-gui ${selectedTask.status}`} style={{ marginTop: '4px' }}>
+                              {selectedTask.status}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="detail-row">
+                          <div className="detail-label">Size</div>
+                          <div className="detail-value">{selectedTask.isYoutube && selectedTask.displaySize ? selectedTask.displaySize : (selectedTask.totalBytes > 0 ? formatBytes(selectedTask.totalBytes) : 'Unknown')}</div>
                         </div>
                       </div>
+
                       <div className="detail-row">
-                        <div className="detail-label">Size</div>
-                        <div className="detail-value">{selectedTask.isYoutube && selectedTask.displaySize ? selectedTask.displaySize : (selectedTask.totalBytes > 0 ? formatBytes(selectedTask.totalBytes) : 'Unknown')}</div>
+                        <div className="detail-label">Save Directory</div>
+                        <div className="detail-value" style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{selectedTask.saveDir}</div>
                       </div>
-                    </div>
 
-                    <div className="detail-row">
-                      <div className="detail-label">Save Directory</div>
-                      <div className="detail-value" style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{selectedTask.saveDir}</div>
-                    </div>
+                      {/* Actions Bar inside Drawer */}
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                        {selectedTask.status === 'downloading' || selectedTask.status === 'preparing' ? (
+                          <button className="btn-secondary" style={{ flex: 1, padding: '8px 0', fontSize: '12px', justifyContent: 'center' }} onClick={() => pauseDownload(selectedTask.id)}>
+                            <Pause size={14} /> Pause
+                          </button>
+                        ) : selectedTask.status !== 'completed' && selectedTask.status !== 'merging' && selectedTask.status !== 'compressing' ? (
+                          <button className="btn-primary" style={{ flex: 1, padding: '8px 0', fontSize: '12px', justifyContent: 'center' }} onClick={() => resumeDownload(selectedTask.id)}>
+                            <Play size={14} /> Resume
+                          </button>
+                        ) : null}
 
-                    {/* Actions Bar inside Drawer */}
-                    <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                      {selectedTask.status === 'downloading' || selectedTask.status === 'preparing' ? (
-                        <button className="btn-secondary" style={{ flex: 1, padding: '8px 0', fontSize: '12px', justifyContent: 'center' }} onClick={() => pauseDownload(selectedTask.id)}>
-                          <Pause size={14} /> Pause
-                        </button>
-                      ) : selectedTask.status !== 'completed' && selectedTask.status !== 'merging' && selectedTask.status !== 'compressing' ? (
-                        <button className="btn-primary" style={{ flex: 1, padding: '8px 0', fontSize: '12px', justifyContent: 'center' }} onClick={() => resumeDownload(selectedTask.id)}>
-                          <Play size={14} /> Resume
-                        </button>
-                      ) : null}
-
-                      {selectedTask.status === 'completed' && (
-                        <>
-                          {!['mp4', 'mkv', 'webm', 'avi', 'mov', 'ts', 'm4v', 'mpg', 'mpeg', 'mp3', 'm4a', 'flac', 'wav'].includes(selectedTask.filename.split('.').pop()?.toLowerCase() || '') ? (
-                            <button className="btn-primary" style={{ flex: 1, padding: '8px 0', fontSize: '12px', justifyContent: 'center' }} onClick={() => openFile(selectedTask)}>
-                              <ExternalLink size={14} /> Open
+                        {selectedTask.status === 'completed' && (
+                          <>
+                            {!['mp4', 'mkv', 'webm', 'avi', 'mov', 'ts', 'm4v', 'mpg', 'mpeg', 'mp3', 'm4a', 'flac', 'wav'].includes(selectedTask.filename.split('.').pop()?.toLowerCase() || '') ? (
+                              <button className="btn-primary" style={{ flex: 1, padding: '8px 0', fontSize: '12px', justifyContent: 'center' }} onClick={() => openFile(selectedTask)}>
+                                <ExternalLink size={14} /> Open
+                              </button>
+                            ) : null}
+                            <button
+                              className="btn-secondary"
+                              style={{
+                                padding: '8px 12px',
+                                flex: ['mp4', 'mkv', 'webm', 'avi', 'mov', 'ts', 'm4v', 'mpg', 'mpeg', 'mp3', 'm4a', 'flac', 'wav'].includes(selectedTask.filename.split('.').pop()?.toLowerCase() || '') ? 1 : undefined,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '6px'
+                              }}
+                              onClick={() => openFolder(selectedTask)}
+                              title="Open in File Explorer"
+                            >
+                              <Folder size={14} /> Open Folder
                             </button>
-                          ) : null}
-                          <button 
-                            className="btn-secondary" 
-                            style={{ 
-                              padding: '8px 12px', 
-                              flex: ['mp4', 'mkv', 'webm', 'avi', 'mov', 'ts', 'm4v', 'mpg', 'mpeg', 'mp3', 'm4a', 'flac', 'wav'].includes(selectedTask.filename.split('.').pop()?.toLowerCase() || '') ? 1 : undefined,
+                          </>
+                        )}
+
+                        <button
+                          className="btn-secondary"
+                          style={{ padding: '8px 12px', borderColor: 'rgba(239, 68, 68, 0.2)', color: 'var(--danger)' }}
+                          onClick={() => deleteDownload(selectedTask.id, selectedTask.status === 'completed')}
+                          title="Delete Download"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+
+                      {selectedTask.error && (
+                        <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '10px', padding: '10px', display: 'flex', gap: '8px', color: '#f87171', fontSize: '12px' }}>
+                          <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                          <div>{selectedTask.error}</div>
+                        </div>
+                      )}
+
+                      {/* Real-time Graph in Drawer */}
+                      {selectedTask.status === 'downloading' && (
+                        <SpeedGraph currentSpeed={selectedTask.speed} isActive={true} />
+                      )}
+
+                      {/* Segment block progress indicator */}
+                      {!selectedTask.isYoutube && selectedTask.status !== 'completed' && (
+                        <SegmentVisualizer segments={selectedTask.segments} />
+                      )}
+
+                      {selectedTask.status === 'completed' && ['mp4', 'mkv', 'webm', 'avi', 'mov', 'ts', 'm4v', 'mpg', 'mpeg', 'mp3', 'm4a', 'flac', 'wav'].includes(selectedTask.filename.split('.').pop()?.toLowerCase() || '') && (
+                        <div style={{ marginTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <div className="detail-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <PlayCircle size={12} style={{ color: 'var(--primary)' }} /> Panamedia Player
+                          </div>
+                          <div
+                            onClick={() => {
+                              const fullPath = selectedTask.saveDir + (selectedTask.saveDir.endsWith('\\') || selectedTask.saveDir.endsWith('/') ? '' : '\\') + selectedTask.filename;
+                              electron?.ipcRenderer.invoke('open-player-window', { filePath: fullPath, filename: selectedTask.filename });
+                            }}
+                            style={{
+                              position: 'relative',
+                              width: '100%',
+                              height: '145px',
+                              borderRadius: '10px',
+                              overflow: 'hidden',
+                              border: '1px solid var(--panel-border)',
+                              background: '#09090e',
+                              cursor: 'pointer',
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
-                              gap: '6px'
-                            }} 
-                            onClick={() => openFolder(selectedTask)}
-                            title="Open in File Explorer"
+                              boxShadow: '0 8px 25px rgba(0,0,0,0.5)'
+                            }}
                           >
-                            <Folder size={14} /> Open Folder
-                          </button>
-                        </>
-                      )}
-
-                      <button
-                        className="btn-secondary"
-                        style={{ padding: '8px 12px', borderColor: 'rgba(239, 68, 68, 0.2)', color: 'var(--danger)' }}
-                        onClick={() => deleteDownload(selectedTask.id, selectedTask.status === 'completed')}
-                        title="Delete Download"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-
-                    {selectedTask.error && (
-                      <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '10px', padding: '10px', display: 'flex', gap: '8px', color: '#f87171', fontSize: '12px' }}>
-                        <AlertCircle size={16} style={{ flexShrink: 0 }} />
-                        <div>{selectedTask.error}</div>
-                      </div>
-                    )}
-
-                    {/* Real-time Graph in Drawer */}
-                    {selectedTask.status === 'downloading' && (
-                      <SpeedGraph currentSpeed={selectedTask.speed} isActive={true} />
-                    )}
-
-                    {/* Segment block progress indicator */}
-                    {!selectedTask.isYoutube && selectedTask.status !== 'completed' && (
-                      <SegmentVisualizer segments={selectedTask.segments} />
-                    )}
-
-                    {selectedTask.status === 'completed' && ['mp4', 'mkv', 'webm', 'avi', 'mov', 'ts', 'm4v', 'mpg', 'mpeg', 'mp3', 'm4a', 'flac', 'wav'].includes(selectedTask.filename.split('.').pop()?.toLowerCase() || '') && (
-                      <div style={{ marginTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <div className="detail-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <PlayCircle size={12} style={{ color: 'var(--primary)' }} /> Panamedia Player
-                        </div>
-                        <div
-                          onClick={() => {
-                            const fullPath = selectedTask.saveDir + (selectedTask.saveDir.endsWith('\\') || selectedTask.saveDir.endsWith('/') ? '' : '\\') + selectedTask.filename;
-                            electron?.ipcRenderer.invoke('open-player-window', { filePath: fullPath, filename: selectedTask.filename });
-                          }}
-                          style={{
-                            position: 'relative',
-                            width: '100%',
-                            height: '145px',
-                            borderRadius: '10px',
-                            overflow: 'hidden',
-                            border: '1px solid var(--panel-border)',
-                            background: '#09090e',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            boxShadow: '0 8px 25px rgba(0,0,0,0.5)'
-                          }}
-                        >
-                          <img
-                            src={`http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(selectedTask.saveDir + '\\' + selectedTask.filename)}`}
-                            style={{
+                            <img
+                              src={`http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(selectedTask.saveDir + '\\' + selectedTask.filename)}`}
+                              style={{
+                                position: 'absolute',
+                                inset: 0,
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'cover',
+                                opacity: 0.75
+                              }}
+                              alt=""
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).src = playerBg;
+                              }}
+                            />
+                            <div style={{
                               position: 'absolute',
                               inset: 0,
-                              width: '100%',
-                              height: '100%',
-                              objectFit: 'cover',
-                              opacity: 0.75
-                            }}
-                            alt=""
-                            onError={(e) => {
-                              (e.currentTarget as HTMLImageElement).src = playerBg;
-                            }}
-                          />
-                          <div style={{
-                            position: 'absolute',
-                            inset: 0,
-                            background: 'linear-gradient(to top, rgba(7, 7, 12, 0.92) 0%, rgba(7, 7, 12, 0.3) 60%, rgba(7, 7, 12, 0.5) 100%)'
-                          }} />
-                          <div style={{
-                            position: 'relative',
-                            zIndex: 2,
-                            width: '46px',
-                            height: '46px',
-                            borderRadius: '50%',
-                            background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            boxShadow: '0 0 25px rgba(99, 102, 241, 0.6)'
-                          }}>
-                            <Play size={20} color="#fff" style={{ marginLeft: '3px' }} />
-                          </div>
-                          <div style={{
-                            position: 'absolute',
-                            bottom: '10px',
-                            left: '12px',
-                            right: '12px',
-                            zIndex: 2,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            fontSize: '11px',
-                            color: '#fff'
-                          }}>
-                            <span style={{ fontWeight: '600', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              Play in Panamedia
-                            </span>
-                            <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', fontFamily: 'monospace' }}>
-                              {selectedTask.filename.split('.').pop()?.toUpperCase()}
-                            </span>
+                              background: 'linear-gradient(to top, rgba(7, 7, 12, 0.92) 0%, rgba(7, 7, 12, 0.3) 60%, rgba(7, 7, 12, 0.5) 100%)'
+                            }} />
+                            <div style={{
+                              position: 'relative',
+                              zIndex: 2,
+                              width: '46px',
+                              height: '46px',
+                              borderRadius: '50%',
+                              background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              boxShadow: '0 0 25px rgba(99, 102, 241, 0.6)'
+                            }}>
+                              <Play size={20} color="#fff" style={{ marginLeft: '3px' }} />
+                            </div>
+                            <div style={{
+                              position: 'absolute',
+                              bottom: '10px',
+                              left: '12px',
+                              right: '12px',
+                              zIndex: 2,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              fontSize: '11px',
+                              color: '#fff'
+                            }}>
+                              <span style={{ fontWeight: '600', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                Play in Panamedia
+                              </span>
+                              <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', fontFamily: 'monospace' }}>
+                                {selectedTask.filename.split('.').pop()?.toUpperCase()}
+                              </span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  /* LIBRARY TAB CONTENT */
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1, minHeight: 0, marginTop: '12px' }}>
-
-                    {/* â”€â”€ Category icon+text tabs (Primary, Videos, Audios, Docx, Files) â”€â”€ */}
-                    <div style={{ display: 'flex', gap: '2px', background: 'rgba(255,255,255,0.02)', padding: '2px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
-                      {([
-                        { id: 'recent' as const,  label: 'Primary', icon: <Activity size={11} /> },
-                        { id: 'videos' as const,  label: 'Videos',  icon: <Film size={11} /> },
-                        { id: 'audios' as const,  label: 'Audios',  icon: <Music size={11} /> },
-                        { id: 'docx'  as const,   label: 'Docx',    icon: <FileText size={11} /> },
-                        { id: 'files' as const,   label: 'Files',   icon: <Folder size={11} /> },
-                      ]).map(tab => (
-                        <button
-                          key={tab.id}
-                          onClick={() => setLibraryCategory(tab.id)}
-                          style={{
-                            flex: 1,
-                            padding: '7px 2px',
-                            borderRadius: '6px',
-                            border: 'none',
-                            fontSize: '9px',
-                            fontWeight: '600',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            gap: '4px',
-                            background: libraryCategory === tab.id ? 'rgba(99,102,241,0.15)' : 'transparent',
-                            color: libraryCategory === tab.id ? '#fff' : 'var(--text-muted)',
-                            transition: 'all 0.15s',
-                          }}
-                        >
-                          {tab.icon}
-                          <span>{tab.label}</span>
-                        </button>
-                      ))}
+                      )}
                     </div>
+                  ) : (
+                    /* LIBRARY TAB CONTENT */
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1, minHeight: 0, marginTop: '12px' }}>
 
-                    {/* Search and sync controls */}
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                      <div className="search-bar" style={{ flex: 1, background: 'rgba(255,255,255,0.04)', borderRadius: '8px', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: '6px', border: '1px solid rgba(255,255,255,0.04)' }}>
-                        <Search size={12} style={{ color: 'var(--text-muted)' }} />
-                        <input
-                          type="text"
-                          placeholder="Search library..."
-                          value={librarySearch}
-                          onChange={(e) => setLibrarySearch(e.target.value)}
-                          style={{ background: 'transparent', border: 'none', fontSize: '11px', color: '#fff', outline: 'none', width: '100%' }}
-                        />
-                      </div>
-                      <button
-                        onClick={syncLibrary}
-                        disabled={syncingLibrary}
-                        className="btn-secondary"
-                        style={{ padding: '6px 8px', borderRadius: '8px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.04)', color: syncingLibrary ? 'var(--primary)' : '#fff' }}
-                        title="Sync Downloads folder"
-                      >
-                        <RefreshCw size={12} className={syncingLibrary ? 'animate-spin' : ''} />
-                      </button>
-                    </div>
-
-                    {/* Sorting & View Controls (Same row, compact size) */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '6px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '10px', color: 'var(--text-muted)' }}>
-                        <span>Sort:</span>
-                        <select
-                          value={librarySortBy}
-                          onChange={(e) => setLibrarySortBy(e.target.value as any)}
-                          style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '10px', fontWeight: 'bold', outline: 'none', cursor: 'pointer', paddingRight: '2px' }}
-                        >
-                          <option value="date" style={{ background: '#0f0f16' }}>Date</option>
-                          <option value="name" style={{ background: '#0f0f16' }}>Name</option>
-                          <option value="size" style={{ background: '#0f0f16' }}>Size</option>
-                        </select>
-                        <button
-                          onClick={() => setLibrarySortOrder(librarySortOrder === 'asc' ? 'desc' : 'asc')}
-                          style={{ background: 'transparent', border: 'none', color: 'var(--primary)', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', padding: '0 2px' }}
-                          title={librarySortOrder === 'asc' ? 'Ascending' : 'Descending'}
-                        >
-                          {librarySortOrder === 'asc' ? 'â–²' : 'â–¼'}
-                        </button>
+                      {/*  Category icon+text tabs (Primary, Videos, Audios, Docx, Files)  */}
+                      <div style={{ display: 'flex', gap: '2px', background: 'rgba(255,255,255,0.02)', padding: '2px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                        {([
+                          { id: 'recent' as const, label: 'Primary', icon: <Activity size={11} /> },
+                          { id: 'videos' as const, label: 'Videos', icon: <Film size={11} /> },
+                          { id: 'audios' as const, label: 'Audios', icon: <Music size={11} /> },
+                          { id: 'docx' as const, label: 'Docx', icon: <FileText size={11} /> },
+                          { id: 'files' as const, label: 'Files', icon: <Folder size={11} /> },
+                        ]).map(tab => (
+                          <button
+                            key={tab.id}
+                            onClick={() => setLibraryCategory(tab.id)}
+                            style={{
+                              flex: 1,
+                              padding: '7px 2px',
+                              borderRadius: '6px',
+                              border: 'none',
+                              fontSize: '9px',
+                              fontWeight: '600',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              gap: '4px',
+                              background: libraryCategory === tab.id ? 'rgba(99,102,241,0.15)' : 'transparent',
+                              color: libraryCategory === tab.id ? '#fff' : 'var(--text-muted)',
+                              transition: 'all 0.15s',
+                            }}
+                          >
+                            {tab.icon}
+                            <span>{tab.label}</span>
+                          </button>
+                        ))}
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: 'var(--text-muted)' }}>
-                        <span>View:</span>
+                      {/* Search and sync controls */}
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <div className="search-bar" style={{ flex: 1, background: 'rgba(255,255,255,0.04)', borderRadius: '8px', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: '6px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                          <Search size={12} style={{ color: 'var(--text-muted)' }} />
+                          <input
+                            type="text"
+                            placeholder="Search library..."
+                            value={librarySearch}
+                            onChange={(e) => setLibrarySearch(e.target.value)}
+                            style={{ background: 'transparent', border: 'none', fontSize: '11px', color: '#fff', outline: 'none', width: '100%' }}
+                          />
+                        </div>
                         <button
-                          type="button"
-                          aria-pressed={libraryViewMode === 'folders'}
-                          onClick={() => setLibraryViewMode(libraryViewMode === 'files' ? 'folders' : 'files')}
+                          onClick={syncLibrary}
+                          disabled={syncingLibrary}
                           className="btn-secondary"
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '5px',
-                            padding: '4px 8px',
-                            fontSize: '9.5px',
-                            lineHeight: '13px',
-                            borderRadius: '5px',
-                            background: 'rgba(255,255,255,0.04)',
-                            border: '1px solid rgba(255,255,255,0.08)',
-                            color: '#fff'
-                          }}
-                          title={`Switch to ${libraryViewMode === 'files' ? 'folder' : 'file list'} view`}
+                          style={{ padding: '6px 8px', borderRadius: '8px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.04)', color: syncingLibrary ? 'var(--primary)' : '#fff' }}
+                          title="Sync Downloads folder"
                         >
-                          {libraryViewMode === 'files' ? <List size={11} /> : <Folder size={11} />}
-                          {libraryViewMode === 'files' ? 'Files List' : 'Folder View'}
+                          <RefreshCw size={12} className={syncingLibrary ? 'animate-spin' : ''} />
                         </button>
                       </div>
-                    </div>
 
-                    {/* Sync Items List */}
-                    <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', paddingRight: '2px' }}>
+                      {/* Sorting & View Controls (Same row, compact size) */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '10px', color: 'var(--text-muted)' }}>
+                          <span>Sort:</span>
+                          <select
+                            value={librarySortBy}
+                            onChange={(e) => setLibrarySortBy(e.target.value as any)}
+                            style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '10px', fontWeight: 'bold', outline: 'none', cursor: 'pointer', paddingRight: '2px' }}
+                          >
+                            <option value="date" style={{ background: '#0f0f16' }}>Date</option>
+                            <option value="name" style={{ background: '#0f0f16' }}>Name</option>
+                            <option value="size" style={{ background: '#0f0f16' }}>Size</option>
+                          </select>
+                          <button
+                            onClick={() => setLibrarySortOrder(librarySortOrder === 'asc' ? 'desc' : 'asc')}
+                            style={{ background: 'transparent', border: 'none', color: 'var(--primary)', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', padding: '0 2px' }}
+                            title={librarySortOrder === 'asc' ? 'Ascending' : 'Descending'}
+                          >
+                            {librarySortOrder === 'asc' ? '▲' : '▼'}
+                          </button>
+                        </div>
 
-                      {/* â”€â”€ Duplicates Tab â”€â”€ */}
-                      {(libraryCategory as string) === 'duplicates' ? (() => {
-                        // Build duplicate groups from libraryFiles using normalized name
-                        const nameMap = new Map<string, any[]>();
-                        libraryFiles.filter(f => !isItemArchived(f.path)).forEach(f => {
-                          const normName = getNormalizedName(f.name);
-                          if (!nameMap.has(normName)) nameMap.set(normName, []);
-                          nameMap.get(normName)!.push(f);
-                        });
-                        const dupGroups = Array.from(nameMap.entries())
-                          .filter(([, files]) => files.length > 1)
-                          .sort(([a], [b]) => a.localeCompare(b));
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: 'var(--text-muted)' }}>
+                          <span>View:</span>
+                          <button
+                            type="button"
+                            aria-pressed={libraryViewMode === 'folders'}
+                            onClick={() => setLibraryViewMode(libraryViewMode === 'files' ? 'folders' : 'files')}
+                            className="btn-secondary"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                              padding: '4px 8px',
+                              fontSize: '9.5px',
+                              lineHeight: '13px',
+                              borderRadius: '5px',
+                              background: 'rgba(255,255,255,0.04)',
+                              border: '1px solid rgba(255,255,255,0.08)',
+                              color: '#fff'
+                            }}
+                            title={`Switch to ${libraryViewMode === 'files' ? 'folder' : 'file list'} view`}
+                          >
+                            {libraryViewMode === 'files' ? <List size={11} /> : <Folder size={11} />}
+                            {libraryViewMode === 'files' ? 'Files List' : 'Folder View'}
+                          </button>
+                        </div>
+                      </div>
 
-                        if (dupGroups.length === 0) {
+                      {/* Sync Items List */}
+                      <div ref={libraryListRef} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', paddingRight: '2px' }}>
+
+                        {/* Duplicates Tab  */}
+                        {(libraryCategory as string) === 'duplicates' ? (() => {
+                          // Build duplicate groups from libraryFiles using normalized name
+                          const nameMap = new Map<string, any[]>();
+                          libraryFiles.filter(f => !isItemArchived(f.path)).forEach(f => {
+                            const normName = getNormalizedName(f.name);
+                            if (!nameMap.has(normName)) nameMap.set(normName, []);
+                            nameMap.get(normName)!.push(f);
+                          });
+                          const dupGroups = Array.from(nameMap.entries())
+                            .filter(([, files]) => files.length > 1)
+                            .sort(([a], [b]) => a.localeCompare(b));
+
+                          if (dupGroups.length === 0) {
+                            return (
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 20px', gap: '8px', color: 'var(--text-muted)', textAlign: 'center' }}>
+                                <Copy size={24} strokeWidth={1.5} />
+                                <span style={{ fontSize: '11px' }}>No duplicate filenames found across synced folders.</span>
+                              </div>
+                            );
+                          }
+
                           return (
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 20px', gap: '8px', color: 'var(--text-muted)', textAlign: 'center' }}>
-                              <Copy size={24} strokeWidth={1.5} />
-                              <span style={{ fontSize: '11px' }}>No duplicate filenames found across synced folders.</span>
-                            </div>
-                          );
-                        }
-
-                        return (
-                          <>
-                            <div style={{ fontSize: '10px', color: 'var(--text-muted)', padding: '4px 2px', marginBottom: '4px' }}>
-                              {dupGroups.length} duplicate groups found.
-                              <span style={{ color: 'rgba(255,255,255,0.3)', marginLeft: '4px' }}>Click a group header to collapse/expand.</span>
-                            </div>
-                            {dupGroups.map(([normName, files]) => {
-                              const sorted = [...files].sort((a, b) => (a.mtime || 0) - (b.mtime || 0));
-                              const groupTitle = files[0]?.name || normName;
-                              const isExpanded = expandedDupGroups[normName] !== false; // expanded by default
-                              const markedInGroup = sorted.filter(f => duplicateDeletePaths.includes(f.path)).length;
-                              return (
-                                <div key={normName} style={{ borderRadius: '8px', border: `1px solid ${isExpanded ? 'rgba(239,68,68,0.3)' : 'rgba(239,68,68,0.1)'}`, background: isExpanded ? 'rgba(239,68,68,0.04)' : 'transparent', overflow: 'hidden', marginBottom: '4px', transition: 'all 0.15s' }}>
-                                  {/* Clickable group header */}
-                                  <div
-                                    onClick={() => setExpandedDupGroups(prev => ({ ...prev, [normName]: !isExpanded }))}
-                                    style={{ padding: '7px 10px', background: 'rgba(239,68,68,0.06)', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', userSelect: 'none' }}
-                                  >
-                                    <span style={{ fontSize: '9px', color: isExpanded ? '#ef4444' : 'var(--text-muted)', transition: 'transform 0.15s', display: 'inline-block', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>â–¶</span>
-                                    <Copy size={10} style={{ color: '#ef4444', flexShrink: 0 }} />
-                                    <span style={{ fontSize: '10px', fontWeight: '600', color: '#fff', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={groupTitle}>{groupTitle}</span>
-                                    {markedInGroup > 0 && <span style={{ fontSize: '9px', color: '#ef4444', background: 'rgba(239,68,68,0.15)', padding: '1px 5px', borderRadius: '4px', flexShrink: 0 }}>ðŸ—‘ {markedInGroup}</span>}
-                                    <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.04)', padding: '1px 5px', borderRadius: '4px', flexShrink: 0 }}>{files.length} copies</span>
-                                  </div>
-                                  {/* Expanded file list */}
-                                  {isExpanded && sorted.map((f: any, idx: number) => {
-                                    const checked = duplicateDeletePaths.includes(f.path);
-                                    const isOldest = idx === 0;
-                                    return (
-                                      <div key={`${f.path}-${idx}`} style={{ padding: '7px 10px', display: 'flex', alignItems: 'center', gap: '8px', borderTop: '1px solid rgba(255,255,255,0.04)', background: checked ? 'rgba(239,68,68,0.06)' : 'transparent', transition: 'background 0.15s' }}>
-                                        <input
-                                          type="checkbox"
-                                          checked={checked}
-                                          onChange={() => toggleDuplicateDelete(f.path)}
-                                          style={{ cursor: 'pointer', accentColor: '#ef4444', flexShrink: 0 }}
-                                        />
-                                        <div style={{ flex: 1, minWidth: 0 }}>
-                                          <div style={{ fontSize: '9px', color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.path}>{f.path}</div>
-                                          <div style={{ display: 'flex', gap: '6px', fontSize: '8px', color: 'rgba(255,255,255,0.4)', marginTop: '2px', flexWrap: 'wrap' }}>
-                                            <span>{formatBytes(f.size)}</span>
-                                            <span>â€¢</span>
-                                            <span>{f.mtime ? new Date(f.mtime).toLocaleDateString() : '?'}</span>
-                                            {isOldest && <span style={{ color: '#f59e0b', fontWeight: '700' }}>oldest</span>}
+                            <>
+                              <div style={{ fontSize: '10px', color: 'var(--text-muted)', padding: '4px 2px', marginBottom: '4px' }}>
+                                {dupGroups.length} duplicate groups found.
+                                <span style={{ color: 'rgba(255,255,255,0.3)', marginLeft: '4px' }}>Click a group header to collapse/expand.</span>
+                              </div>
+                              {dupGroups.map(([normName, files]) => {
+                                const sorted = [...files].sort((a, b) => (a.mtime || 0) - (b.mtime || 0));
+                                const groupTitle = files[0]?.name || normName;
+                                const isExpanded = expandedDupGroups[normName] !== false; // expanded by default
+                                const markedInGroup = sorted.filter(f => duplicateDeletePaths.includes(f.path)).length;
+                                return (
+                                  <div key={normName} style={{ borderRadius: '8px', border: `1px solid ${isExpanded ? 'rgba(239,68,68,0.3)' : 'rgba(239,68,68,0.1)'}`, background: isExpanded ? 'rgba(239,68,68,0.04)' : 'transparent', overflow: 'hidden', marginBottom: '4px', transition: 'all 0.15s' }}>
+                                    {/* Clickable group header */}
+                                    <div
+                                      onClick={() => setExpandedDupGroups(prev => ({ ...prev, [normName]: !isExpanded }))}
+                                      style={{ padding: '7px 10px', background: 'rgba(239,68,68,0.06)', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', userSelect: 'none' }}
+                                    >
+                                      <span style={{ fontSize: '9px', color: isExpanded ? '#ef4444' : 'var(--text-muted)', transition: 'transform 0.15s', display: 'inline-block', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
+                                      <Copy size={10} style={{ color: '#ef4444', flexShrink: 0 }} />
+                                      <span style={{ fontSize: '10px', fontWeight: '600', color: '#fff', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={groupTitle}>{groupTitle}</span>
+                                      {markedInGroup > 0 && <span style={{ fontSize: '9px', color: '#ef4444', background: 'rgba(239,68,68,0.15)', padding: '1px 5px', borderRadius: '4px', flexShrink: 0 }}>🗑 {markedInGroup}</span>}
+                                      <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.04)', padding: '1px 5px', borderRadius: '4px', flexShrink: 0 }}>{files.length} copies</span>
+                                    </div>
+                                    {/* Expanded file list */}
+                                    {isExpanded && sorted.map((f: any, idx: number) => {
+                                      const checked = duplicateDeletePaths.includes(f.path);
+                                      const isOldest = idx === 0;
+                                      return (
+                                        <div key={`${f.path}-${idx}`} style={{ padding: '7px 10px', display: 'flex', alignItems: 'center', gap: '8px', borderTop: '1px solid rgba(255,255,255,0.04)', background: checked ? 'rgba(239,68,68,0.06)' : 'transparent', transition: 'background 0.15s' }}>
+                                          <input
+                                            type="checkbox"
+                                            checked={checked}
+                                            onChange={() => toggleDuplicateDelete(f.path)}
+                                            style={{ cursor: 'pointer', accentColor: '#ef4444', flexShrink: 0 }}
+                                          />
+                                          <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div style={{ fontSize: '9px', color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.path}>{f.path}</div>
+                                            <div style={{ display: 'flex', gap: '6px', fontSize: '8px', color: 'rgba(255,255,255,0.4)', marginTop: '2px', flexWrap: 'wrap' }}>
+                                              <span>{formatBytes(f.size)}</span>
+                                              <span>•</span>
+                                              <span>{f.mtime ? new Date(f.mtime).toLocaleDateString() : '?'}</span>
+                                              {isOldest && <span style={{ color: '#f59e0b', fontWeight: '700' }}>oldest</span>}
+                                            </div>
                                           </div>
+                                          <span style={{ fontSize: '9px', color: checked ? '#ef4444' : '#4ade80', fontWeight: '700', flexShrink: 0 }}>
+                                            {checked ? '✕ Del' : '✓ Keep'}
+                                          </span>
                                         </div>
-                                        <span style={{ fontSize: '9px', color: checked ? '#ef4444' : '#4ade80', fontWeight: '700', flexShrink: 0 }}>
-                                          {checked ? 'âœ• Del' : 'âœ“ Keep'}
-                                        </span>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              );
-                            })}
-                            {duplicateDeletePaths.length > 0 && (
-                              <button
-                                onClick={handleResolveDuplicates}
-                                style={{ margin: '8px 0', padding: '8px 14px', background: 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center', width: '100%' }}
-                              >
-                                <Trash2 size={12} /> Delete {duplicateDeletePaths.length} marked file{duplicateDeletePaths.length !== 1 ? 's' : ''} from disk
-                              </button>
-                            )}
-                          </>
-                        );
-                      })() : (
-                        <>{/* â”€â”€ Normal Categories â”€â”€ */}
-                          {(() => {
-                            const rawItems = libraryCategory === 'recent'
-                              ? downloads
-                                .filter(t => {
-                                  const fullPath = t.saveDir ? `${t.saveDir}\\${t.filename}` : t.filename;
-                                  return t.status === 'completed' && !isItemArchived(fullPath);
-                                })
-                                .map(t => {
-                                  const ext = '.' + (t.filename.split('.').pop() || '').toLowerCase();
-                                  return {
-                                    name: t.filename,
-                                    path: t.saveDir + '\\' + t.filename,
-                                    size: t.totalBytes,
-                                    displaySize: t.isYoutube && t.displaySize ? t.displaySize : null,
-                                    mtime: t.addedAt || Date.now(),
-                                    category: 'recent',
-                                    ext: ext
-                                  };
-                                })
-                              : libraryFiles.filter(f => {
-                                  if (isItemArchived(f.path)) return false;
-                                  if (f.category !== libraryCategory) return false;
-                                  if (libraryCategory === 'videos' || libraryCategory === 'audios') {
-                                    if (appSettings.downloadDir) {
-                                      const itemDir = (f.path.substring(0, f.path.lastIndexOf('\\')) || f.path.substring(0, f.path.lastIndexOf('/'))).replace(/[\\/]/g, '/').toLowerCase();
-                                      const primaryDir = appSettings.downloadDir.replace(/[\\/]/g, '/').toLowerCase();
-                                      if (itemDir === primaryDir) return false;
-                                    }
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })}
+                              {duplicateDeletePaths.length > 0 && (
+                                <button
+                                  onClick={handleResolveDuplicates}
+                                  style={{ margin: '8px 0', padding: '8px 14px', background: 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center', width: '100%' }}
+                                >
+                                  <Trash2 size={12} /> Delete {duplicateDeletePaths.length} marked file{duplicateDeletePaths.length !== 1 ? 's' : ''} from disk
+                                </button>
+                              )}
+                            </>
+                          );
+                        })() : (
+                          <>{/* ── Normal Categories ── */}
+                            {(() => {
+                              // Filtered + sorted once per real change (memoized
+                              // at component level): thousands of library items
+                              // are no longer re-filtered and re-sorted on every
+                              // progress-tick re-render.
+                              const filteredItems = libraryFilteredItems;
+
+                              if (filteredItems.length === 0) {
+                                return (
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 20px', gap: '8px', color: 'var(--text-muted)', textAlign: 'center' }}>
+                                    <Folder size={24} strokeWidth={1.5} />
+                                    <span style={{ fontSize: '11px' }}>No files found in {libraryCategory} category.</span>
+                                  </div>
+                                );
+                              }
+
+                              if (libraryViewMode === 'folders') {
+                                // Group filteredItems by parentPath
+                                const groups: Record<string, typeof filteredItems> = {};
+                                filteredItems.forEach(file => {
+                                  const parentPath = file.path.substring(0, file.path.lastIndexOf('\\')) || file.path.substring(0, file.path.lastIndexOf('/')) || 'Default';
+                                  if (!groups[parentPath]) {
+                                    groups[parentPath] = [];
                                   }
-                                  return true;
+                                  groups[parentPath].push(file);
                                 });
 
-                            const itemsToDisplay = rawItems;
-
-                            const filteredItems = itemsToDisplay
-                              .filter(f => f.name.toLowerCase().includes(librarySearch.toLowerCase()))
-                              .sort((a, b) => {
-                                let comp = 0;
-                                if (librarySortBy === 'name') comp = a.name.localeCompare(b.name);
-                                else if (librarySortBy === 'date') comp = (a.mtime || 0) - (b.mtime || 0);
-                                else if (librarySortBy === 'size') comp = (a.size || 0) - (b.size || 0);
-                                return librarySortOrder === 'asc' ? comp : -comp;
-                              });
-
-                            if (filteredItems.length === 0) {
-                              return (
-                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 20px', gap: '8px', color: 'var(--text-muted)', textAlign: 'center' }}>
-                                  <Folder size={24} strokeWidth={1.5} />
-                                  <span style={{ fontSize: '11px' }}>No files found in {libraryCategory} category.</span>
-                                </div>
-                              );
-                            }
-
-                            if (libraryViewMode === 'folders') {
-                              // Group filteredItems by parentPath
-                              const groups: Record<string, typeof filteredItems> = {};
-                              filteredItems.forEach(file => {
-                                const parentPath = file.path.substring(0, file.path.lastIndexOf('\\')) || file.path.substring(0, file.path.lastIndexOf('/')) || 'Default';
-                                if (!groups[parentPath]) {
-                                  groups[parentPath] = [];
-                                }
-                                groups[parentPath].push(file);
-                              });
-
-                              return (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                  {Object.entries(groups).map(([folderPath, files]) => {
-                                    const folderName = folderPath.split(/[\\/]/).pop() || folderPath;
-                                    const isExpanded = !!expandedFolders[folderPath];
-                                    return (
-                                      <div key={folderPath} className="glass-panel" style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.04)', background: 'rgba(255,255,255,0.01)' }}>
-                                        {/* Folder Header */}
-                                        <div
-                                          onClick={() => setExpandedFolders(prev => ({ ...prev, [folderPath]: !isExpanded }))}
-                                          style={{
-                                            padding: '8px 10px',
-                                            background: 'rgba(255,255,255,0.02)',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'space-between',
-                                            cursor: 'pointer',
-                                            userSelect: 'none'
-                                          }}
-                                        >
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-                                            <Folder size={12} style={{ color: 'var(--primary)', flexShrink: 0 }} />
-                                            <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={folderPath}>{folderName}</span>
-                                            <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>({files.length})</span>
+                                return (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    {Object.entries(groups).map(([folderPath, files]) => {
+                                      const folderName = folderPath.split(/[\\/]/).pop() || folderPath;
+                                      const isExpanded = !!expandedFolders[folderPath];
+                                      return (
+                                        <div key={folderPath} className="glass-panel" style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.04)', background: 'rgba(255,255,255,0.01)' }}>
+                                          {/* Folder Header */}
+                                          <div
+                                            onClick={() => setExpandedFolders(prev => ({ ...prev, [folderPath]: !isExpanded }))}
+                                            style={{
+                                              padding: '8px 10px',
+                                              background: 'rgba(255,255,255,0.02)',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              justifyContent: 'space-between',
+                                              cursor: 'pointer',
+                                              userSelect: 'none'
+                                            }}
+                                          >
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                                              <Folder size={12} style={{ color: 'var(--primary)', flexShrink: 0 }} />
+                                              <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={folderPath}>{folderName}</span>
+                                              <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>({files.length})</span>
+                                            </div>
+                                            <ChevronRight size={12} style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease', color: 'var(--text-muted)' }} />
                                           </div>
-                                          <ChevronRight size={12} style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease', color: 'var(--text-muted)' }} />
-                                        </div>
 
-                                        {/* Folder Files List */}
-                                        {isExpanded && (
-                                          <div style={{ padding: '6px', display: 'flex', flexDirection: 'column', gap: '6px', background: 'rgba(0,0,0,0.15)' }}>
-                                            {libraryCategory === 'recent' ? (() => {
-                                              const vids = files.filter(f => !['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.aac', '.opus', '.wma'].includes(f.ext.toLowerCase()));
-                                              const auds = files.filter(f => ['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.aac', '.opus', '.wma'].includes(f.ext.toLowerCase()));
-                                              const renderSubFile = (file: any, idx2: number) => {
-                                                const taskMatch = downloads.find(t => t.filename === file.name);
-                                                const thumbUrl = taskMatch?.thumbnail;
-                                                const isSelected = file.path === selectedLibraryPath;
-                                                return (
-                                                  <div
-                                                    key={`${file.path}-${idx2}`}
-                                                    style={{
-                                                      padding: '6px 8px',
-                                                      borderRadius: '6px',
-                                                      display: 'flex',
-                                                      gap: '6px',
-                                                      alignItems: 'center',
-                                                      background: isSelected ? 'rgba(99, 102, 241, 0.08)' : 'transparent',
-                                                      border: isSelected ? '1px solid rgba(99, 102, 241, 0.2)' : '1px solid transparent',
-                                                      cursor: 'pointer'
-                                                    }}
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      setSelectedLibraryPath(file.path);
-                                                    }}
-                                                    onContextMenu={(e) => handleContextMenu(e, file.path)}
-                                                    onDoubleClick={() => {
-                                                      if (file.category === 'videos' || file.category === 'audios' || (file.category === 'recent' && ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.ts', '.m4v', '.flv', '.mpg', '.3gp', '.wmv', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'].includes(file.ext))) {
-                                                        electron?.ipcRenderer.invoke('open-player-window', { filePath: file.path, filename: file.name });
-                                                      } else {
-                                                        const parentDir = file.path.substring(0, file.path.lastIndexOf('\\')) || file.path.substring(0, file.path.lastIndexOf('/'));
-                                                        electron?.ipcRenderer.invoke('open-file', { saveDir: parentDir, filename: file.name });
-                                                      }
-                                                    }}
-                                                  >
-                                                    {(() => {
-                                                      const localThumb = `http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(file.path)}`;
-                                                      const displayThumb = thumbUrl || (['.mp4', '.mkv', '.webm', '.avi', '.mov', '.ts', '.m4v', '.flv', '.mpg', '.3gp', '.wmv'].includes(file.ext.toLowerCase()) ? localThumb : null);
-                                                      const hasError = imgErrors[file.path];
-
-                                                      if (displayThumb && !hasError) {
-                                                        return (
-                                                          <img
-                                                            src={displayThumb}
-                                                            alt="thumb"
-                                                            style={{ width: '36px', height: '22px', borderRadius: '4px', objectFit: 'cover', border: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}
-                                                            onError={() => setImgErrors(prev => ({ ...prev, [file.path]: true }))}
-                                                          />
-                                                        );
-                                                      }
-
-                                                      const isAudioFile = ['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.aac', '.opus', '.wma'].includes(file.ext.toLowerCase());
-                                                      return (
-                                                        <div style={{ width: '36px', height: '22px', borderRadius: '4px', background: 'rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.03)', flexShrink: 0 }}>
-                                                          {isAudioFile ? <Music size={10} style={{ color: '#ec4899' }} /> : <FileText size={10} style={{ color: '#3b82f6' }} />}
-                                                        </div>
-                                                      );
-                                                    })()}
-
-                                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                                      <div style={{ fontSize: '10px', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={file.name}>{file.name}</div>
-                                                      <div style={{ fontSize: '8px', color: 'var(--text-muted)' }}>{file.displaySize ? file.displaySize : formatBytes(file.size)}</div>
-                                                    </div>
-
-                                                    <div style={{ display: 'flex', gap: '2px' }} onClick={e => e.stopPropagation()}>
-                                                      <button
-                                                        onClick={() => {
+                                          {/* Folder Files List */}
+                                          {isExpanded && (
+                                            <div style={{ padding: '6px', display: 'flex', flexDirection: 'column', gap: '6px', background: 'rgba(0,0,0,0.15)' }}>
+                                              {libraryCategory === 'recent' ? (() => {
+                                                const vids = files.filter(f => !['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.aac', '.opus', '.wma'].includes(f.ext.toLowerCase()));
+                                                const auds = files.filter(f => ['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.aac', '.opus', '.wma'].includes(f.ext.toLowerCase()));
+                                                const renderSubFile = (file: any, idx2: number) => {
+                                                  const taskMatch = downloads.find(t => t.filename === file.name);
+                                                  const thumbUrl = taskMatch?.thumbnail;
+                                                  const isSelected = file.path === selectedLibraryPath;
+                                                  return (
+                                                    <div
+                                                      key={`${file.path}-${idx2}`}
+                                                      style={{
+                                                        padding: '6px 8px',
+                                                        borderRadius: '6px',
+                                                        display: 'flex',
+                                                        gap: '6px',
+                                                        alignItems: 'center',
+                                                        background: isSelected ? 'rgba(99, 102, 241, 0.08)' : 'transparent',
+                                                        border: isSelected ? '1px solid rgba(99, 102, 241, 0.2)' : '1px solid transparent',
+                                                        cursor: 'pointer'
+                                                      }}
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setSelectedLibraryPath(file.path);
+                                                      }}
+                                                      onContextMenu={(e) => handleContextMenu(e, file.path)}
+                                                      onDoubleClick={() => {
+                                                        if (file.category === 'videos' || file.category === 'audios' || (file.category === 'recent' && ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.ts', '.m4v', '.flv', '.mpg', '.3gp', '.wmv', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'].includes(file.ext))) {
                                                           electron?.ipcRenderer.invoke('open-player-window', { filePath: file.path, filename: file.name });
-                                                        }}
-                                                        style={{ background: 'transparent', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: '2px' }}
-                                                        title="Play"
-                                                      >
-                                                        <Play size={10} fill="currentColor" />
-                                                      </button>
-                                                      <button
-                                                        onClick={() => {
-                                                          setSelectedFileDetails(file);
-                                                          setShowFileDetailsModal(true);
-                                                        }}
-                                                        style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', padding: '2px' }}
-                                                        title="Details"
-                                                      >
-                                                        <Info size={10} />
-                                                      </button>
-                                                      <button
-                                                        onClick={() => {
-                                                          setDeleteConfirmTarget({
-                                                            type: 'file',
-                                                            title: 'Delete File from Disk',
-                                                            message: `Are you sure you want to permanently delete "${file.name}" from disk?`,
-                                                            filePath: file.path,
-                                                            onConfirm: async () => {
-                                                              const res = await performDeleteFile(file.path);
-                                                              if (res && !res.success) {
-                                                                alert('Failed to delete file: ' + (res?.error || 'Unknown error'));
-                                                              }
-                                                            }
-                                                          });
-                                                        }}
-                                                        style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: '2px' }}
-                                                        title="Delete"
-                                                      >
-                                                        <Trash2 size={10} />
-                                                      </button>
-                                                    </div>
-                                                  </div>
-                                                );
-                                              };
-                                              return (
-                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                                  {vids.length > 0 && (
-                                                    <div>
-                                                      <div style={{ fontSize: '9px', fontWeight: 'bold', color: '#a855f7', paddingLeft: '4px', marginBottom: '4px', textTransform: 'uppercase' }}>Videos ({vids.length})</div>
-                                                      {vids.map((f, i) => renderSubFile(f, i))}
-                                                    </div>
-                                                  )}
-                                                  {auds.length > 0 && (
-                                                    <div>
-                                                      <div style={{ fontSize: '9px', fontWeight: 'bold', color: '#ec4899', paddingLeft: '4px', marginBottom: '4px', textTransform: 'uppercase' }}>Mp3 ({auds.length})</div>
-                                                      {auds.map((f, i) => renderSubFile(f, i))}
-                                                    </div>
-                                                  )}
-                                                </div>
-                                              );
-                                            })() : (
-                                              files.map((file, idx) => {
-                                                const taskMatch = downloads.find(t => t.filename === file.name);
-                                                const thumbUrl = taskMatch?.thumbnail;
-                                                const isSelected = file.path === selectedLibraryPath;
+                                                        } else {
+                                                          const parentDir = file.path.substring(0, file.path.lastIndexOf('\\')) || file.path.substring(0, file.path.lastIndexOf('/'));
+                                                          electron?.ipcRenderer.invoke('open-file', { saveDir: parentDir, filename: file.name });
+                                                        }
+                                                      }}
+                                                    >
+                                                      {(() => {
+                                                        const localThumb = `http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(file.path)}`;
+                                                        const displayThumb = thumbUrl || (['.mp4', '.mkv', '.webm', '.avi', '.mov', '.ts', '.m4v', '.flv', '.mpg', '.3gp', '.wmv'].includes(file.ext.toLowerCase()) ? localThumb : null);
+                                                        const hasError = imgErrors[file.path];
 
-                                                return (
-                                                  <div
-                                                    key={`${file.path}-${idx}`}
-                                                    style={{
-                                                      padding: '6px 8px',
-                                                      borderRadius: '6px',
-                                                      display: 'flex',
-                                                      gap: '6px',
-                                                      alignItems: 'center',
-                                                      background: isSelected ? 'rgba(99, 102, 241, 0.08)' : 'transparent',
-                                                      border: isSelected ? '1px solid rgba(99, 102, 241, 0.2)' : '1px solid transparent',
-                                                      cursor: 'pointer'
-                                                    }}
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      setSelectedLibraryPath(file.path);
-                                                    }}
-                                                    onContextMenu={(e) => handleContextMenu(e, file.path)}
-                                                    onDoubleClick={() => {
-                                                      if (file.category === 'videos' || file.category === 'audios' || (file.category === 'recent' && ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.ts', '.m4v', '.flv', '.mpg', '.3gp', '.wmv', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'].includes(file.ext))) {
-                                                        electron?.ipcRenderer.invoke('open-player-window', { filePath: file.path, filename: file.name });
-                                                      } else {
-                                                        const parentDir = file.path.substring(0, file.path.lastIndexOf('\\')) || file.path.substring(0, file.path.lastIndexOf('/'));
-                                                        electron?.ipcRenderer.invoke('open-file', { saveDir: parentDir, filename: file.name });
-                                                      }
-                                                    }}
-                                                  >
-                                                  {(() => {
-                                                    const localThumb = `http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(file.path)}`;
-                                                    const displayThumb = thumbUrl || ((file.category === 'videos' || file.category === 'audios') ? localThumb : null);
-                                                    const hasError = imgErrors[file.path];
+                                                        if (displayThumb && !hasError) {
+                                                          return (
+                                                            <img
+                                                              src={displayThumb}
+                                                              alt="thumb"
+                                                              style={{ width: '36px', height: '22px', borderRadius: '4px', objectFit: 'cover', border: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}
+                                                              onError={() => setImgErrors(prev => ({ ...prev, [file.path]: true }))}
+                                                            />
+                                                          );
+                                                        }
 
-                                                    if (displayThumb && !hasError) {
-                                                      return (
-                                                        <img
-                                                          src={displayThumb}
-                                                          alt="thumb"
-                                                          style={{ width: '36px', height: '22px', borderRadius: '4px', objectFit: 'cover', border: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}
-                                                          onError={() => setImgErrors(prev => ({ ...prev, [file.path]: true }))}
-                                                        />
-                                                      );
-                                                    }
+                                                        const isAudioFile = ['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.aac', '.opus', '.wma'].includes(file.ext.toLowerCase());
+                                                        return (
+                                                          <div style={{ width: '36px', height: '22px', borderRadius: '4px', background: 'rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.03)', flexShrink: 0 }}>
+                                                            {isAudioFile ? <Music size={10} style={{ color: '#ec4899' }} /> : <FileText size={10} style={{ color: '#3b82f6' }} />}
+                                                          </div>
+                                                        );
+                                                      })()}
 
-                                                    return (
-                                                      <div style={{ width: '36px', height: '22px', borderRadius: '4px', background: 'rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.03)', flexShrink: 0 }}>
-                                                        {file.category === 'audios' ? <Music size={10} style={{ color: '#ec4899' }} /> : <FileText size={10} style={{ color: '#3b82f6' }} />}
+                                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <div style={{ fontSize: '10px', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={file.name}>{file.name}</div>
+                                                        <div style={{ fontSize: '8px', color: 'var(--text-muted)' }}>{file.displaySize ? file.displaySize : formatBytes(file.size)}</div>
                                                       </div>
-                                                    );
-                                                  })()}
 
-                                                  <div style={{ flex: 1, minWidth: 0 }}>
-                                                    <div style={{ fontSize: '10px', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={file.name}>{file.name}</div>
-                                                    <div style={{ fontSize: '8px', color: 'var(--text-muted)' }}>{file.displaySize ? file.displaySize : formatBytes(file.size)}</div>
-                                                  </div>
-
-                                                  <div style={{ display: 'flex', gap: '2px' }} onClick={e => e.stopPropagation()}>
-                                                    {(() => {
-                                                      const isStillDownloading = downloads.some(t => (t.filename === file.name || (t.saveDir + '\\' + t.filename) === file.path || (t.saveDir + '/' + t.filename) === file.path) && t.status !== 'completed');
-                                                      return (
+                                                      <div style={{ display: 'flex', gap: '2px' }} onClick={e => e.stopPropagation()}>
                                                         <button
-                                                          onClick={isStillDownloading ? undefined : () => {
-                                                            if (file.category === 'videos' || file.category === 'audios' || (file.category === 'recent' && ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.ts', '.m4v', '.flv', '.mpg', '.3gp', '.wmv', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'].includes(file.ext))) {
-                                                              electron?.ipcRenderer.invoke('open-player-window', { filePath: file.path, filename: file.name });
-                                                            } else {
-                                                              const parentDir = file.path.substring(0, file.path.lastIndexOf('\\')) || file.path.substring(0, file.path.lastIndexOf('/'));
-                                                              electron?.ipcRenderer.invoke('open-file', { saveDir: parentDir, filename: file.name });
-                                                            }
+                                                          onClick={() => {
+                                                            electron?.ipcRenderer.invoke('open-player-window', { filePath: file.path, filename: file.name });
                                                           }}
-                                                          disabled={isStillDownloading}
-                                                          style={{ background: 'transparent', border: 'none', color: 'var(--primary)', cursor: isStillDownloading ? 'default' : 'pointer', padding: '2px', opacity: isStillDownloading ? 0.4 : 1 }}
-                                                          title={isStillDownloading ? 'Downloading file...' : 'Play'}
+                                                          style={{ background: 'transparent', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: '2px' }}
+                                                          title="Play"
                                                         >
                                                           <Play size={10} fill="currentColor" />
                                                         </button>
-                                                      );
-                                                    })()}
-                                                    <button
-                                                      onClick={() => {
-                                                        setSelectedFileDetails(file);
-                                                        setShowFileDetailsModal(true);
-                                                      }}
-                                                      style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', padding: '2px' }}
-                                                      title="Details"
-                                                    >
-                                                      <Info size={10} />
-                                                    </button>
-                                                    <button
-                                                      onClick={() => {
-                                                        setDeleteConfirmTarget({
-                                                          type: 'file',
-                                                          title: 'Delete File from Disk',
-                                                          message: `Are you sure you want to permanently delete "${file.name}" from disk?`,
-                                                          filePath: file.path,
-                                                          onConfirm: async () => {
-                                                            const res = await performDeleteFile(file.path);
-                                                            if (res && !res.success) {
-                                                              alert('Failed to delete file: ' + (res?.error || 'Unknown error'));
-                                                            }
-                                                          }
-                                                        });
-                                                      }}
-                                                      style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: '2px' }}
-                                                      title="Delete"
-                                                    >
-                                                      <Trash2 size={10} />
-                                                    </button>
+                                                        <button
+                                                          onClick={() => {
+                                                            setSelectedFileDetails(file);
+                                                            setShowFileDetailsModal(true);
+                                                          }}
+                                                          style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', padding: '2px' }}
+                                                          title="Details"
+                                                        >
+                                                          <Info size={10} />
+                                                        </button>
+                                                        <button
+                                                          onClick={() => {
+                                                            setDeleteConfirmTarget({
+                                                              type: 'file',
+                                                              title: 'Delete File from Disk',
+                                                              message: `Are you sure you want to permanently delete "${file.name}" from disk?`,
+                                                              filePath: file.path,
+                                                              onConfirm: async () => {
+                                                                const res = await performDeleteFile(file.path);
+                                                                if (res && !res.success) {
+                                                                  alert('Failed to delete file: ' + (res?.error || 'Unknown error'));
+                                                                }
+                                                              }
+                                                            });
+                                                          }}
+                                                          style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: '2px' }}
+                                                          title="Delete"
+                                                        >
+                                                          <Trash2 size={10} />
+                                                        </button>
+                                                      </div>
+                                                    </div>
+                                                  );
+                                                };
+                                                return (
+                                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                                    {vids.length > 0 && (
+                                                      <div>
+                                                        <div style={{ fontSize: '9px', fontWeight: 'bold', color: '#a855f7', paddingLeft: '4px', marginBottom: '4px', textTransform: 'uppercase' }}>Videos ({vids.length})</div>
+                                                        {vids.map((f, i) => renderSubFile(f, i))}
+                                                      </div>
+                                                    )}
+                                                    {auds.length > 0 && (
+                                                      <div>
+                                                        <div style={{ fontSize: '9px', fontWeight: 'bold', color: '#ec4899', paddingLeft: '4px', marginBottom: '4px', textTransform: 'uppercase' }}>Mp3 ({auds.length})</div>
+                                                        {auds.map((f, i) => renderSubFile(f, i))}
+                                                      </div>
+                                                    )}
                                                   </div>
-                                                </div>
-                                              );
-                                            }))}
-                                          </div>
-                                        )}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              );
-                            } else {
-                              return filteredItems.map((file, idx) => {
-                                // Find thumbnail from downloads list matching task filename
-                                const taskMatch = downloads.find(t => t.filename === file.name);
-                                const thumbUrl = taskMatch?.thumbnail;
+                                                );
+                                              })() : (
+                                                files.map((file, idx) => {
+                                                  const taskMatch = downloads.find(t => t.filename === file.name);
+                                                  const thumbUrl = taskMatch?.thumbnail;
+                                                  const isSelected = file.path === selectedLibraryPath;
 
-                                const getFallbackIcon = () => {
-                                  if (file.category === 'recent') return <Activity size={14} style={{ color: 'var(--primary)' }} />;
-                                  if (file.category === 'videos') return <Film size={14} style={{ color: '#818cf8' }} />;
-                                  if (file.category === 'audios') return <Music size={14} style={{ color: '#ec4899' }} />;
-                                  if (file.category === 'docx') return <FileText size={14} style={{ color: '#3b82f6' }} />;
-                                  return <Folder size={14} style={{ color: '#9ca3af' }} />;
-                                };
+                                                  return (
+                                                    <div
+                                                      key={`${file.path}-${idx}`}
+                                                      style={{
+                                                        padding: '6px 8px',
+                                                        borderRadius: '6px',
+                                                        display: 'flex',
+                                                        gap: '6px',
+                                                        alignItems: 'center',
+                                                        background: isSelected ? 'rgba(99, 102, 241, 0.08)' : 'transparent',
+                                                        border: isSelected ? '1px solid rgba(99, 102, 241, 0.2)' : '1px solid transparent',
+                                                        cursor: 'pointer'
+                                                      }}
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setSelectedLibraryPath(file.path);
+                                                      }}
+                                                      onContextMenu={(e) => handleContextMenu(e, file.path)}
+                                                      onDoubleClick={() => {
+                                                        if (file.category === 'videos' || file.category === 'audios' || (file.category === 'recent' && ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.ts', '.m4v', '.flv', '.mpg', '.3gp', '.wmv', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'].includes(file.ext))) {
+                                                          electron?.ipcRenderer.invoke('open-player-window', { filePath: file.path, filename: file.name });
+                                                        } else {
+                                                          const parentDir = file.path.substring(0, file.path.lastIndexOf('\\')) || file.path.substring(0, file.path.lastIndexOf('/'));
+                                                          electron?.ipcRenderer.invoke('open-file', { saveDir: parentDir, filename: file.name });
+                                                        }
+                                                      }}
+                                                    >
+                                                      {(() => {
+                                                        const localThumb = `http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(file.path)}`;
+                                                        const displayThumb = thumbUrl || ((file.category === 'videos' || file.category === 'audios') ? localThumb : null);
+                                                        const hasError = imgErrors[file.path];
 
-                                const handlePlayFile = () => {
-                                  if (file.category === 'videos' || file.category === 'audios' || (file.category === 'recent' && ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.ts', '.flv', '.mpg', '.3gp', '.wmv', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'].includes(file.ext))) {
-                                    electron?.ipcRenderer.invoke('open-player-window', { filePath: file.path, filename: file.name });
-                                  } else {
-                                    const parentDir = file.path.substring(0, file.path.lastIndexOf('\\')) || file.path.substring(0, file.path.lastIndexOf('/'));
-                                    electron?.ipcRenderer.invoke('open-file', { saveDir: parentDir, filename: file.name });
-                                  }
-                                };
+                                                        if (displayThumb && !hasError) {
+                                                          return (
+                                                            <img
+                                                              src={displayThumb}
+                                                              alt="thumb"
+                                                              style={{ width: '36px', height: '22px', borderRadius: '4px', objectFit: 'cover', border: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}
+                                                              onError={() => setImgErrors(prev => ({ ...prev, [file.path]: true }))}
+                                                            />
+                                                          );
+                                                        }
 
-                                const isSelected = file.path === selectedLibraryPath;
+                                                        return (
+                                                          <div style={{ width: '36px', height: '22px', borderRadius: '4px', background: 'rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.03)', flexShrink: 0 }}>
+                                                            {file.category === 'audios' ? <Music size={10} style={{ color: '#ec4899' }} /> : <FileText size={10} style={{ color: '#3b82f6' }} />}
+                                                          </div>
+                                                        );
+                                                      })()}
 
-                                return (
-                                  <div
-                                    key={`${file.path}-${idx}`}
-                                    className="glass-panel"
-                                    style={{
-                                      padding: '8px',
-                                      borderRadius: '10px',
-                                      display: 'flex',
-                                      gap: '8px',
-                                      alignItems: 'center',
-                                      background: isSelected ? 'rgba(99, 102, 241, 0.08)' : 'rgba(255,255,255,0.02)',
-                                      border: isSelected ? '1px solid rgba(99, 102, 241, 0.3)' : '1px solid rgba(255,255,255,0.04)',
-                                      position: 'relative',
-                                      cursor: 'pointer'
-                                    }}
-                                    onClick={() => {
-                                      setSelectedLibraryPath(file.path);
-                                    }}
-                                    onDoubleClick={handlePlayFile}
-                                    onContextMenu={(e) => handleContextMenu(e, file.path)}
-                                  >
-                                    {/* Thumbnail or icon */}
-                                    {(() => {
-                                      const isAdOrGif = (src?: string | null) => {
-                                        if (!src || typeof src !== 'string') return true;
-                                        const l = src.toLowerCase();
-                                        if (l.includes('youtube.com') || l.includes('ytimg.com') || l.includes('googlevideo.com')) {
-                                          return false;
-                                        }
-                                        return l.endsWith('.gif') || l.includes('.gif?') || l.includes('.gif#') || l.includes('.gif') ||
-                                          l.includes('data:image/gif') || l.includes('doubleclick') || l.includes('googleads') ||
-                                          l.includes('ad_') || l.includes('ad-') || l.includes('banner') || l.includes('sponsor') ||
-                                          l.includes('promo') || l.includes('exclusive') || l.includes('trafficjunky') || l.includes('advert');
-                                      };
-                                      const localThumb = `http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(file.path)}`;
-                                      const cleanThumb = (thumbUrl && !isAdOrGif(thumbUrl)) ? thumbUrl : null;
-                                      const displayThumb = cleanThumb || ((file.category === 'videos' || file.category === 'audios') ? localThumb : null);
-                                      const hasError = imgErrors[file.path];
+                                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <div style={{ fontSize: '10px', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={file.name}>{file.name}</div>
+                                                        <div style={{ fontSize: '8px', color: 'var(--text-muted)' }}>{file.displaySize ? file.displaySize : formatBytes(file.size)}</div>
+                                                      </div>
 
-                                      if (displayThumb && !hasError) {
-                                        return (
-                                          <div style={{ width: '46px', height: '30px', borderRadius: '4px', overflow: 'hidden', flexShrink: 0, position: 'relative', border: '1px solid rgba(255,255,255,0.05)' }}>
-                                            <img
-                                              src={displayThumb}
-                                              alt="thumb"
-                                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                              onError={() => setImgErrors(prev => ({ ...prev, [file.path]: true }))}
-                                            />
-                                          </div>
-                                        );
-                                      }
-
-                                      return (
-                                        <div style={{ width: '46px', height: '30px', borderRadius: '4px', background: 'rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, border: '1px solid rgba(255,255,255,0.03)' }}>
-                                          {getFallbackIcon()}
+                                                      <div style={{ display: 'flex', gap: '2px' }} onClick={e => e.stopPropagation()}>
+                                                        {(() => {
+                                                          const isStillDownloading = downloads.some(t => (t.filename === file.name || (t.saveDir + '\\' + t.filename) === file.path || (t.saveDir + '/' + t.filename) === file.path) && t.status !== 'completed');
+                                                          return (
+                                                            <button
+                                                              onClick={isStillDownloading ? undefined : () => {
+                                                                if (file.category === 'videos' || file.category === 'audios' || (file.category === 'recent' && ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.ts', '.m4v', '.flv', '.mpg', '.3gp', '.wmv', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'].includes(file.ext))) {
+                                                                  electron?.ipcRenderer.invoke('open-player-window', { filePath: file.path, filename: file.name });
+                                                                } else {
+                                                                  const parentDir = file.path.substring(0, file.path.lastIndexOf('\\')) || file.path.substring(0, file.path.lastIndexOf('/'));
+                                                                  electron?.ipcRenderer.invoke('open-file', { saveDir: parentDir, filename: file.name });
+                                                                }
+                                                              }}
+                                                              disabled={isStillDownloading}
+                                                              style={{ background: 'transparent', border: 'none', color: 'var(--primary)', cursor: isStillDownloading ? 'default' : 'pointer', padding: '2px', opacity: isStillDownloading ? 0.4 : 1 }}
+                                                              title={isStillDownloading ? 'Downloading file...' : 'Play'}
+                                                            >
+                                                              <Play size={10} fill="currentColor" />
+                                                            </button>
+                                                          );
+                                                        })()}
+                                                        <button
+                                                          onClick={() => {
+                                                            setSelectedFileDetails(file);
+                                                            setShowFileDetailsModal(true);
+                                                          }}
+                                                          style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', padding: '2px' }}
+                                                          title="Details"
+                                                        >
+                                                          <Info size={10} />
+                                                        </button>
+                                                        <button
+                                                          onClick={() => {
+                                                            setDeleteConfirmTarget({
+                                                              type: 'file',
+                                                              title: 'Delete File from Disk',
+                                                              message: `Are you sure you want to permanently delete "${file.name}" from disk?`,
+                                                              filePath: file.path,
+                                                              onConfirm: async () => {
+                                                                const res = await performDeleteFile(file.path);
+                                                                if (res && !res.success) {
+                                                                  alert('Failed to delete file: ' + (res?.error || 'Unknown error'));
+                                                                }
+                                                              }
+                                                            });
+                                                          }}
+                                                          style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: '2px' }}
+                                                          title="Delete"
+                                                        >
+                                                          <Trash2 size={10} />
+                                                        </button>
+                                                      </div>
+                                                    </div>
+                                                  );
+                                                }))}
+                                            </div>
+                                          )}
                                         </div>
                                       );
-                                    })()}
+                                    })}
+                                  </div>
+                                );
+                              } else {
+                                const virtualRows = libraryVirtualizer.getVirtualItems();
+                                return (
+                                  <div style={{ position: 'relative', width: '100%', height: libraryVirtualizer.getTotalSize() }}>
+                                    {virtualRows.map((virtualRow) => {
+                                      const file = filteredItems[virtualRow.index];
+                                      const idx = virtualRow.index;
+                                      // Find thumbnail from downloads list matching task filename
+                                      const taskMatch = downloads.find(t => t.filename === file.name);
+                                  const thumbUrl = taskMatch?.thumbnail;
 
-                                    {/* File info */}
-                                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                      <div
-                                        style={{ fontSize: '11px', fontWeight: '600', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                                        title={file.name}
-                                      >
-                                        {file.name}
-                                      </div>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9px', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-                                        <span>{file.displaySize ? file.displaySize : formatBytes(file.size)}</span>
-                                        <span>â€¢</span>
-                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', background: 'rgba(255,255,255,0.04)', padding: '1px 4px', borderRadius: '4px', color: '#a855f7' }}>
-                                          <Folder size={8} /> {getParentFolderName(file.path)}
-                                        </span>
-                                        <span>â€¢</span>
-                                        <span>{new Date(file.mtime).toLocaleDateString()}</span>
-                                        <span>â€¢</span>
-                                        <span style={{ textTransform: 'uppercase', color: 'var(--primary)', fontWeight: 'bold' }}>{file.ext.replace('.', '')}</span>
-                                      </div>
-                                    </div>
+                                  const getFallbackIcon = () => {
+                                    if (file.category === 'recent') return <Activity size={14} style={{ color: 'var(--primary)' }} />;
+                                    if (file.category === 'videos') return <Film size={14} style={{ color: '#818cf8' }} />;
+                                    if (file.category === 'audios') return <Music size={14} style={{ color: '#ec4899' }} />;
+                                    if (file.category === 'docx') return <FileText size={14} style={{ color: '#3b82f6' }} />;
+                                    return <Folder size={14} style={{ color: '#9ca3af' }} />;
+                                  };
 
-                                    {/* Play/Open/Delete Action */}
-                                    <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                                  const handlePlayFile = () => {
+                                    if (file.category === 'videos' || file.category === 'audios' || (file.category === 'recent' && ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.ts', '.flv', '.mpg', '.3gp', '.wmv', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'].includes(file.ext))) {
+                                      electron?.ipcRenderer.invoke('open-player-window', { filePath: file.path, filename: file.name });
+                                    } else {
+                                      const parentDir = file.path.substring(0, file.path.lastIndexOf('\\')) || file.path.substring(0, file.path.lastIndexOf('/'));
+                                      electron?.ipcRenderer.invoke('open-file', { saveDir: parentDir, filename: file.name });
+                                    }
+                                  };
+
+                                  const isSelected = file.path === selectedLibraryPath;
+
+                                  return (
+                                    <div
+                                      key={`${file.path}-${idx}`}
+                                      ref={libraryVirtualizer.measureElement}
+                                      data-index={virtualRow.index}
+                                      className="glass-panel"
+                                      style={{
+                                        position: 'absolute',
+                                        top: 0,
+                                        left: 0,
+                                        width: '100%',
+                                        transform: `translateY(${virtualRow.start}px)`,
+                                        padding: '8px',
+                                        borderRadius: '10px',
+                                        display: 'flex',
+                                        gap: '8px',
+                                        alignItems: 'center',
+                                        background: isSelected ? 'rgba(99, 102, 241, 0.08)' : 'rgba(255,255,255,0.02)',
+                                        border: isSelected ? '1px solid rgba(99, 102, 241, 0.3)' : '1px solid rgba(255,255,255,0.04)',
+                                        cursor: 'pointer'
+                                      }}
+                                      onClick={() => {
+                                        setSelectedLibraryPath(file.path);
+                                      }}
+                                      onDoubleClick={handlePlayFile}
+                                      onContextMenu={(e) => handleContextMenu(e, file.path)}
+                                    >
+                                      {/* Thumbnail or icon */}
                                       {(() => {
-                                        const isStillDownloading = downloads.some(t => (t.filename === file.name || (t.saveDir + '\\' + t.filename) === file.path || (t.saveDir + '/' + t.filename) === file.path) && t.status !== 'completed');
+                                        const isAdOrGif = (src?: string | null) => {
+                                          if (!src || typeof src !== 'string') return true;
+                                          const l = src.toLowerCase();
+                                          if (l.includes('youtube.com') || l.includes('ytimg.com') || l.includes('googlevideo.com')) {
+                                            return false;
+                                          }
+                                          return l.endsWith('.gif') || l.includes('.gif?') || l.includes('.gif#') || l.includes('.gif') ||
+                                            l.includes('data:image/gif') || l.includes('doubleclick') || l.includes('googleads') ||
+                                            l.includes('ad_') || l.includes('ad-') || l.includes('banner') || l.includes('sponsor') ||
+                                            l.includes('promo') || l.includes('exclusive') || l.includes('trafficjunky') || l.includes('advert');
+                                        };
+                                        const localThumb = `http://127.0.0.1:${streamingPort}/thumbnail?path=${encodeURIComponent(file.path)}`;
+                                        const cleanThumb = (thumbUrl && !isAdOrGif(thumbUrl)) ? thumbUrl : null;
+                                        const displayThumb = cleanThumb || ((file.category === 'videos' || file.category === 'audios') ? localThumb : null);
+                                        const hasError = imgErrors[file.path];
+
+                                        if (displayThumb && !hasError) {
+                                          return (
+                                            <div style={{ width: '46px', height: '30px', borderRadius: '4px', overflow: 'hidden', flexShrink: 0, position: 'relative', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                              <img
+                                                src={displayThumb}
+                                                alt="thumb"
+                                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                onError={() => setImgErrors(prev => ({ ...prev, [file.path]: true }))}
+                                              />
+                                            </div>
+                                          );
+                                        }
+
                                         return (
-                                          <button
-                                            onClick={isStillDownloading ? undefined : handlePlayFile}
-                                            disabled={isStillDownloading}
-                                            className="btn-secondary"
-                                            style={{
-                                              padding: '4px 6px',
-                                              borderRadius: '6px',
-                                              border: 'none',
-                                              background: (file.category === 'videos' || file.category === 'audios' || file.category === 'recent') ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)',
-                                              color: (file.category === 'videos' || file.category === 'audios' || file.category === 'recent') ? 'var(--primary)' : '#fff',
-                                              cursor: isStillDownloading ? 'default' : 'pointer',
-                                              opacity: isStillDownloading ? 0.4 : 1
-                                            }}
-                                            title={isStillDownloading ? 'Downloading file...' : ((file.category === 'videos' || file.category === 'audios' || file.category === 'recent') ? 'Play in Player Window' : 'Open in App')}
-                                          >
-                                            {(file.category === 'videos' || file.category === 'audios' || file.category === 'recent') ? <Play size={10} fill="currentColor" /> : <ExternalLink size={10} />}
-                                          </button>
+                                          <div style={{ width: '46px', height: '30px', borderRadius: '4px', background: 'rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, border: '1px solid rgba(255,255,255,0.03)' }}>
+                                            {getFallbackIcon()}
+                                          </div>
                                         );
                                       })()}
 
-                                      <button
-                                        onClick={() => {
-                                          setSelectedFileDetails(file);
-                                          setShowFileDetailsModal(true);
-                                        }}
-                                        className="btn-secondary"
-                                        style={{
-                                          padding: '4px 6px',
-                                          borderRadius: '6px',
-                                          border: 'none',
-                                          background: 'rgba(255,255,255,0.05)',
-                                          color: '#fff',
-                                          cursor: 'pointer'
-                                        }}
-                                        title="View Details"
-                                      >
-                                        <Info size={10} />
-                                      </button>
+                                      {/* File info */}
+                                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                        <div
+                                          style={{ fontSize: '11px', fontWeight: '600', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                          title={file.name}
+                                        >
+                                          {file.name}
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9px', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+                                          <span>{file.displaySize ? file.displaySize : formatBytes(file.size)}</span>
+                                          <span>•</span>
+                                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', background: 'rgba(255,255,255,0.04)', padding: '1px 4px', borderRadius: '4px', color: '#a855f7' }}>
+                                            <Folder size={8} /> {getParentFolderName(file.path)}
+                                          </span>
+                                          <span>•</span>
+                                          <span>{new Date(file.mtime).toLocaleDateString()}</span>
+                                          <span>•</span>
+                                          <span style={{ textTransform: 'uppercase', color: 'var(--primary)', fontWeight: 'bold' }}>{file.ext.replace('.', '')}</span>
+                                        </div>
+                                      </div>
 
-                                      <button
-                                        onClick={() => {
-                                          setDeleteConfirmTarget({
-                                            type: 'file',
-                                            title: 'Delete File from Disk',
-                                            message: `Are you sure you want to permanently delete "${file.name}" from disk?`,
-                                            filePath: file.path,
-                                            onConfirm: async () => {
-                                              const res = await performDeleteFile(file.path);
-                                              if (res && !res.success) {
-                                                alert('Failed to delete file: ' + (res?.error || 'Unknown error'));
+                                      {/* Play/Open/Delete Action */}
+                                      <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                                        {(() => {
+                                          const isStillDownloading = downloads.some(t => (t.filename === file.name || (t.saveDir + '\\' + t.filename) === file.path || (t.saveDir + '/' + t.filename) === file.path) && t.status !== 'completed');
+                                          return (
+                                            <button
+                                              onClick={isStillDownloading ? undefined : handlePlayFile}
+                                              disabled={isStillDownloading}
+                                              className="btn-secondary"
+                                              style={{
+                                                padding: '4px 6px',
+                                                borderRadius: '6px',
+                                                border: 'none',
+                                                background: (file.category === 'videos' || file.category === 'audios' || file.category === 'recent') ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)',
+                                                color: (file.category === 'videos' || file.category === 'audios' || file.category === 'recent') ? 'var(--primary)' : '#fff',
+                                                cursor: isStillDownloading ? 'default' : 'pointer',
+                                                opacity: isStillDownloading ? 0.4 : 1
+                                              }}
+                                              title={isStillDownloading ? 'Downloading file...' : ((file.category === 'videos' || file.category === 'audios' || file.category === 'recent') ? 'Play in Player Window' : 'Open in App')}
+                                            >
+                                              {(file.category === 'videos' || file.category === 'audios' || file.category === 'recent') ? <Play size={10} fill="currentColor" /> : <ExternalLink size={10} />}
+                                            </button>
+                                          );
+                                        })()}
+
+                                        <button
+                                          onClick={() => {
+                                            setSelectedFileDetails(file);
+                                            setShowFileDetailsModal(true);
+                                          }}
+                                          className="btn-secondary"
+                                          style={{
+                                            padding: '4px 6px',
+                                            borderRadius: '6px',
+                                            border: 'none',
+                                            background: 'rgba(255,255,255,0.05)',
+                                            color: '#fff',
+                                            cursor: 'pointer'
+                                          }}
+                                          title="View Details"
+                                        >
+                                          <Info size={10} />
+                                        </button>
+
+                                        <button
+                                          onClick={() => {
+                                            setDeleteConfirmTarget({
+                                              type: 'file',
+                                              title: 'Delete File from Disk',
+                                              message: `Are you sure you want to permanently delete "${file.name}" from disk?`,
+                                              filePath: file.path,
+                                              onConfirm: async () => {
+                                                const res = await performDeleteFile(file.path);
+                                                if (res && !res.success) {
+                                                  alert('Failed to delete file: ' + (res?.error || 'Unknown error'));
+                                                }
                                               }
-                                            }
-                                          });
-                                        }}
-                                        className="btn-secondary"
-                                        style={{
-                                          padding: '4px 6px',
-                                          borderRadius: '6px',
-                                          border: 'none',
-                                          background: 'rgba(239, 68, 68, 0.1)',
-                                          color: 'var(--danger)',
-                                          cursor: 'pointer'
-                                        }}
-                                        title="Delete from Disk"
-                                      >
-                                        <Trash2 size={10} />
-                                      </button>
+                                            });
+                                          }}
+                                          className="btn-secondary"
+                                          style={{
+                                            padding: '4px 6px',
+                                            borderRadius: '6px',
+                                            border: 'none',
+                                            background: 'rgba(239, 68, 68, 0.1)',
+                                            color: 'var(--danger)',
+                                            cursor: 'pointer'
+                                          }}
+                                          title="Delete from Disk"
+                                        >
+                                          <Trash2 size={10} />
+                                        </button>
+                                      </div>
                                     </div>
+                                  );
+                                })}
                                   </div>
                                 );
-                              });
-                            }
-                          })()}
-                        </>
-                      )}
+                              }
+                            })()}
+                          </>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
                 </div>
               </div>
             </div>
@@ -2642,10 +2688,10 @@ export default function App() {
                     </button>
                   </div>
 
-                  <div style={{ 
-                    display: 'flex', 
-                    flexDirection: 'column', 
-                    gap: '8px', 
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
                     marginTop: '4px',
                     maxHeight: '320px',
                     overflowY: 'auto',
@@ -2677,7 +2723,7 @@ export default function App() {
                                 path: folder,
                                 shouldLock: false,
                                 isFolder: true
-                              }).catch(() => {});
+                              }).catch(() => { });
                               electron.ipcRenderer.send('synced-folders-updated', nextFolders);
                             }
                             // Also unarchive from archivePaths if it was archived
@@ -2708,7 +2754,7 @@ export default function App() {
               {settingsSubTab === 'security' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
-                  {/* â”€â”€ Main Two-Column Layout â”€â”€ */}
+                  {/* Main Two-Column Layout ── */}
                   <div className="glass-panel" style={{
                     padding: '0',
                     display: 'grid',
@@ -2717,7 +2763,7 @@ export default function App() {
                     marginTop: '8px'
                   }}>
 
-                    {/* â”€â”€ LEFT: Status & Info Panel â”€â”€ */}
+                    {/*  LEFT: Status & Info Panel ── */}
                     <div style={{
                       padding: '28px 24px',
                       display: 'flex',
@@ -2766,7 +2812,7 @@ export default function App() {
                             ? '1px solid rgba(34,197,94,0.3)'
                             : '1px solid rgba(239,68,68,0.3)'
                         }}>
-                          {settingsArchivePin ? 'â— Protected' : 'â—‹ Unprotected'}
+                          {settingsArchivePin ? '● Protected' : '○ Unprotected'}
                         </span>
                       </div>
 
@@ -2815,7 +2861,7 @@ export default function App() {
                       )}
                     </div>
 
-                    {/* â”€â”€ RIGHT: PIN Entry Form â”€â”€ */}
+                    {/* RIGHT: PIN Entry Form ── */}
                     <div style={{
                       padding: '28px',
                       display: 'flex',
@@ -2843,7 +2889,7 @@ export default function App() {
                               {settingsArchivePin ? 'Change Archive PIN' : 'Set New Archive PIN'}
                             </div>
                             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '1px' }}>
-                              4â€“8 digit numeric passcode
+                              4–8 digit numeric passcode
                             </div>
                           </div>
                         </div>
@@ -2894,7 +2940,7 @@ export default function App() {
                               <input
                                 type={showNewPin ? 'text' : 'password'}
                                 inputMode="numeric"
-                                placeholder="â€¢â€¢â€¢â€¢"
+                                placeholder="••••"
                                 maxLength={8}
                                 value={newSettingsPin}
                                 onFocus={() => setNewPinFocused(true)}
@@ -2978,7 +3024,7 @@ export default function App() {
                               <input
                                 type={showConfirmPin ? 'text' : 'password'}
                                 inputMode="numeric"
-                                placeholder="â€¢â€¢â€¢â€¢"
+                                placeholder="••••"
                                 maxLength={8}
                                 value={confirmSettingsPin}
                                 onFocus={() => setConfirmPinFocused(true)}
@@ -3049,7 +3095,7 @@ export default function App() {
                             }}>
                               {newSettingsPin === confirmSettingsPin && newSettingsPin.length >= 4 ? (
                                 <span style={{ color: '#4ade80', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                                  <Check size={13} /> PINs match â€” ready to save
+                                  <Check size={13} /> PINs match - ready to save
                                 </span>
                               ) : (
                                 <span style={{ color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -3082,7 +3128,7 @@ export default function App() {
                               setConfirmSettingsPin('');
                               if (electron) {
                                 electron.ipcRenderer.send('archive-pin-updated', hashedPin);
-                                electron.ipcRenderer.invoke('save-archive-data', { archivePin: hashedPin }).catch(() => {});
+                                electron.ipcRenderer.invoke('save-archive-data', { archivePin: hashedPin }).catch(() => { });
                               }
                               setPinFeedbackMsg({ type: 'success', text: 'Archive PIN updated and synchronized with Player!' });
                             } catch {
@@ -3141,7 +3187,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* â”€â”€ Reset PIN Confirmation Modal â”€â”€ */}
+                  {/* ── Reset PIN Confirmation Modal ── */}
                   {showResetPinModal && (
                     <div
                       style={{
@@ -3284,7 +3330,7 @@ export default function App() {
                               setConfirmSettingsPin('');
                               if (electron) {
                                 electron.ipcRenderer.send('archive-pin-updated', '');
-                                electron.ipcRenderer.invoke('save-archive-data', { archivePin: '' }).catch(() => {});
+                                electron.ipcRenderer.invoke('save-archive-data', { archivePin: '' }).catch(() => { });
                               }
                               setShowResetPinModal(false);
                               setPinFeedbackMsg({ type: 'success', text: 'Archive PIN removed. Archive is now unlocked across player and app.' });
@@ -3452,7 +3498,7 @@ export default function App() {
                             }}
                             title="Remove Site"
                           >
-                            âœ•
+                            ✕
                           </button>
                         )}
                       </div>
@@ -3608,7 +3654,7 @@ export default function App() {
                             let pageCookies = '';
                             try {
                               pageCookies = await electron.ipcRenderer.invoke('get-page-cookies', currentBrowserUrl);
-                            } catch (e) {}
+                            } catch (e) { }
 
                             fetchFormats(currentBrowserUrl, {
                               pageUrl: currentBrowserUrl,
@@ -3690,26 +3736,26 @@ export default function App() {
                                   ];
                                   if (adNetworks.some(d => l.includes(d))) return true;
                                   return l.includes('.gif') || l.includes('banner') ||
-                                         l.includes('creative') || l.includes('advert') || l.includes('sponsor') ||
-                                         l.includes('promo') || l.includes('exclusive') || l.includes('teaser') ||
-                                         l.includes('preview') || l.includes('/ads/') || l.includes('/ad/') ||
-                                         l.includes('preroll') || l.includes('interstitial') ||
-                                         l.includes('video_ad') || l.includes('videoad') || l.includes('ad_video') ||
-                                         l.includes('commercial') || l.includes('overlay') ||
-                                         l.includes('ad_type=') || l.includes('campaign_id=') || l.includes('creative_id=');
+                                    l.includes('creative') || l.includes('advert') || l.includes('sponsor') ||
+                                    l.includes('promo') || l.includes('exclusive') || l.includes('teaser') ||
+                                    l.includes('preview') || l.includes('/ads/') || l.includes('/ad/') ||
+                                    l.includes('preroll') || l.includes('interstitial') ||
+                                    l.includes('video_ad') || l.includes('videoad') || l.includes('ad_video') ||
+                                    l.includes('commercial') || l.includes('overlay') ||
+                                    l.includes('ad_type=') || l.includes('campaign_id=') || l.includes('creative_id=');
                                 };
                                 if (!isTrash(captured.stream.mediaUrl)) {
                                   targetMediaUrl = captured.stream.mediaUrl;
                                 }
                               }
-                            } catch (e) {}
+                            } catch (e) { }
                           }
 
                           // Fetch cookies from the active session to bypass age verification & CDN token blocks
                           let pageCookies = '';
                           try {
                             pageCookies = await electron.ipcRenderer.invoke('get-page-cookies', currentBrowserUrl);
-                          } catch (e) {}
+                          } catch (e) { }
 
                           const isAdOrGif = (src: string) => {
                             if (!src || typeof src !== 'string') return true;
@@ -3834,7 +3880,7 @@ export default function App() {
           <div className="glass-panel modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Add New Download</h2>
-              <button className="modal-close-btn" onClick={() => setShowAddModal(false)}>âœ•</button>
+              <button className="modal-close-btn" onClick={() => setShowAddModal(false)}>✕</button>
             </div>
 
             <div className="form-group">
@@ -3909,7 +3955,7 @@ export default function App() {
           onAddSite={(siteData: NewStreamSiteData) => {
             setStreamSites((prev: any[]) => {
               const next = [...prev.filter(s => s.url !== siteData.url), siteData];
-              try { localStorage.setItem('stream_sites', JSON.stringify(next)); } catch (e) {}
+              try { localStorage.setItem('stream_sites', JSON.stringify(next)); } catch (e) { }
               return next;
             });
             setShowAddSiteModal(false);
@@ -3924,7 +3970,7 @@ export default function App() {
           <div className="glass-panel modal-content" style={{ width: '560px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>YouTube Playlist Analyzer</h2>
-              <button className="modal-close-btn" onClick={() => { setShowPlaylistModal(false); setPlaylistInfo(null); }}>âœ•</button>
+              <button className="modal-close-btn" onClick={() => { setShowPlaylistModal(false); setPlaylistInfo(null); }}>✕</button>
             </div>
 
             {playlistLoading ? (
@@ -3954,7 +4000,7 @@ export default function App() {
           <div className="glass-panel modal-content" style={{ width: '680px', maxWidth: '95%' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Select Media Format</h2>
-              <button className="modal-close-btn" onClick={handleCloseFormatsModal}>âœ•</button>
+              <button className="modal-close-btn" onClick={handleCloseFormatsModal}>✕</button>
             </div>
 
             {formatLoading ? (
@@ -4058,7 +4104,7 @@ export default function App() {
           <div className="glass-panel modal-content" style={{ width: '480px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>File Details</h2>
-              <button className="modal-close-btn" onClick={() => setShowFileDetailsModal(false)}>âœ•</button>
+              <button className="modal-close-btn" onClick={() => setShowFileDetailsModal(false)}>✕</button>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '8px 0' }}>
@@ -4146,7 +4192,7 @@ export default function App() {
           <div className="glass-panel modal-content" style={{ width: '420px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Clear History</h2>
-              <button className="modal-close-btn" onClick={() => setShowClearHistoryModal(false)}>âœ•</button>
+              <button className="modal-close-btn" onClick={() => setShowClearHistoryModal(false)}>✕</button>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '8px 0' }}>
@@ -4392,7 +4438,7 @@ export default function App() {
               onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#fff'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
             >
-              âœ•
+              ✕
             </button>
 
             {/* 1. CHECKING STATE */}
@@ -4618,7 +4664,7 @@ export default function App() {
               </div>
             )}
 
-            {/* 5. DOWNLOAD COMPLETE STATE â€” Install Button */}
+            {/* 5. DOWNLOAD COMPLETE STATE — Install Button */}
             {releaseCheckStatus === 'download-complete' && (
               <div style={{ zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
                 <div style={{

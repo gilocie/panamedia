@@ -97,8 +97,14 @@ export function SendConvertPreparationModal({
       return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
     } catch { return {}; }
   });
+  // Debounced: tool settings change on every scrub tick while a grip is
+  // dragged, and a synchronous JSON.stringify + setItem per tick is disk I/O
+  // on the UI thread. Trailing write keeps persistence without the churn.
   useEffect(() => {
-    try { localStorage.setItem('converter_tool_settings', JSON.stringify(toolSettings)); } catch { /* storage may be unavailable */ }
+    const timer = window.setTimeout(() => {
+      try { localStorage.setItem('converter_tool_settings', JSON.stringify(toolSettings)); } catch { /* storage may be unavailable */ }
+    }, 400);
+    return () => window.clearTimeout(timer);
   }, [toolSettings]);
   const applyToolSettings = useCallback((file: string, tool: string, settings: Record<string, unknown>) => {
     const key = normalizeQueuePath(file);
@@ -744,6 +750,9 @@ export function SendConvertPreparationModal({
         return nextMap;
       });
     }
+    if (nextQueue.length === 0) {
+      try { localStorage.removeItem('converter_active_progress'); } catch (e) {}
+    }
     if (electron) {
       electron.ipcRenderer.send('converter-minimize-state', {
         minimized: nextQueue.length > 0,
@@ -752,6 +761,7 @@ export function SendConvertPreparationModal({
         progress: 0,
         queueCount: nextQueue.length,
         currentFile: nextQueue[0] ? nextQueue[0].split(/[\\/]/).pop() : '',
+        status: nextQueue.length === 0 ? 'idle' : 'ready',
         statusText: nextQueue.length > 1 ? `${nextQueue.length} files queued` : (nextQueue.length === 1 ? 'Ready to Convert' : 'Idle')
       });
     }
@@ -789,6 +799,7 @@ export function SendConvertPreparationModal({
     onQueueFilesRemoved?.(removedFiles);
     setMediaTypes({});
     localStorage.removeItem('converter_media_types');
+    try { localStorage.removeItem('converter_active_progress'); } catch (e) {}
     if (electron) {
       electron.ipcRenderer.send('converter-minimize-state', {
         minimized: false,
@@ -797,6 +808,7 @@ export function SendConvertPreparationModal({
         progress: 0,
         queueCount: 0,
         currentFile: '',
+        status: 'idle',
         statusText: 'Idle'
       });
     }
@@ -853,6 +865,9 @@ export function SendConvertPreparationModal({
       localStorage.setItem('converter_media_types', JSON.stringify(nextMap));
       return nextMap;
     });
+    if (nextQueue.length === 0) {
+      try { localStorage.removeItem('converter_active_progress'); } catch (e) {}
+    }
     if (electron) {
       electron.ipcRenderer.send('converter-minimize-state', {
         minimized: nextQueue.length > 0,
@@ -861,6 +876,7 @@ export function SendConvertPreparationModal({
         progress: 0,
         queueCount: nextQueue.length,
         currentFile: nextQueue[0] ? nextQueue[0].split(/[\\/]/).pop() : '',
+        status: nextQueue.length === 0 ? 'idle' : 'ready',
         statusText: nextQueue.length > 1 ? `${nextQueue.length} files queued` : (nextQueue.length === 1 ? 'Ready to Convert' : 'Idle')
       });
     }

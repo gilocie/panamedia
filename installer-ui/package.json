@@ -2,7 +2,7 @@
   "name": "panamedia-installer-ui",
   "version": "1.0.1",
   "description": "Panamedia Custom Installer UI",
-  "author": "Panamedia",
+  "author": "Go Save Site",
   "main": "main.cjs",
   "private": true,
   "devDependencies": {

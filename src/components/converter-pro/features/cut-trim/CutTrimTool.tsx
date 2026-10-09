@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Scissors, Check, Timer } from "lucide-react";
 import { TimelineRuler, useTimelineDrag } from "../timeline";
 import { electron } from "../../../panamedia/types";
-import { ProTimeline, ProToolShell } from "../ProToolShell";
+import { ProInspector, ProTimeline, ProToolShell } from "../ProToolShell";
 import { TrimTelemetryPanel } from "./TrimTelemetryPanel";
 import { TrimTransportBar } from "./TrimTransportBar";
 import { TrimSideCutModal } from "./TrimSideCutModal";
@@ -89,6 +89,7 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
   const [startDraft, setStartDraft] = useState(() => splitTrimTime(initialSettings?.startSec ?? 0));
   const [endDraft, setEndDraft] = useState(() => splitTrimTime(initialSettings?.endSec ?? duration));
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
   const [isRulerZooming, setIsRulerZooming] = useState(false);
   const rulerCursorTimer = useRef<number | null>(null);
   const [previewFailed, setPreviewFailed] = useState(false);
@@ -123,6 +124,9 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
 
   useEffect(() => {
     if (!electron) return;
+    // Cut/Trim owns the active preview decoder. Pause other Panamedia player
+    // windows while this tool is open so they do not compete for decode time.
+    electron.ipcRenderer.send('player-remote-command', 'pause');
     electron.ipcRenderer.invoke('get-streaming-port').then((port: number) => {
       if (port) setActiveStreamingPort(port);
     }).catch(() => {});
@@ -192,9 +196,33 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
     return () => window.removeEventListener('converter-volume-change', onVolumeSync);
   }, [fileName, volume, isMuted]);
 
+  // Push settings to the parent on a trailing debounce rather than on every
+  // state write: a grip drag changes start/end up to 60×/s, and each call
+  // re-rendered the entire converter modal plus triggered a synchronous
+  // localStorage write in the parent — disk I/O on the UI thread per input
+  // event. Flushed on drag end and on unmount, so the parent's in-memory
+  // copy is never stale when the user starts a conversion.
+  const settingsCallbackRef = useRef(onSettingsChange);
+  settingsCallbackRef.current = onSettingsChange;
+  const pendingSettingsRef = useRef<{ startSec: number; endSec: number; strategy: TrimStrategy; timelineOrigin: number; rightCutApplied: boolean } | null>(null);
+  const settingsTimerRef = useRef<number | null>(null);
+  const flushToolSettings = useCallback(() => {
+    if (settingsTimerRef.current !== null) {
+      window.clearTimeout(settingsTimerRef.current);
+      settingsTimerRef.current = null;
+    }
+    if (pendingSettingsRef.current) {
+      settingsCallbackRef.current?.(pendingSettingsRef.current);
+      pendingSettingsRef.current = null;
+    }
+  }, []);
   useEffect(() => {
-    onSettingsChange?.({ startSec, endSec, strategy, timelineOrigin, rightCutApplied });
-  }, [startSec, endSec, strategy, timelineOrigin, rightCutApplied, onSettingsChange]);
+    pendingSettingsRef.current = { startSec, endSec, strategy, timelineOrigin, rightCutApplied };
+    if (settingsTimerRef.current !== null) window.clearTimeout(settingsTimerRef.current);
+    settingsTimerRef.current = window.setTimeout(flushToolSettings, 200);
+  }, [startSec, endSec, strategy, timelineOrigin, rightCutApplied, flushToolSettings]);
+  // Flush anything still pending when the tool unmounts.
+  useEffect(() => flushToolSettings, [flushToolSettings]);
 
   useEffect(() => setStartDraft(splitTrimTime(startSec)), [startSec]);
   useEffect(() => setEndDraft(splitTrimTime(endSec)), [endSec]);
@@ -287,33 +315,39 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
   }, [zoom]);
 
   // Dense adaptive ruler ticks: choose an interval so ~12-20 labels are visible.
-  const rulerIntervals = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
-  const rulerInterval = rulerIntervals.find(i => visibleDuration / i <= 16) ?? rulerIntervals[rulerIntervals.length - 1];
-  const buildRulerTicks = (dur: number, from: number, visibleDur: number): number[] => {
-    if (dur <= 0) return [];
-    const interval = rulerIntervals.find(i => visibleDur / i <= 16) ?? rulerIntervals[rulerIntervals.length - 1];
-    const ticks: number[] = [];
-    const end = Math.min(dur, from + visibleDur);
-    for (let t = Math.floor(from / interval) * interval; t <= end + interval * 0.01; t += interval) {
-      if (t >= 0 && t <= dur) ticks.push(t);
-    }
-    return ticks;
-  };
-  const rulerTicks = buildRulerTicks(timelineDuration, visibleStart, visibleDuration);
+  // Memoized on the visible range only: playhead updates (~4/s) and scrub
+  // drags re-render this tool constantly, and rebuilding up to 500 mark
+  // objects each time was a major part of the Cut/Trim jam.
   const visibleEnd = Math.min(timelineDuration, visibleStart + visibleDuration);
-  const minorRulerInterval = rulerInterval / 5;
-  const firstMinorMarkIndex = Math.ceil((visibleStart - 0.0001) / minorRulerInterval);
-  const lastMinorMarkIndex = Math.floor((visibleEnd + 0.0001) / minorRulerInterval);
-  const rulerMarks = Array.from(
-    { length: timelineDuration > 0 ? Math.max(0, Math.min(500, lastMinorMarkIndex - firstMinorMarkIndex + 1)) : 0 },
-    (_, index) => {
-      const markIndex = firstMinorMarkIndex + index;
-      return { time: markIndex * minorRulerInterval, major: markIndex % 5 === 0 };
-    }
-  );
-  const displayedRulerTicks = timelineDuration > 0
-    ? [...new Set([0, ...rulerTicks, timelineDuration].filter(t => t >= visibleStart - 0.001 && t <= visibleEnd + 0.001))]
-    : [];
+  const { rulerMarks, displayedRulerTicks } = useMemo(() => {
+    const rulerIntervals = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+    const rulerInterval = rulerIntervals.find(i => visibleDuration / i <= 16) ?? rulerIntervals[rulerIntervals.length - 1];
+    const buildRulerTicks = (dur: number, from: number, visibleDur: number): number[] => {
+      if (dur <= 0) return [];
+      const interval = rulerIntervals.find(i => visibleDur / i <= 16) ?? rulerIntervals[rulerIntervals.length - 1];
+      const ticks: number[] = [];
+      const end = Math.min(dur, from + visibleDur);
+      for (let t = Math.floor(from / interval) * interval; t <= end + interval * 0.01; t += interval) {
+        if (t >= 0 && t <= dur) ticks.push(t);
+      }
+      return ticks;
+    };
+    const rulerTicks = buildRulerTicks(timelineDuration, visibleStart, visibleDuration);
+    const minorRulerInterval = rulerInterval / 5;
+    const firstMinorMarkIndex = Math.ceil((visibleStart - 0.0001) / minorRulerInterval);
+    const lastMinorMarkIndex = Math.floor((visibleEnd + 0.0001) / minorRulerInterval);
+    const marks = Array.from(
+      { length: timelineDuration > 0 ? Math.max(0, Math.min(500, lastMinorMarkIndex - firstMinorMarkIndex + 1)) : 0 },
+      (_, index) => {
+        const markIndex = firstMinorMarkIndex + index;
+        return { time: markIndex * minorRulerInterval, major: markIndex % 5 === 0 };
+      }
+    );
+    const ticks = timelineDuration > 0
+      ? [...new Set([0, ...rulerTicks, timelineDuration].filter(t => t >= visibleStart - 0.001 && t <= visibleEnd + 0.001))]
+      : [];
+    return { rulerMarks: marks, displayedRulerTicks: ticks };
+  }, [timelineDuration, visibleStart, visibleEnd, visibleDuration]);
 
   const seekPreview = (time: number, bounds?: { start: number; end: number }, allowOutsideSelection = false) => {
     const activeBounds = bounds ?? (allowOutsideSelection || strategy === 'delete'
@@ -442,14 +476,10 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
       }
       try {
         await video.play();
-        setIsPlaying(true);
       } catch (err) {
         console.warn('[CutTrimTool] Playback blocked or interrupted:', err);
-        if (videoRef.current && !videoRef.current.paused) {
-          setIsPlaying(true);
-        } else {
-          setIsPlaying(false);
-        }
+        setIsPlaying(false);
+        setIsBuffering(false);
       }
     } else {
       video.pause();
@@ -587,6 +617,9 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
         rememberEdit();
         videoRef.current?.pause();
         setIsPlaying(false);
+      } else {
+        // Drag ended: publish the final trim values immediately.
+        flushToolSettings();
       }
     }
   });
@@ -651,7 +684,10 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
             ref={videoRef}
             src={mediaUrl}
             crossOrigin="anonymous"
-            preload="auto"
+            // Match the queue preview: let playback request media as needed
+            // instead of eagerly pulling the entire source while the timeline
+            // is also generating its filmstrip and waveform.
+            preload="metadata"
             muted={isMuted}
             onLoadedMetadata={handleLoadedMetadata}
             onTimeUpdate={(event) => {
@@ -697,11 +733,37 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
               }
               setPlayhead(video.currentTime);
             }}
-            onPlay={() => setIsPlaying(true)}
-            onPause={() => setIsPlaying(false)}
+            // Keep Pause available while a play request is buffering; changing
+            // back to Play here makes a second click cancel the pending playback.
+            onPlay={() => { setIsPlaying(true); setIsBuffering(true); }}
+            onPlaying={() => { setIsPlaying(true); setIsBuffering(false); }}
+            onWaiting={() => setIsBuffering(true)}
+            onStalled={() => setIsBuffering(true)}
+            onPause={() => { setIsPlaying(false); setIsBuffering(false); }}
+            onEnded={() => { setIsPlaying(false); setIsBuffering(false); }}
             onError={handlePreviewError}
             style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
           />
+          {isBuffering && !previewFailed && (
+            <div
+              role="status"
+              style={{
+                position: 'absolute',
+                top: 10,
+                left: 10,
+                zIndex: 2,
+                padding: '5px 9px',
+                borderRadius: 6,
+                background: 'rgba(7, 8, 14, 0.78)',
+                border: '1px solid rgba(56, 189, 248, 0.38)',
+                color: '#bae6fd',
+                fontSize: 11,
+                pointerEvents: 'none'
+              }}
+            >
+              Buffering preview…
+            </div>
+          )}
           {previewFailed && (
             <div
               style={{
@@ -780,24 +842,26 @@ export const CutTrimTool: React.FC<CutTrimToolProps> = ({
         />
       </section>
 
-      <TrimTelemetryPanel
-        strategy={strategy}
-        setStrategy={setStrategy}
-        startDraft={startDraft}
-        setStartDraft={setStartDraft}
-        commitStartDraft={commitStartDraft}
-        endDraft={endDraft}
-        setEndDraft={setEndDraft}
-        commitEndDraft={commitEndDraft}
-        clipDuration={clipDuration}
-        activePreset={activePreset}
-        applyPreset={applyPreset}
-        resetRange={resetRange}
-        usableDuration={usableDuration}
-        playhead={playhead}
-        updateStart={updateStart}
-        updateEnd={updateEnd}
-      />
+      <ProInspector>
+        <TrimTelemetryPanel
+          strategy={strategy}
+          setStrategy={setStrategy}
+          startDraft={startDraft}
+          setStartDraft={setStartDraft}
+          commitStartDraft={commitStartDraft}
+          endDraft={endDraft}
+          setEndDraft={setEndDraft}
+          commitEndDraft={commitEndDraft}
+          clipDuration={clipDuration}
+          activePreset={activePreset}
+          applyPreset={applyPreset}
+          resetRange={resetRange}
+          usableDuration={usableDuration}
+          playhead={playhead}
+          updateStart={updateStart}
+          updateEnd={updateEnd}
+        />
+      </ProInspector>
 
       <ProTimeline>
         <section className="pro-timeline" style={{ padding: '6px 8px' }}>

@@ -661,6 +661,11 @@ namespace Panamedia {
         if (result.success) {
             std::lock_guard<std::mutex> lock(s_probeMutex);
             s_probeCache[filePath] = result;
+            // Bound the cache: an unordered_map has no ordering, so on
+            // overflow drop everything rather than maintain an LRU. Probe
+            // results are tiny and cheap to re-derive; an unbounded cache
+            // grew without limit on hosts that scan many folders.
+            if (s_probeCache.size() > 300) s_probeCache.clear();
         }
 
         return result;
@@ -840,8 +845,11 @@ namespace Panamedia {
         }
         bool isAudio = (ext == ".mp3" || ext == ".m4a" || ext == ".flac" || ext == ".wav" || ext == ".ogg" || ext == ".aac");
 
+        // -threads 1 before -i caps the *decoder*: without it ffmpeg spawns
+        // one thread per logical core per thumbnail request, and mounting a
+        // queue of 30 rows fires one request per row.
         std::stringstream cmd;
-        cmd << escapeArg(ffmpegExe) << " -y -ss 00:00:01 -i " << escapeArg(decodedPath);
+        cmd << escapeArg(ffmpegExe) << " -y -threads 1 -ss 00:00:01 -i " << escapeArg(decodedPath);
         if (isAudio) {
             cmd << " -an -vcodec copy ";
         } else {
@@ -860,7 +868,13 @@ namespace Panamedia {
         ZeroMemory(&pi, sizeof(pi));
 
         if (CreateProcessW(NULL, &wcmd[0], NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-            WaitForSingleObject(pi.hProcess, 3000);
+            // Kill on timeout instead of leaving the child running detached —
+            // repeated scrubs used to stack up orphaned ffmpeg processes.
+            const DWORD waitResult = WaitForSingleObject(pi.hProcess, 8000);
+            if (waitResult == WAIT_TIMEOUT) {
+                TerminateProcess(pi.hProcess, 1);
+                WaitForSingleObject(pi.hProcess, 2000);
+            }
             CloseHandle(pi.hProcess);
             CloseHandle(pi.hThread);
         }
@@ -1019,7 +1033,7 @@ namespace Panamedia {
         std::string ffmpegExe = findFFmpegExecutable();
         std::stringstream cmd;
         cmd << escapeArg(ffmpegExe)
-            << " -ss " << timeSec
+            << " -threads 1 -ss " << timeSec
             << " -i " << escapeArg(decodedPath)
             << " -vframes 1 -vf \"scale=240:-2\" -q:v 3 -f image2 pipe:1";
 
@@ -1049,14 +1063,40 @@ namespace Panamedia {
             if (CreateProcessW(NULL, &wcmd[0], NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
                 CloseHandle(hWrite);
 
+                // Poll the pipe instead of blocking in ReadFile forever: a
+                // pathological file could otherwise pin this handler thread
+                // (and one of the server's limited connection slots) until
+                // shutdown. The deadline kills ffmpeg if it never emits a
+                // frame; the size cap keeps the allocation bounded.
                 std::vector<char> imgData;
                 std::vector<char> readBuf(32768);
                 DWORD bytesRead = 0;
-                while (ReadFile(hRead, readBuf.data(), readBuf.size(), &bytesRead, NULL) && bytesRead > 0 && m_running) {
-                    imgData.insert(imgData.end(), readBuf.data(), readBuf.data() + bytesRead);
+                const DWORD previewDeadlineMs = 10000;
+                const size_t previewMaxBytes = 32u * 1024u * 1024u;
+                const DWORD startTick = GetTickCount();
+                bool timedOut = false;
+                while (m_running) {
+                    DWORD avail = 0;
+                    if (!PeekNamedPipe(hRead, NULL, 0, NULL, &avail, NULL)) break; // write end closed
+                    if (avail > 0) {
+                        if (!ReadFile(hRead, readBuf.data(), static_cast<DWORD>(readBuf.size()), &bytesRead, NULL) || bytesRead == 0) break;
+                        imgData.insert(imgData.end(), readBuf.data(), readBuf.data() + bytesRead);
+                        if (imgData.size() >= previewMaxBytes) break;
+                        continue;
+                    }
+                    DWORD exitCode = 0;
+                    if (GetExitCodeProcess(pi.hProcess, &exitCode) && exitCode != STILL_ACTIVE) break;
+                    if (GetTickCount() - startTick > previewDeadlineMs) { timedOut = true; break; }
+                    Sleep(10);
                 }
 
-                TerminateProcess(pi.hProcess, 0);
+                // Never leave an ffmpeg child running detached: kill it if it
+                // is still alive (timeout, server shutdown, or early break).
+                DWORD exitCode = STILL_ACTIVE;
+                if (GetExitCodeProcess(pi.hProcess, &exitCode) && exitCode == STILL_ACTIVE) {
+                    TerminateProcess(pi.hProcess, timedOut ? 1 : 0);
+                    WaitForSingleObject(pi.hProcess, 2000);
+                }
                 CloseHandle(pi.hProcess);
                 CloseHandle(pi.hThread);
 
@@ -1127,18 +1167,27 @@ namespace Panamedia {
         bool isAudioOnly = videoCodec.empty();
         bool is10or12Bit = (pixelFormat.find("10") != std::string::npos || pixelFormat.find("12") != std::string::npos);
 
-        // Smart Remuxing determination:
-        // If video is H.264, HEVC, VP9, or AV1 and quality is original,
-        // we copy the video stream directly (-c:v copy). 0% CPU, instant startup!
-        bool isH264 = (videoCodec == "h264" || videoCodec == "avc1");
-        bool isDirectCopyableVideo = isH264;
-        bool isCompatiblePixFmt = (pixelFormat == "yuv420p" || pixelFormat == "yuvj420p" || pixelFormat.empty());
+        // Smart Remuxing determination — the shared rule in
+        // playback_support.hpp is the single source of truth for what
+        // Chromium decodes natively (h264/vp8/vp9/av1 + accepted pixel
+        // formats). The old local copy only knew "h264", which sent every
+        // VP8/VP9/AV1 file — the normal output of this app's own downloads —
+        // through a full libx264 re-encode per playing window: a whole core
+        // per playback, exactly what a weak CPU cannot spare.
+        //
+        // audioCodec is deliberately left empty: the audio decision is made
+        // separately below (AAC copies, everything else becomes AAC), so the
+        // video copy must not be vetoed by an audio codec like AC-3.
+        Panamedia::PlaybackSupport::MediaInfo copyRule;
+        copyRule.videoCodec = videoCodec;
+        copyRule.pixelFormat = pixelFormat;
+        const bool isDirectCopyableVideo = Panamedia::PlaybackSupport::canStreamCopy(copyRule);
         bool isAAC = (audioCodec == "aac");
 
         std::string subPath;
         bool hasExternalSubs = hasExternalSubtitles(decodedPath, subPath);
 
-        bool canDirectCopyVideo = !isAudioOnly && isDirectCopyableVideo && isCompatiblePixFmt && (quality == "original" || quality.empty()) && !hasExternalSubs;
+        bool canDirectCopyVideo = !isAudioOnly && isDirectCopyableVideo && (quality == "original" || quality.empty()) && !hasExternalSubs;
 
         if (startSec > 0.0) {
             cmd << " -ss " << startSec;
@@ -1182,7 +1231,10 @@ namespace Panamedia {
                 cmd << " -vf " << escapeArg(filterArg);
             }
 
-            cmd << " -err_detect ignore_err -c:v libx264 -pix_fmt yuv420p -preset ultrafast -tune zerolatency -g 30";
+            // -threads caps the encoder: without it x264 spawns one thread
+            // per logical core, starving the UI and Chromium's own decoder
+            // on the small CPUs this app targets.
+            cmd << " -err_detect ignore_err -c:v libx264 -pix_fmt yuv420p -preset ultrafast -tune zerolatency -g 30 -threads 2";
         }
 
         if (hasAudio) {

@@ -66,26 +66,28 @@ export function PlayerTitleBar({ currentTitle, onHelpClick, onOpenConverter }: P
   // snapshot the modal last published over IPC, so preferring it left the badge
   // showing a count for a queue the user had already emptied.
   const activeQueueCount = queueCount;
+  const hasItems = activeQueueCount > 0;
+  const isConvertingRunning = !!converterState?.converting && !converterState?.isPaused;
   const hasActiveQueue = Boolean(
     (converterState && (converterState.converting || (converterState.progress && converterState.progress > 0))) ||
-    activeQueueCount > 0
+    hasItems
   );
 
   // Derived state for ring
-  const pct       = converterState?.progress || 0;
+  const pct       = hasItems ? (converterState?.progress || 0) : 0;
   const r         = 13;
   const circ      = 2 * Math.PI * r;
-  const isDone    = converterState?.status === 'completed';
-  const isFailed  = converterState?.status === 'failed';
-  const isPaused  = !!converterState?.isPaused;
-  const isRunning = !!converterState?.converting && !isPaused;
+  const isDone    = hasItems && converterState?.status === 'completed';
+  const isFailed  = hasItems && converterState?.status === 'failed';
+  const isPaused  = hasItems && !!converterState?.isPaused;
+  const isRunning = hasItems && isConvertingRunning;
   const offset    = isDone ? 0 : circ - (circ * Math.min(100, Math.max(0, pct)) / 100);
   const arcColor  = isDone ? '#10b981' : isFailed ? '#ef4444' : isPaused ? '#f59e0b' : 'url(#cvG)';
   const iconBg    = isDone
     ? 'linear-gradient(135deg,#10b981,#059669)'
     : isFailed
     ? 'linear-gradient(135deg,#ef4444,#dc2626)'
-    : (isRunning || hasActiveQueue)
+    : (isRunning || (hasItems && hasActiveQueue))
     ? 'linear-gradient(135deg,#ec4899,#8b5cf6)'
     : 'linear-gradient(135deg,#06b6d4,#6366f1)';
 

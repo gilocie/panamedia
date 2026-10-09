@@ -167,13 +167,25 @@ function broadcastThrottled() {
   }, 300);
 }
 
-function saveState() {
+let saveStateTimer = null;
+function persistDownloadsStateNow() {
   try {
     fs.writeFileSync(downloadsFile(), JSON.stringify(downloadsList, null, 2), 'utf8');
-    broadcast();
   } catch (e) {
     console.error('Failed to save downloads state', e);
   }
+}
+function saveState() {
+  // Async + debounced. downloadsList carries base64 thumbnails, so the old
+  // writeFileSync was a multi-MB synchronous disk write on the main thread
+  // from 16 different call sites — every status change and progress
+  // milestone stalled all IPC replies behind it.
+  if (saveStateTimer) clearTimeout(saveStateTimer);
+  saveStateTimer = setTimeout(() => {
+    saveStateTimer = null;
+    fs.writeFile(downloadsFile(), JSON.stringify(downloadsList, null, 2), 'utf8', () => {});
+  }, 500);
+  broadcast();
 }
 
 function checkCompleted(task) {
@@ -202,18 +214,13 @@ function loadState() {
   try {
     if (!fs.existsSync(downloadsFile())) return;
     downloadsList = JSON.parse(fs.readFileSync(downloadsFile(), 'utf8'));
+    const thumbQueue = [];
     downloadsList = downloadsList.map(task => {
       if (isAdOrGifThumbnail(task.thumbnail)) {
         task.thumbnail = '';
       }
       if (task.status === 'completed' && !task.thumbnail && task.filename) {
-        const filePath = path.join(task.saveDir, task.filename);
-        extractVideoFrameThumbnail(filePath, task.duration || 0).then(th => {
-          if (th) {
-            task.thumbnail = th;
-            saveState();
-          }
-        }).catch(() => {});
+        thumbQueue.push(task);
       }
       if (checkCompleted(task)) {
         return task;
@@ -225,6 +232,27 @@ function loadState() {
       }
       return task;
     });
+    // Regenerate missing thumbnails with a bounded pool of 2 workers. This
+    // used to fire one ffmpeg spawn per completed download at startup —
+    // 20 stale entries meant 20 concurrent ffmpeg processes before the UI
+    // was even usable, which is a guaranteed stall on a 2 GB machine.
+    if (thumbQueue.length > 0) {
+      let thumbIndex = 0;
+      const thumbWorker = async () => {
+        while (thumbIndex < thumbQueue.length) {
+          const task = thumbQueue[thumbIndex++];
+          try {
+            const th = await extractVideoFrameThumbnail(path.join(task.saveDir, task.filename), task.duration || 0);
+            if (th) {
+              task.thumbnail = th;
+              saveState();
+            }
+          } catch (e) { /* thumbnail failures are non-fatal */ }
+        }
+      };
+      thumbWorker();
+      thumbWorker();
+    }
   } catch (e) {
     downloadsList = [];
   }
@@ -652,6 +680,11 @@ function initDownloadManager(mainFn, playerFn, cfg) {
 function cleanUpDownloadManager() {
   if (netSpeedTimer) clearInterval(netSpeedTimer);
   if (queueTimer) clearInterval(queueTimer);
+  if (saveStateTimer) {
+    clearTimeout(saveStateTimer);
+    saveStateTimer = null;
+    persistDownloadsStateNow(); // flush pending state on quit
+  }
   Object.keys(activeDownloads).forEach(id => {
     try { activeDownloads[id].pause(); } catch (e) { }
     traffic.end(id);

@@ -27,6 +27,18 @@ export interface FilmstripProps {
 
 // Module-level in-memory cache so revisiting or trimming files displays in 0ms with zero server requests
 const filmstripCache = new Map<string, string[]>();
+// Bounded so a long session cannot pin an unbounded number of frame URL
+// arrays in memory (12 URLs of several KB each per strip). 48 strips is
+// far more reuse than the editor ever gets; past that, oldest are evicted.
+const FILMSTRIP_CACHE_MAX = 48;
+function filmstripCacheSet(key: string, value: string[]) {
+  filmstripCache.set(key, value);
+  while (filmstripCache.size > FILMSTRIP_CACHE_MAX) {
+    const oldest = filmstripCache.keys().next().value;
+    if (oldest === undefined) break;
+    filmstripCache.delete(oldest);
+  }
+}
 
 export const Filmstrip: React.FC<FilmstripProps> = ({
   fileName,
@@ -98,7 +110,7 @@ export const Filmstrip: React.FC<FilmstripProps> = ({
             setShots(prev => {
               const copy = prev.slice();
               copy[item.index] = item.url;
-              filmstripCache.set(cacheKey, copy);
+              filmstripCacheSet(cacheKey, copy);
               return copy;
             });
             pump();

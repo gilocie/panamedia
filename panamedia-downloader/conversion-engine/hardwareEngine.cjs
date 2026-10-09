@@ -167,60 +167,158 @@ function parseTimeString(tStr) {
   return 0;
 }
 
-// Active conversion processes map: filePath -> { proc, isPaused, abort }
+// Active conversion processes map: filePath -> { proc, outputPath, isPaused, inputPath, cancelled }
 const activeProcesses = new Map();
 
+function normalizeProcessKey(p) {
+  if (!p || typeof p !== 'string') return '';
+  return path.resolve(p).toLowerCase().replace(/\\/g, '/');
+}
+
+function findActiveProcess(filePath) {
+  if (!filePath) return null;
+  const key = normalizeProcessKey(filePath);
+  if (activeProcesses.has(key)) return activeProcesses.get(key);
+  if (activeProcesses.has(filePath)) return activeProcesses.get(filePath);
+  for (const [k, item] of activeProcesses.entries()) {
+    if (normalizeProcessKey(k) === key) return item;
+    if (item.inputPath && normalizeProcessKey(item.inputPath) === key) return item;
+  }
+  return null;
+}
+
+function getSuspendToolPath() {
+  const candidates = [
+    path.join(__dirname, '..', '..', 'bin', 'panamedia-suspend.exe'),
+    path.join(__dirname, '..', '..', 'src-cpp', 'build', 'bin', 'Release', 'panamedia-suspend.exe'),
+    path.join(process.resourcesPath || '', 'bin', 'panamedia-suspend.exe')
+  ];
+  for (const p of candidates) {
+    if (p && fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
 /**
- * Toggles pause for a conversion, returning true when now paused.
- *
- * The C++ engine calls NtSuspendProcess / NtResumeProcess on the ffmpeg handle
- * it owns, so pausing genuinely stops the encoder.
- *
- * Previously this only flipped an in-memory flag: it built a PowerShell
- * NtSuspendProcess command into an unused variable and then ran an unrelated
- * command that merely slept 50ms. ffmpeg kept encoding at full speed while the
- * UI claimed the job was paused.
+ * Toggles pause for a conversion, returning true when now paused. The C++ path
+ * controls its own FFmpeg handle; the local fallback suspends the child process
+ * through the Windows process API.
  */
 async function togglePauseProcess(filePath) {
   // Ask the engine which way the job currently sits before flipping it.
-  const st = await coreClient.call('convert_status', { jobId: filePath }, 5000);
+  let st = null;
+  try {
+    st = await coreClient.call('convert_status', { jobId: filePath }, 5000);
+  } catch (err) {
+    console.warn('[Engine] Could not query C++ conversion state:', err.message);
+  }
   if (st && st.found) {
     const action = st.paused ? 'convert_resume' : 'convert_pause';
-    const res = await coreClient.call(action, { jobId: filePath }, 5000);
+    let res = null;
+    try {
+      res = await coreClient.call(action, { jobId: filePath }, 5000);
+    } catch (err) {
+      console.warn('[Engine] C++ pause toggle failed for', filePath, err.message);
+    }
     if (res && res.paused !== undefined) return !!res.paused;
     console.warn('[Engine] C++ pause toggle failed for', filePath, res && res.error);
   }
 
   // Local fallback for Node-run conversions.
-  const item = activeProcesses.get(filePath);
-  if (!item || !item.proc || !item.proc.pid) return false;
+  const item = findActiveProcess(filePath);
+  if (!item || !item.proc || !item.proc.pid) {
+    throw new Error('No active conversion process was found for this media.');
+  }
   try {
-    if (!item.isPaused) {
-      try {
-        execSync(`powershell -Command "$p = Get-Process -Id ${item.proc.pid} -ErrorAction SilentlyContinue; if ($p) { [System.Threading.Thread]::Sleep(50) }"`, { windowsHide: true });
-      } catch (e) {}
-      item.isPaused = true;
-    } else {
-      item.isPaused = false;
+    const action = item.isPaused ? 'resume' : 'pause';
+    const processId = Number(item.proc.pid);
+    if (!Number.isSafeInteger(processId) || processId <= 0) {
+      throw new Error('FFmpeg returned an invalid process ID.');
     }
+
+    if (process.platform === 'win32') {
+      const suspendTool = getSuspendToolPath();
+      if (suspendTool) {
+        execFileSync(suspendTool, [String(processId), action], {
+          windowsHide: true,
+          stdio: 'ignore',
+          timeout: 4000
+        });
+      } else {
+        const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class PanamediaProcessControl {
+  [DllImport("kernel32.dll", SetLastError = true)]
+  public static extern IntPtr OpenProcess(uint access, bool inheritHandle, int processId);
+  [DllImport("ntdll.dll")]
+  public static extern int NtSuspendProcess(IntPtr processHandle);
+  [DllImport("ntdll.dll")]
+  public static extern int NtResumeProcess(IntPtr processHandle);
+  [DllImport("kernel32.dll")]
+  public static extern bool CloseHandle(IntPtr handle);
+}
+'@
+$processId = ${processId}
+$handle = [PanamediaProcessControl]::OpenProcess(0x0800, $false, $processId)
+if ($handle -eq [IntPtr]::Zero) { throw "Could not open FFmpeg process $processId." }
+try {
+  if ('${action}' -eq 'pause') {
+    $status = [PanamediaProcessControl]::NtSuspendProcess($handle)
+  } else {
+    $status = [PanamediaProcessControl]::NtResumeProcess($handle)
+  }
+  if ($status -ne 0) { throw "Windows process control failed with status $status." }
+} finally {
+  [PanamediaProcessControl]::CloseHandle($handle) | Out-Null
+}
+`;
+        execFileSync('powershell.exe', [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          script
+        ], { windowsHide: true, stdio: 'pipe', timeout: 10000 });
+      }
+    } else {
+      process.kill(processId, action === 'pause' ? 'SIGSTOP' : 'SIGCONT');
+    }
+
+    item.isPaused = !item.isPaused;
     return item.isPaused;
   } catch (err) {
-    console.warn('[Engine] Error toggling pause on PID:', err);
-    return false;
+    console.warn('[Engine] Error toggling pause on PID:', err.message);
+    throw new Error(`Could not ${item.isPaused ? 'resume' : 'pause'} FFmpeg: ${err.message}`);
   }
 }
 
 function cancelConversion(filePath) {
-  const item = activeProcesses.get(filePath);
+  const item = findActiveProcess(filePath);
   if (!item || !item.proc || item.proc.killed) return false;
+  item.cancelled = true;
+  if (item.isPaused && process.platform === 'win32') {
+    try {
+      const suspendTool = getSuspendToolPath();
+      if (suspendTool) {
+        execFileSync(suspendTool, [String(item.proc.pid), 'resume'], {
+          windowsHide: true,
+          stdio: 'ignore',
+          timeout: 2000
+        });
+      }
+    } catch (e) {}
+  }
   return item.proc.kill();
 }
 
 function cancelConversionsWritingOutput(outputPath) {
-  const target = path.resolve(outputPath).toLowerCase();
+  const target = normalizeProcessKey(outputPath);
   const cancelledInputs = [];
   for (const [inputPath, item] of activeProcesses.entries()) {
-    if (!item.outputPath || path.resolve(item.outputPath).toLowerCase() !== target) continue;
+    if (!item.outputPath || normalizeProcessKey(item.outputPath) !== target) continue;
+    item.cancelled = true;
     if (item.proc && !item.proc.killed && item.proc.kill()) cancelledInputs.push(inputPath);
   }
   return cancelledInputs;
@@ -435,7 +533,10 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
 
     // Spawn with windowsHide and standard pipe
     const proc = spawn(ffmpegPath, args, { windowsHide: true });
-    activeProcesses.set(inputPath, { proc, outputPath, isPaused: false });
+    const canonKey = normalizeProcessKey(inputPath);
+    const processEntry = { proc, outputPath, isPaused: false, inputPath, cancelled: false };
+    activeProcesses.set(canonKey, processEntry);
+    activeProcesses.set(inputPath, processEntry);
 
     // Lower process priority on Windows so FFmpeg never starves the UI or jams the PC
     if (proc.pid) {
@@ -459,6 +560,7 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
       const startTime = Date.now();
       const estimatedMs = 180000; // 3 minute ceiling estimate
       timedProgressInterval = setInterval(() => {
+        if (processEntry.isPaused) return;
         const elapsed = Date.now() - startTime;
         const estimated = Math.min(0.90, 0.05 + 0.85 * (elapsed / estimatedMs));
         if (estimated > lastKnownProgress) {
@@ -469,6 +571,7 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
     }
 
     proc.stderr.on('data', (d) => {
+      if (processEntry.isPaused) return;
       const str = d.toString();
       lastStderr += str;
       if (lastStderr.length > 4000) lastStderr = lastStderr.slice(-4000);
@@ -505,7 +608,13 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
 
     proc.on('close', (code) => {
       if (timedProgressInterval) clearInterval(timedProgressInterval);
+      activeProcesses.delete(canonKey);
       activeProcesses.delete(inputPath);
+      if (processEntry.cancelled) {
+        onProgress({ progress: 0, status: 'cancelled' });
+        resolve({ success: false, cancelled: true });
+        return;
+      }
       if (code === 0 && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
         onProgress({ progress: 1.0, status: 'completed' });
         resolve({ success: true, outputPath });
@@ -518,7 +627,13 @@ async function executeOptimizedConversionLocal(inputPath, outputPath, options = 
 
     proc.on('error', (err) => {
       if (timedProgressInterval) clearInterval(timedProgressInterval);
+      activeProcesses.delete(canonKey);
       activeProcesses.delete(inputPath);
+      if (processEntry.cancelled) {
+        onProgress({ progress: 0, status: 'cancelled' });
+        resolve({ success: false, cancelled: true });
+        return;
+      }
       onProgress({ progress: 0, status: 'failed', error: err.message });
       reject(err);
     });

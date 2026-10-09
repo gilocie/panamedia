@@ -194,6 +194,10 @@ export function VideoScreen({
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
     const sampleEdges = () => {
+      // Don't read frame pixels while the window is hidden/minimized/behind
+      // another app: the glow isn't visible anyway, and drawImage+getImageData
+      // is the expensive part of this timer.
+      if (document.visibilityState !== 'visible') return;
       if (!v.paused && v.readyState >= 2 && ctx) {
         try {
           ctx.drawImage(v, 0, 0, 4, 4);
@@ -257,6 +261,13 @@ export function VideoScreen({
     window.addEventListener('resize', resize);
 
     const draw = () => {
+      // Stop the frame chain while the window is hidden/minimized: nothing is
+      // visible to paint and a silent 60 fps loop is pure waste. The
+      // visibilitychange handler below restarts it the moment it matters.
+      if (document.visibilityState !== 'visible') {
+        rafRef.current = null;
+        return;
+      }
       rafRef.current = requestAnimationFrame(draw);
       const analyser = analyserRef.current;
       const ctx2d = canvas.getContext('2d');
@@ -322,8 +333,16 @@ export function VideoScreen({
       }
     };
 
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !rafRef.current) {
+        draw(); // restart the animation chain on return
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
     draw();
     return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('resize', resize);
       if (rafRef.current) {
         cancelAnimationFrame(rafRef.current);

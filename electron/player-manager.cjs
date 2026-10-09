@@ -100,6 +100,14 @@ function openPlayerWindow(filePath, filename, options = {}) {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      // The player window must behave like a desktop media player (VLC, video
+      // editors): keep playing and keep its timers/IPC alive when minimized,
+      // hidden to the sidebar, occluded by another window, or covered by a
+      // fullscreen game. `backgroundThrottling: true` freezes rAF/timers and
+      // stalls the media pipeline the moment the window loses visibility,
+      // which is exactly the "stops working when I open another app" bug.
+      // Only player windows are exempt — the main and converter windows stay
+      // throttled so hidden UI doesn't burn CPU/RAM on low-end machines.
       backgroundThrottling: false,
       preload: path.join(__dirname, '..', 'preload.cjs')
     }
@@ -173,6 +181,11 @@ function openPlayerWindow(filePath, filename, options = {}) {
     playerWin.webContents.send('player-fullscreen-changed', false);
   });
 
+  // The player never pauses when it loses focus — it behaves like a desktop
+  // media player (VLC/track editors). Switching to another app, including the
+  // main Panamedia window, used to fire 'blur' → 'player-remote-command:
+  // pause', which is exactly the "it stops playing as soon as I open another
+  // app" bug. Playback now simply keeps running.
   playerWin.on('focus', () => {
     lastFocusedPlayerWindow = playerWin;
     const st = playerStates.get(playerWin.id);
@@ -307,22 +320,31 @@ function setupIpcHandlers() {
   });
 
   ipcMain.on('player-control-play-pause', (event) => {
-    const win = (event && event.sender) ? BrowserWindow.fromWebContents(event.sender) : getLastFocusedPlayerWindow();
-    if (win && !win.isDestroyed()) {
+    const senderWin = (event && event.sender) ? BrowserWindow.fromWebContents(event.sender) : null;
+    const isPlayer = senderWin && activePlayerWindows.has(senderWin);
+    const win = isPlayer ? senderWin : getLastFocusedPlayerWindow();
+    if (win && !win.isDestroyed() && win !== mainWindowRef) {
       win.webContents.send('player-control-play-pause');
     }
   });
 
   ipcMain.on('player-control-close', (event) => {
-    const win = (event && event.sender) ? BrowserWindow.fromWebContents(event.sender) : getLastFocusedPlayerWindow();
-    if (win && !win.isDestroyed()) {
+    const senderWin = (event && event.sender) ? BrowserWindow.fromWebContents(event.sender) : null;
+    const isPlayer = senderWin && activePlayerWindows.has(senderWin);
+    const win = isPlayer ? senderWin : getLastFocusedPlayerWindow();
+    if (win && !win.isDestroyed() && win !== mainWindowRef) {
       win.close();
+    }
+    if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+      mainWindowRef.webContents.send('player-state-changed', null);
     }
   });
 
   ipcMain.on('player-control-mute', (event) => {
-    const win = (event && event.sender) ? BrowserWindow.fromWebContents(event.sender) : getLastFocusedPlayerWindow();
-    if (win && !win.isDestroyed()) {
+    const senderWin = (event && event.sender) ? BrowserWindow.fromWebContents(event.sender) : null;
+    const isPlayer = senderWin && activePlayerWindows.has(senderWin);
+    const win = isPlayer ? senderWin : getLastFocusedPlayerWindow();
+    if (win && !win.isDestroyed() && win !== mainWindowRef) {
       win.webContents.send('player-control-mute');
     }
   });

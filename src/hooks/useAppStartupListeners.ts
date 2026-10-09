@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { isExtractorUrl } from '../utils/urlUtils';
 import type { AppTask, AppSettings } from '../types/appTypes';
 
@@ -31,6 +31,24 @@ export function useAppStartupListeners({
 }: UseAppStartupListenersParams) {
   const loadedSettingsRef = useRef(false);
 
+  // The main process broadcasts `downloads-updated` on a ~300 ms throttle
+  // while a download runs. Syncing the library on each of those was a full
+  // directory walk + stat pass over every library file + serialization of
+  // the whole file list to both windows + two full App re-renders — roughly
+  // 3×/sec for the entire duration of any download. Sync instead when a
+  // download actually finishes, debounced so a burst of completions costs
+  // a single scan.
+  const syncLibraryRef = useRef(syncLibrary);
+  syncLibraryRef.current = syncLibrary;
+  const syncTimerRef = useRef<number | null>(null);
+  const scheduleLibrarySync = useCallback(() => {
+    if (syncTimerRef.current !== null) window.clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = window.setTimeout(() => {
+      syncTimerRef.current = null;
+      syncLibraryRef.current?.();
+    }, 1500);
+  }, []);
+
   useEffect(() => {
     if (!electron) return;
 
@@ -45,8 +63,8 @@ export function useAppStartupListeners({
     });
 
     const handleDownloadsUpdated = (_event: any, list: AppTask[]) => {
+      // Progress-only tick: update the list, never rescan the library here.
       setDownloads(list);
-      syncLibrary();
     };
     electron.ipcRenderer.on('downloads-updated', handleDownloadsUpdated);
 
@@ -61,6 +79,8 @@ export function useAppStartupListeners({
 
     const handleDownloadCompletedToast = (_event: any, filename: string) => {
       addToast(`Completed: ${filename}`);
+      // A finished download puts a new file on disk — sync then.
+      scheduleLibrarySync();
     };
     electron.ipcRenderer.on('download-completed-toast', handleDownloadCompletedToast);
 
@@ -72,6 +92,10 @@ export function useAppStartupListeners({
     electron.ipcRenderer.on('settings-changed', handleSettingsChanged);
 
     return () => {
+      if (syncTimerRef.current !== null) {
+        window.clearTimeout(syncTimerRef.current);
+        syncTimerRef.current = null;
+      }
       electron.ipcRenderer.removeListener('downloads-updated', handleDownloadsUpdated);
       electron.ipcRenderer.removeListener('native-download-received', handleNativeDownloadReceived);
       electron.ipcRenderer.removeListener('download-completed-toast', handleDownloadCompletedToast);

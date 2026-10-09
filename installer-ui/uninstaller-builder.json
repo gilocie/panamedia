@@ -1,0 +1,52 @@
+{
+  "appId": "com.panamedia.uninstaller",
+  "productName": "PanamediaUninstall",
+  "copyright": "Copyright © 2026 Go Save Site",
+  "icon": "panamedia.ico",
+  "directories": {
+    "output": "../dist-installer",
+    "buildResources": "build"
+  },
+  "electronVersion": "42.4.1",
+  "files": [
+    "main.cjs",
+    "index.html",
+    "panamedia.ico",
+    "icons.svg"
+  ],
+  "extraResources": [
+    {
+      "from": "../src/assets/playerbg.jpg",
+      "to": "playerbg.jpg"
+    },
+    {
+      "from": "panamedia.ico",
+      "to": "panamedia.ico"
+    },
+    {
+      "from": "../public/player.ico",
+      "to": "player.ico"
+    },
+    {
+      "from": "icons.svg",
+      "to": "icons.svg"
+    }
+  ],
+  "win": {
+    "publisherName": "Go Save Site",
+    "target": [
+      {
+        "target": "portable",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "panamedia.ico",
+    "requestedExecutionLevel": "requireAdministrator",
+    "artifactName": "PanamediaUninstall.exe"
+  },
+  "portable": {
+    "artifactName": "PanamediaUninstall.exe",
+    "requestExecutionLevel": "admin"
+  },
+  "compression": "maximum"
+}

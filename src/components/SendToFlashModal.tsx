@@ -132,6 +132,20 @@ export function SendToFlashModal({
     error?: string;
     outputPath?: string;
   }>>({});
+  const forgetCompletedConversions = (files: string[]) => {
+    if (files.length === 0) return;
+    setFileConversionMap(prev => {
+      const next = { ...prev };
+      let changed = false;
+      for (const file of files) {
+        if (next[file]?.status === 'completed') {
+          delete next[file];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  };
 
   // Files the user deleted from the queue while converting. Their
   // jobs were cancelled, so late progress events are dropped here --
@@ -152,11 +166,24 @@ export function SendToFlashModal({
 
     // If every file in this run was removed, clear the aggregate run state now
     // instead of waiting for a late FFmpeg/core completion event to arrive.
-    if (isConvertingBatch && allFiles.length > 0 && allFiles.every(file => removedFilesRef.current.has(file))) {
+    const remainingInRun = allFiles.filter(file => !removedFilesRef.current.has(file));
+    if (remainingInRun.length === 0) {
       setIsConvertingBatch(false);
       setCopyStatus('idle');
       setCopyProgress(0);
       try { localStorage.removeItem('converter_active_progress'); } catch (e) {}
+      if (electron) {
+        electron.ipcRenderer.send('converter-minimize-state', {
+          minimized: false,
+          converting: false,
+          isPaused: false,
+          progress: 0,
+          queueCount: 0,
+          currentFile: '',
+          status: 'idle',
+          statusText: 'Idle'
+        });
+      }
     }
   };
   // Mirror of the above, readable from callbacks without re-creating them.
@@ -200,23 +227,33 @@ export function SendToFlashModal({
   }, [fileConversionMap, splitInFlight]);
 
   /** Applies a pause state to specific jobs in the engine and in the map. */
-  const applyPauseTo = useCallback(async (targets: string[], toPaused: boolean) => {
+  const applyPauseTo = useCallback(async (targets: string[]) => {
     if (!electron || targets.length === 0) return;
     const bridge = electron;
-    await Promise.all(targets.map(async (f) => {
+    const outcomes = await Promise.all(targets.map(async (f) => {
       try {
-        await bridge.ipcRenderer.invoke('converter-toggle-pause', f);
-      } catch (e) {}
+        const res = await bridge.ipcRenderer.invoke('converter-toggle-pause', f);
+        if (!res?.success || typeof res.isPaused !== 'boolean') {
+          throw new Error(res?.error || 'The conversion process could not be paused.');
+        }
+        return { file: f, paused: res.isPaused };
+      } catch (error: any) {
+        return { file: f, error: error?.message || 'Could not pause or resume this conversion.' };
+      }
     }));
     setFileConversionMap(prev => {
       const next = { ...prev };
-      for (const f of targets) {
-        const item = next[f];
+      for (const result of outcomes) {
+        const item = next[result.file];
         if (!item) continue;
-        next[f] = { ...item, status: toPaused ? 'paused' : 'converting' };
+        if (!result.error) {
+          next[result.file] = { ...item, status: result.paused ? 'paused' : 'converting' };
+        }
       }
       return next;
     });
+    const failure = outcomes.find(result => result.error);
+    setErrorMsg(failure?.error || '');
   }, []);
 
   const [isConvertingBatch, setIsConvertingBatch] = useState(false);
@@ -274,12 +311,12 @@ export function SendToFlashModal({
     const handlePause = () => {
       const { running } = splitInFlight(fileConversionMapRef.current);
       if (running.length === 0) return;
-      applyPauseTo(running, true);
+      applyPauseTo(running);
     };
     const handleResume = () => {
       const { held } = splitInFlight(fileConversionMapRef.current);
       if (held.length === 0) return;
-      applyPauseTo(held, false);
+      applyPauseTo(held);
     };
     bridge.ipcRenderer.on('converter-open-request', handleDirectOpen);
     bridge.ipcRenderer.on('converter-restore-request', handleRestore);
@@ -306,6 +343,7 @@ export function SendToFlashModal({
       if (duplicates.length > 0) {
         console.log(`[Converter] already queued, skipped: ${duplicates.length} file(s)`);
       }
+      forgetCompletedConversions(added);
       // Deliberately does not touch `setSendTrayItems`. Queued-for-conversion
       // and staged-for-sending are different intentions, and pushing converter
       // additions into the sendtray made them show up in both lists at once.
@@ -356,11 +394,17 @@ export function SendToFlashModal({
     if (setSendTrayItems) {
       setSendTrayItems([]);
     }
+    try { localStorage.removeItem('converter_active_progress'); } catch (e) {}
     if (electron) {
       electron.ipcRenderer.send('converter-minimize-state', {
         minimized: false,
         queueCount: 0,
-        converting: false
+        converting: false,
+        isPaused: false,
+        progress: 0,
+        currentFile: '',
+        status: 'idle',
+        statusText: 'Idle'
       });
     }
   };
@@ -643,10 +687,11 @@ export function SendToFlashModal({
             registerOutputs(driveOutputs, driveOutputKind, {
               thumbnailPath: driveOutputKind === 'audio' ? thumbnailForOutput(itemOpt.mode, target) : undefined
             });
-            setFileConversionMap(prev => ({
-              ...prev,
-              [target]: { status: 'completed', progress: 1.0, outputPath: driveOutputs[0] }
-            }));
+            setFileConversionMap(prev => {
+              const next = { ...prev };
+              delete next[target];
+              return next;
+            });
             removeFromQueue([target]);
           } else {
             // Conversion output belongs in the matching media folder by
@@ -693,13 +738,11 @@ export function SendToFlashModal({
                 thumbnailPath: outputKind === 'audio' ? thumbnailForOutput(itemOpt.mode, target) : undefined
               });
 
-              setFileConversionMap(prev => ({
-                ...prev,
-                [target]: {
-                  status: 'completed', progress: 1.0, outputPath: finalPath,
-                  segments: res.segments
-                }
-              }));
+              setFileConversionMap(prev => {
+                const next = { ...prev };
+                delete next[target];
+                return next;
+              });
 
               // Done means done: the source leaves the queue. Only failures stay
               // behind, so they can be retried, and the title-bar badge stops
@@ -797,7 +840,7 @@ export function SendToFlashModal({
     const targets = toPaused ? running : held;
     if (targets.length === 0) return;
 
-    await applyPauseTo(targets, toPaused);
+    await applyPauseTo(targets);
   };
 
   const handleConvertSingleFile = async (targetFile: string, options: SendConvertOptions) => {
@@ -877,10 +920,11 @@ export function SendToFlashModal({
         thumbnailPath: outputKind === 'audio' ? thumbnailForOutput(itemOptions.mode, targetFile) : undefined
       });
       if (!removedFilesRef.current.has(targetFile)) {
-        setFileConversionMap(prev => ({
-          ...prev,
-          [targetFile]: { status: 'completed', progress: 1.0, outputPath }
-        }));
+        setFileConversionMap(prev => {
+          const next = { ...prev };
+          delete next[targetFile];
+          return next;
+        });
         removeFromQueue([targetFile]);
       }
     } catch (err: any) {
@@ -896,23 +940,23 @@ export function SendToFlashModal({
   const handleTogglePauseSingleFile = async (targetFile: string) => {
     if (!electron || !targetFile) return;
 
-    // What this file is doing now, before the round trip. Used as the fallback
-    // when the engine does not answer, so the button still moves rather than
-    // silently sticking -- it used to fall back to the *global* flag, which is
-    // how a single-file pause could leave the footer reading PAUSE.
-    const wasPaused = fileConversionMapRef.current[targetFile]?.status === 'paused';
-
-    const res = await electron.ipcRenderer.invoke('converter-toggle-pause', targetFile);
-    const isNowPaused = typeof res?.isPaused === 'boolean' ? res.isPaused : !wasPaused;
-
-    setFileConversionMap(prev => {
-      const curr = prev[targetFile];
-      if (!curr) return prev;
-      return {
-        ...prev,
-        [targetFile]: { ...curr, status: isNowPaused ? 'paused' : 'converting' }
-      };
-    });
+    try {
+      const res = await electron.ipcRenderer.invoke('converter-toggle-pause', targetFile);
+      if (!res?.success || typeof res.isPaused !== 'boolean') {
+        throw new Error(res?.error || 'The conversion process could not be paused.');
+      }
+      setFileConversionMap(prev => {
+        const curr = prev[targetFile];
+        if (!curr) return prev;
+        return {
+          ...prev,
+          [targetFile]: { ...curr, status: res.isPaused ? 'paused' : 'converting' }
+        };
+      });
+      setErrorMsg('');
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Could not pause or resume this conversion.');
+    }
     // No aggregate update needed: the footer's state is derived from this map,
     // so holding the only running job now reads RESUME there automatically.
   };
@@ -1035,6 +1079,7 @@ export function SendToFlashModal({
     if (usable.length === 0) return;
 
     const { added, duplicates } = addToQueue(usable);
+    forgetCompletedConversions(added);
     if (added.length === 0 && duplicates.length > 0) {
       console.log('[Converter] already in queue, opening it');
     }

@@ -182,7 +182,14 @@ export function PlayerControls({
           let active = true;
           img.onload = () => {
             if (!active) return;
-            previewCacheRef.current.set(cacheKey, img.src);
+            const cache = previewCacheRef.current;
+            cache.set(cacheKey, img.src);
+            // Each entry is a data-URL JPEG (tens of KB); keep scrubbing cache
+            // bounded so a long session doesn't pin hundreds of MB.
+            if (cache.size > 200) {
+              const oldest = cache.keys().next().value;
+              if (oldest !== undefined) cache.delete(oldest);
+            }
             setDynamicThumbnailUrl(img.src);
           };
           img.onerror = () => {

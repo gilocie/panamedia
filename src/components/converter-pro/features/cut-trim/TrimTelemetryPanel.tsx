@@ -6,7 +6,7 @@ import {
   SkipForward,
   Timer
 } from 'lucide-react';
-import { ProInspector, ProPanel } from '../ProToolShell';
+import { ProPanel } from '../ProToolShell';
 
 const ACCENT = '#38bdf8';
 
@@ -104,7 +104,7 @@ export const TrimTelemetryPanel: React.FC<TrimTelemetryPanelProps> = ({
   );
 
   return (
-    <ProInspector>
+    <>
       <ProPanel
         title="Trimming Strategy"
         icon={<Timer size={13} />}
@@ -215,6 +215,6 @@ export const TrimTelemetryPanel: React.FC<TrimTelemetryPanelProps> = ({
           </button>
         </div>
       </ProPanel>
-    </ProInspector>
+    </>
   );
 };
