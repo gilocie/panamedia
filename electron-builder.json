@@ -17,11 +17,6 @@
   ],
   "extraResources": [
     {
-      "from": "src-cpp/build/bin/Release/",
-      "to": "bin/",
-      "filter": ["*.exe", "*.dll"]
-    },
-    {
       "from": "bin/",
       "to": "bin/",
       "filter": ["*.exe", "*.dll"]

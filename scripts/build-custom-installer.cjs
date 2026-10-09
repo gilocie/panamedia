@@ -38,6 +38,22 @@ async function main() {
     }
   }
 
+  // Sync latest C++ binaries to bin directory
+  const cppReleaseDir = path.join(ROOT, 'src-cpp', 'build', 'bin', 'Release');
+  const binDir = path.join(ROOT, 'bin');
+  if (fs.existsSync(cppReleaseDir) && fs.existsSync(binDir)) {
+    const binFiles = fs.readdirSync(cppReleaseDir);
+    for (const file of binFiles) {
+      if (file.endsWith('.exe') || file.endsWith('.dll')) {
+        try {
+          fs.copyFileSync(path.join(cppReleaseDir, file), path.join(binDir, file));
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
   // 1. Ensure build and public asset icons are present in installer-ui
   console.log('\n1. Staging installer icons & assets...');
   const iconSources = [
