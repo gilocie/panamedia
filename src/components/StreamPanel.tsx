@@ -222,8 +222,10 @@ export function StreamPanel({
         {/* Navigation Buttons */}
         <button
           onClick={() => {
-            const webview = document.querySelector('webview') as any;
-            webview?.goBack();
+            try {
+              const webview = document.querySelector('webview') as any;
+              if (webview && webview.isConnected) webview.goBack();
+            } catch (e) {}
           }}
           className="btn-secondary"
           style={{ padding: '6px 8px', borderRadius: '8px' }}
@@ -233,8 +235,10 @@ export function StreamPanel({
         </button>
         <button
           onClick={() => {
-            const webview = document.querySelector('webview') as any;
-            webview?.goForward();
+            try {
+              const webview = document.querySelector('webview') as any;
+              if (webview && webview.isConnected) webview.goForward();
+            } catch (e) {}
           }}
           className="btn-secondary"
           style={{ padding: '6px 8px', borderRadius: '8px' }}
@@ -245,8 +249,16 @@ export function StreamPanel({
         <button
           onClick={() => {
             setIsLoading(true);
-            const webview = document.querySelector('webview') as any;
-            webview?.reload();
+            try {
+              const webview = document.querySelector('webview') as any;
+              if (webview && webview.isConnected) {
+                webview.reload();
+              } else {
+                setIsLoading(false);
+              }
+            } catch (e) {
+              setIsLoading(false);
+            }
           }}
           className="btn-secondary"
           style={{ padding: '6px 8px', borderRadius: '8px' }}

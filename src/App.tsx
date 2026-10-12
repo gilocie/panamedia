@@ -4253,7 +4253,7 @@ export default function App() {
             <div className="glass-panel" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 16px', borderRadius: '12px', border: '1px solid var(--panel-border)', marginBottom: '12px', flexShrink: 0 }}>
               {/* Navigation Buttons */}
               <button
-                onClick={() => webviewRef.current?.goBack()}
+                onClick={() => { try { webviewRef.current?.goBack(); } catch (e) {} }}
                 className="btn-secondary"
                 style={{ padding: '6px 8px', borderRadius: '8px' }}
                 title="Go Back"
@@ -4261,7 +4261,7 @@ export default function App() {
                 <ChevronLeft size={14} />
               </button>
               <button
-                onClick={() => webviewRef.current?.goForward()}
+                onClick={() => { try { webviewRef.current?.goForward(); } catch (e) {} }}
                 className="btn-secondary"
                 style={{ padding: '6px 8px', borderRadius: '8px' }}
                 title="Go Forward"
@@ -4271,7 +4271,7 @@ export default function App() {
               <button
                 onClick={() => {
                   setIsWebviewLoading(true);
-                  webviewRef.current?.reload();
+                  try { webviewRef.current?.reload(); } catch (e) { setIsWebviewLoading(false); }
                 }}
                 className="btn-secondary"
                 style={{ padding: '6px 8px', borderRadius: '8px' }}
@@ -4416,7 +4416,7 @@ export default function App() {
                           let detectedCurrentTime = 0;
 
                           try {
-                            if (webviewRef.current) {
+                            if (webviewRef.current && webviewRef.current.isConnected) {
                               const scriptToRun = `(${extractWebviewStreamScript.toString()})()`;
                               const detected = await webviewRef.current.executeJavaScript(scriptToRun);
                               if (detected) {
@@ -4446,7 +4446,7 @@ export default function App() {
                                 }
 
                                 // 3. Capture live frame strictly within the video player rectangle
-                                if (!liveThumbnail && detected.videoRect && typeof (webviewRef.current as any)?.capturePage === 'function') {
+                                if (!liveThumbnail && detected.videoRect && webviewRef.current?.isConnected && typeof (webviewRef.current as any)?.capturePage === 'function') {
                                   try {
                                     const nativeImg = await (webviewRef.current as any).capturePage(detected.videoRect);
                                     if (nativeImg && !nativeImg.isEmpty()) {

@@ -33,40 +33,45 @@ export function useBrowser() {
 
   const webviewRef = useRef<any>(null);
   const browserScreenActiveRef = useRef(false);
+  const isDomReadyRef = useRef(false);
 
   const setBrowserScreenActive = useCallback((active: boolean) => {
     browserScreenActiveRef.current = active;
     const webview = webviewRef.current;
-    if (!webview?.executeJavaScript) return;
+    if (!webview || !webview.isConnected || !isDomReadyRef.current || typeof webview.executeJavaScript !== 'function') return;
 
-    webview.executeJavaScript(`
-      (() => {
-        window.__panamediaScreenActive = ${active ? 'true' : 'false'};
-        if (window.__panamediaSkipAdInterval) {
-          clearInterval(window.__panamediaSkipAdInterval);
-          window.__panamediaSkipAdInterval = null;
-        }
-        if (!window.__panamediaScreenActive) {
-          document.querySelectorAll('video, audio').forEach((media) => {
-            if (!media.paused) {
-              media.dataset.panamediaPausedForInactiveScreen = 'true';
-              media.pause();
-            }
-          });
-          return;
-        }
-        const skipVideoAds = () => {
-          document.querySelectorAll('.ytp-ad-skip-button, .ytp-skip-ad-button, .videoAdUiSkipButton, .ytp-ad-skip-button-modern')
-            .forEach((button) => { try { button.click(); } catch (e) {} });
-        };
-        window.__panamediaSkipAdInterval = setInterval(skipVideoAds, 1000);
-        document.querySelectorAll('video[data-panamedia-paused-for-inactive-screen="true"], audio[data-panamedia-paused-for-inactive-screen="true"]')
-          .forEach((media) => {
-            delete media.dataset.panamediaPausedForInactiveScreen;
-            media.play().catch(() => {});
-          });
-      })();
-    `).catch(() => {});
+    try {
+      webview.executeJavaScript(`
+        (() => {
+          window.__panamediaScreenActive = ${active ? 'true' : 'false'};
+          if (window.__panamediaSkipAdInterval) {
+            clearInterval(window.__panamediaSkipAdInterval);
+            window.__panamediaSkipAdInterval = null;
+          }
+          if (!window.__panamediaScreenActive) {
+            document.querySelectorAll('video, audio').forEach((media) => {
+              if (!media.paused) {
+                media.dataset.panamediaPausedForInactiveScreen = 'true';
+                media.pause();
+              }
+            });
+            return;
+          }
+          const skipVideoAds = () => {
+            document.querySelectorAll('.ytp-ad-skip-button, .ytp-skip-ad-button, .videoAdUiSkipButton, .ytp-ad-skip-button-modern')
+              .forEach((button) => { try { button.click(); } catch (e) {} });
+          };
+          window.__panamediaSkipAdInterval = setInterval(skipVideoAds, 1000);
+          document.querySelectorAll('video[data-panamedia-paused-for-inactive-screen="true"], audio[data-panamedia-paused-for-inactive-screen="true"]')
+            .forEach((media) => {
+              delete media.dataset.panamediaPausedForInactiveScreen;
+              media.play().catch(() => {});
+            });
+        })();
+      `).catch(() => {});
+    } catch (e) {
+      // webview is not yet attached to DOM or dom-ready not yet emitted
+    }
   }, []);
 
   useEffect(() => {
@@ -117,8 +122,14 @@ export function useBrowser() {
     formattedUrl = cleanStreamUrl(formattedUrl);
     if (webviewRef.current) {
       try {
-        if (typeof webviewRef.current.loadURL === 'function') {
-          webviewRef.current.loadURL(formattedUrl).catch(() => {});
+        if (webviewRef.current.isConnected && isDomReadyRef.current && typeof webviewRef.current.loadURL === 'function') {
+          try {
+            webviewRef.current.loadURL(formattedUrl).catch(() => {
+              if (webviewRef.current) webviewRef.current.src = formattedUrl;
+            });
+          } catch {
+            webviewRef.current.src = formattedUrl;
+          }
         } else {
           webviewRef.current.src = formattedUrl;
         }
@@ -137,8 +148,14 @@ export function useBrowser() {
   }, []);
 
   const setWebviewRef = useCallback((el: any) => {
-    if (!el || webviewRef.current === el) return;
+    if (!el) {
+      webviewRef.current = null;
+      isDomReadyRef.current = false;
+      return;
+    }
+    if (webviewRef.current === el) return;
     webviewRef.current = el;
+    isDomReadyRef.current = false;
 
     const handleNav = (e: any) => {
       const u = (e.url || '').toLowerCase();
@@ -152,6 +169,7 @@ export function useBrowser() {
     const handleStopLoad = () => setIsWebviewLoading(false);
 
     const handleDomReady = () => {
+      isDomReadyRef.current = true;
       try {
         el.executeJavaScript?.(`
           (() => {
