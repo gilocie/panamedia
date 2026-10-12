@@ -10,6 +10,8 @@
   "files": [
     "dist/**/*",
     "electron.cjs",
+    "preload.cjs",
+    "electron/**/*",
     "panamedia-downloader/**/*",
     "dev.cjs",
     "package.json"

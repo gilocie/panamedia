@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Plus, ChevronLeft, ChevronRight, RefreshCw, Globe, List, Download, PlaySquare } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, RefreshCw, Globe, List, Download, Maximize2, Minimize2 } from 'lucide-react';
 
 export interface StreamPanelProps {
   activeTab: string;
@@ -33,7 +33,9 @@ export function StreamPanel({
   onDownloadPlaylist
 }: StreamPanelProps) {
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isFullView, setIsFullView] = useState<boolean>(false);
   const webviewRef = useRef<any>(null);
+
   const getSiteIcon = (site: any) => {
     const name = site.name.toLowerCase();
     if (name.includes('youtube')) {
@@ -65,7 +67,15 @@ export function StreamPanel({
       );
     }
     if (name.includes('moviebox')) {
-      return <PlaySquare size={12} style={{ color: site.color || '#fbbf24', flexShrink: 0 }} />;
+      return (
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" style={{ flexShrink: 0 }}>
+          <rect width="24" height="24" rx="5" fill="#f59e0b" />
+          <path d="M4 8.5h16v9.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8.5z" fill="#181826" />
+          <path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2.5H4V6z" fill="#d97706" />
+          <path d="M7 4l2 4.5M12 4l2 4.5M17 4l2 4.5" stroke="#fbbf24" strokeWidth="1.2" />
+          <polygon points="10.5,11.5 15.5,14 10.5,16.5" fill="#fbbf24" />
+        </svg>
+      );
     }
     return <Globe size={12} style={{ color: 'var(--primary)', flexShrink: 0 }} />;
   };
@@ -81,7 +91,11 @@ export function StreamPanel({
         flexDirection: 'column',
         height: '100%',
         width: '100%',
-        padding: '20px',
+        padding: isFullView ? '12px 16px' : '20px',
+        position: isFullView ? 'fixed' : 'relative',
+        inset: isFullView ? 0 : 'auto',
+        zIndex: isFullView ? 99999 : 'auto',
+        background: isFullView ? '#09090e' : 'transparent',
         minHeight: 0
       }}
     >
@@ -91,9 +105,26 @@ export function StreamPanel({
           <p>Browse video sites and download streams locally</p>
         </div>
 
-        {/* Streaming Sites Row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(255,255,255,0.02)', padding: '6px 12px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.04)' }}>
+        {/* Streaming Sites Row - Exactly 5 tabs visible at a time with smooth horizontal scroll */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', maxWidth: '100%', overflow: 'hidden' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'rgba(255,255,255,0.02)',
+              padding: '6px 10px',
+              borderRadius: '10px',
+              border: '1px solid rgba(255,255,255,0.04)',
+              maxWidth: '520px',
+              overflowX: 'auto',
+              overflowY: 'hidden',
+              scrollbarWidth: 'thin',
+              scrollbarColor: 'rgba(255,255,255,0.2) transparent',
+              whiteSpace: 'nowrap',
+              flexShrink: 1
+            }}
+          >
             {streamSites.map((site: any, idx: number) => {
               let hostname = '';
               try {
@@ -103,7 +134,7 @@ export function StreamPanel({
               }
               const isCurrent = currentBrowserUrl.toLowerCase().includes(hostname);
               return (
-                <div key={idx} style={{ position: 'relative', display: 'inline-block' }}>
+                <div key={idx} style={{ position: 'relative', display: 'inline-block', flexShrink: 0 }}>
                   <button
                     onClick={() => onNavigateBrowser(site.url)}
                     className="btn-secondary"
@@ -177,7 +208,8 @@ export function StreamPanel({
               display: 'flex',
               alignItems: 'center',
               gap: '4px',
-              background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)'
+              background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+              flexShrink: 0
             }}
           >
             <Plus size={12} /> Add Site
@@ -231,8 +263,8 @@ export function StreamPanel({
           </span>
         </div>
 
-        {/* Capture Download Button */}
-        <div style={{ display: 'flex', gap: '8px' }}>
+        {/* Capture Download Button & Full View Toggle */}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {isYtPlaylist && (
             <button
               onClick={onDownloadPlaylist}
@@ -270,6 +302,28 @@ export function StreamPanel({
           >
             <Download size={12} />
             <span>Download Video</span>
+          </button>
+
+          {/* Full View Maximize Button */}
+          <button
+            onClick={() => setIsFullView(prev => !prev)}
+            className="btn-secondary"
+            style={{
+              padding: '6px 12px',
+              fontSize: '12px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: isFullView ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.05)',
+              borderColor: isFullView ? 'var(--primary)' : 'rgba(255, 255, 255, 0.08)',
+              color: isFullView ? '#fff' : 'var(--text-muted)',
+              cursor: 'pointer'
+            }}
+            title={isFullView ? "Exit Full View" : "Maximize Browser to Full View"}
+          >
+            {isFullView ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            <span>{isFullView ? 'Exit Full View' : 'Full View'}</span>
           </button>
         </div>
       </div>

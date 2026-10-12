@@ -4,6 +4,7 @@ const electron = (window as any).electron || ((window as any).require ? (window 
 
 const DEFAULT_STREAM_SITES = [
   { name: 'YouTube', url: 'https://www.youtube.com', color: '#ff0000' },
+  { name: 'Facebook', url: 'https://www.facebook.com/watch', color: '#1877f2' },
   { name: 'Moviebox', url: 'https://moviebox.ph/', color: '#fbbf24' },
   { name: 'TikTok', url: 'https://www.tiktok.com', color: '#010101' }
 ];
@@ -22,7 +23,7 @@ export function useBrowser() {
           return parsed.filter(s => {
             const n = (s?.name || '').toLowerCase();
             const u = (s?.url || '').toLowerCase();
-            return !n.includes('facebook') && !n.includes('instagram') && !u.includes('facebook.com') && !u.includes('instagram.com');
+            return !n.includes('instagram') && !u.includes('instagram.com');
           });
         }
       } catch (e) { }

@@ -5,7 +5,7 @@ import {
   AlertCircle, Loader2, Activity, PlayCircle,
   Search, Volume2, VolumeX, SkipForward, SkipBack,
   ChevronLeft, ChevronRight, FileText, Music, Film, Copy,
-  List, RefreshCw, Maximize2, Info, Send, Tv,
+  List, RefreshCw, Maximize2, Minimize2, Info, Send, Tv,
   HelpCircle, CloudDownload, LayoutDashboard,
   Sparkles, ShieldCheck,
   Eye, EyeOff, KeyRound, Lock, Unlock, ShieldAlert, Check, X
@@ -18,7 +18,7 @@ import { SendToFlashModal } from './components/SendToFlashModal';
 import { PanamediaPlayer } from './components/panamediaPlayer';
 const DuplicatesPanel = lazy(() => import('./components/DuplicatesPanel').then(m => ({ default: m.DuplicatesPanel })));
 import { AddStreamSiteModal, type NewStreamSiteData } from './components/AddStreamSiteModal';
-import { hashPin } from './components/panamedia/utils/pinSecurity';
+import { hashPin, verifyPin } from './components/panamedia/utils/pinSecurity';
 import { useDownloads } from './hooks/useDownloads';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useSettings } from './hooks/useSettings';
@@ -189,6 +189,39 @@ export default function App() {
   useEffect(() => {
     setBrowserScreenActive(activeTab === 'browser');
   }, [activeTab, setBrowserScreenActive]);
+
+  // Full view & Tab lock security states
+  const [isBrowserFullView, setIsBrowserFullView] = useState<boolean>(false);
+  const [unlockedStreamUrls, setUnlockedStreamUrls] = useState<Set<string>>(() => new Set());
+  const [siteToUnlock, setSiteToUnlock] = useState<any | null>(null);
+  const [unlockPinInput, setUnlockPinInput] = useState<string>('');
+  const [showUnlockPin, setShowUnlockPin] = useState<boolean>(false);
+  const [unlockPinError, setUnlockPinError] = useState<string>('');
+  const [isUnlocking, setIsUnlocking] = useState<boolean>(false);
+  const [siteToEdit, setSiteToEdit] = useState<any | null>(null);
+  const [streamTabContextMenu, setStreamTabContextMenu] = useState<{ x: number; y: number; site: any } | null>(null);
+
+  // Listen for external browser links shared to Panamedia via protocol / CLI
+  useEffect(() => {
+    if (!electron) return;
+    const handleExternalUrl = (_event: any, url: string) => {
+      if (url && typeof url === 'string') {
+        setActiveTab('browser');
+        navigateBrowser(url);
+      }
+    };
+    electron.ipcRenderer.on('open-external-stream-url', handleExternalUrl);
+    return () => {
+      electron.ipcRenderer.removeListener('open-external-stream-url', handleExternalUrl);
+    };
+  }, [navigateBrowser]);
+
+  // Close stream tab context menu when clicking anywhere
+  useEffect(() => {
+    const handleGlobalClick = () => setStreamTabContextMenu(null);
+    window.addEventListener('click', handleGlobalClick);
+    return () => window.removeEventListener('click', handleGlobalClick);
+  }, []);
 
   // Archive + PIN 
   const {
@@ -1227,7 +1260,7 @@ export default function App() {
             <div className="dashboard-grid" style={{ width: '100%', display: 'flex', height: '100%', overflow: 'hidden' }}>
 
               {/* Central List */}
-              <div className="main-content">
+              <div className="main-content" style={(libraryCategory as string) === 'duplicates' ? { flex: 1, width: '100%', maxWidth: '100%', padding: 0 } : undefined}>
                 {(libraryCategory as string) === 'duplicates' ? (
                   <Suspense fallback={<div style={{ padding: '20px', color: 'var(--text-muted)' }}>Loading duplicates...</div>}>
                     <DuplicatesPanel
@@ -1235,6 +1268,9 @@ export default function App() {
                       duplicateDeletePaths={duplicateDeletePaths}
                       toggleDuplicateDelete={toggleDuplicateDelete}
                       handleResolveDuplicates={handleResolveDuplicates}
+                      setDuplicateDeletePaths={setDuplicateDeletePaths}
+                      streamingPort={streamingPort}
+                      downloads={downloads}
                       onClose={() => setLibraryCategory('recent')}
                     />
                   </Suspense>
@@ -1512,7 +1548,7 @@ export default function App() {
               </div>
 
               {/* Right Panel Drawer: Details & Media Library */}
-              <div className="detail-drawer" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '330px', flexShrink: 0, borderLeft: '1px solid var(--panel-border)', background: 'rgba(10, 10, 16, 0.5)', padding: '16px', minHeight: 0 }}>
+              <div className="detail-drawer" style={{ display: (libraryCategory as string) === 'duplicates' ? 'none' : 'flex', flexDirection: 'column', height: '100%', width: '330px', flexShrink: 0, borderLeft: '1px solid var(--panel-border)', background: 'rgba(10, 10, 16, 0.5)', padding: '16px', minHeight: 0 }}>
                 {/* Header Switcher */}
                 <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '12px', gap: '8px', flexShrink: 0 }}>
                   <button
@@ -1979,11 +2015,13 @@ export default function App() {
                                 );
                               }
 
-                              if (libraryViewMode === 'folders') {
+                              if (libraryViewMode === 'folders' && libraryCategory !== 'recent') {
                                 // Group filteredItems by parentPath
                                 const groups: Record<string, typeof filteredItems> = {};
                                 filteredItems.forEach(file => {
                                   const parentPath = file.path.substring(0, file.path.lastIndexOf('\\')) || file.path.substring(0, file.path.lastIndexOf('/')) || 'Default';
+                                  const folderName = (parentPath.replace(/[\\/]/g, '/').split('/').pop() || '').toLowerCase();
+                                  if (folderName === 'download' || folderName === 'downloads') return;
                                   if (!groups[parentPath]) {
                                     groups[parentPath] = [];
                                   }
@@ -2021,7 +2059,7 @@ export default function App() {
                                           {/* Folder Files List */}
                                           {isExpanded && (
                                             <div style={{ padding: '6px', display: 'flex', flexDirection: 'column', gap: '6px', background: 'rgba(0,0,0,0.15)' }}>
-                                              {libraryCategory === 'recent' ? (() => {
+                                              {(libraryCategory as string) === 'recent' ? (() => {
                                                 const vids = files.filter(f => !['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.aac', '.opus', '.wma'].includes(f.ext.toLowerCase()));
                                                 const auds = files.filter(f => ['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.aac', '.opus', '.wma'].includes(f.ext.toLowerCase()));
                                                 const renderSubFile = (file: any, idx2: number) => {
@@ -3420,7 +3458,11 @@ export default function App() {
               flexDirection: 'column',
               height: '100%',
               width: '100%',
-              padding: '20px',
+              padding: isBrowserFullView ? '12px 16px' : '20px',
+              position: isBrowserFullView ? 'fixed' : 'relative',
+              inset: isBrowserFullView ? 0 : 'auto',
+              zIndex: isBrowserFullView ? 99999 : 'auto',
+              background: isBrowserFullView ? '#09090e' : 'transparent',
               minHeight: 0
             }}
           >
@@ -3432,7 +3474,7 @@ export default function App() {
 
               {/* Streaming Sites Row */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', maxWidth: '100%' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(255,255,255,0.02)', padding: '6px 12px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.04)', overflowX: 'auto', maxWidth: 'calc(100vw - 420px)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.04)', maxWidth: '520px', overflowX: 'auto', overflowY: 'hidden', scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.2) transparent', whiteSpace: 'nowrap', flexShrink: 1 }}>
                   {streamSites.map((site: any, idx: number) => {
                     let hostname = '';
                     try {
@@ -3442,9 +3484,30 @@ export default function App() {
                     }
                     const isCurrent = currentBrowserUrl.toLowerCase().includes(hostname);
                     return (
-                      <div key={idx} style={{ position: 'relative', display: 'inline-block' }}>
+                      <div
+                        key={idx}
+                        style={{ position: 'relative', display: 'inline-block', flexShrink: 0 }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setStreamTabContextMenu({
+                            x: e.clientX,
+                            y: e.clientY,
+                            site
+                          });
+                        }}
+                      >
                         <button
-                          onClick={() => navigateBrowser(site.url)}
+                          onClick={() => {
+                            if (site.isLocked && !unlockedStreamUrls.has(site.url)) {
+                              setSiteToUnlock(site);
+                              setUnlockPinInput('');
+                              setUnlockPinError('');
+                              setShowUnlockPin(false);
+                              return;
+                            }
+                            navigateBrowser(site.url);
+                          }}
                           className="btn-secondary"
                           style={{
                             padding: '6px 10px',
@@ -3457,10 +3520,20 @@ export default function App() {
                             borderColor: isCurrent ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
                             color: isCurrent ? '#fff' : 'var(--text-muted)'
                           }}
-                          title={`Navigate to ${site.name}`}
+                          title={`Navigate to ${site.name}${site.isLocked ? ' (Protected)' : ''} - Right-click to edit or remove`}
                         >
                           {getSiteIcon(site)}
                           <span>{site.name}</span>
+                          {site.isLocked && (
+                            <Lock
+                              size={10}
+                              style={{
+                                color: unlockedStreamUrls.has(site.url) ? '#4ade80' : '#eab308',
+                                marginLeft: '2px',
+                                flexShrink: 0
+                              }}
+                            />
+                          )}
                         </button>
 
                         {/* Delete button for custom sites */}
@@ -3553,6 +3626,23 @@ export default function App() {
                 title="Reload"
               >
                 <RefreshCw size={14} className={isWebviewLoading ? "animate-spin" : ""} />
+              </button>
+              <button
+                onClick={() => setIsBrowserFullView(!isBrowserFullView)}
+                className="btn-secondary"
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  fontSize: '11px',
+                  color: isBrowserFullView ? '#a5b4fc' : 'var(--text-muted)'
+                }}
+                title={isBrowserFullView ? "Exit Full View" : "Full View"}
+              >
+                {isBrowserFullView ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                <span>{isBrowserFullView ? "Exit Full" : "Full View"}</span>
               </button>
 
               {/* Interactive Address Bar */}
@@ -3951,7 +4041,23 @@ export default function App() {
       {/* Add Stream Site Modal */}
       {showAddSiteModal && (
         <AddStreamSiteModal
-          onClose={() => setShowAddSiteModal(false)}
+          initialData={siteToEdit}
+          onClose={() => {
+            setShowAddSiteModal(false);
+            setSiteToEdit(null);
+          }}
+          onEditSite={(updatedData: NewStreamSiteData) => {
+            setStreamSites((prev: any[]) => {
+              const next = prev.map(s => (s.url === siteToEdit?.url ? updatedData : s));
+              try { localStorage.setItem('stream_sites', JSON.stringify(next)); } catch (e) { }
+              return next;
+            });
+            setShowAddSiteModal(false);
+            setSiteToEdit(null);
+            if (currentBrowserUrl === siteToEdit?.url) {
+              navigateBrowser(updatedData.url);
+            }
+          }}
           onAddSite={(siteData: NewStreamSiteData) => {
             setStreamSites((prev: any[]) => {
               const next = [...prev.filter(s => s.url !== siteData.url), siteData];
@@ -3962,6 +4068,249 @@ export default function App() {
             navigateBrowser(siteData.url);
           }}
         />
+      )}
+
+      {/* Stream Tab Right-Click Context Menu */}
+      {streamTabContextMenu && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'fixed',
+            top: streamTabContextMenu.y,
+            left: streamTabContextMenu.x,
+            zIndex: 100001,
+            background: 'rgba(20, 20, 32, 0.96)',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            borderRadius: '10px',
+            boxShadow: '0 12px 32px rgba(0,0,0,0.85)',
+            padding: '5px',
+            minWidth: '150px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2px'
+          }}
+        >
+          <div style={{ padding: '5px 8px', fontSize: '10px', color: 'var(--text-muted)', borderBottom: '1px solid rgba(255,255,255,0.06)', fontWeight: 600 }}>
+            {streamTabContextMenu.site.name}
+          </div>
+          <button
+            onClick={() => {
+              setSiteToEdit(streamTabContextMenu.site);
+              setShowAddSiteModal(true);
+              setStreamTabContextMenu(null);
+            }}
+            style={{
+              padding: '6px 10px',
+              borderRadius: '6px',
+              border: 'none',
+              background: 'transparent',
+              color: '#fff',
+              fontSize: '11.5px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '7px',
+              textAlign: 'left'
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99, 102, 241, 0.15)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+          >
+            <span>✏️</span> Edit Tab
+          </button>
+          {!DEFAULT_STREAM_SITES.some(ds => ds.url === streamTabContextMenu.site.url) && (
+            <button
+              onClick={() => {
+                deleteStreamSite(streamTabContextMenu.site.url);
+                setStreamTabContextMenu(null);
+              }}
+              style={{
+                padding: '6px 10px',
+                borderRadius: '6px',
+                border: 'none',
+                background: 'transparent',
+                color: '#f87171',
+                fontSize: '11.5px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '7px',
+                textAlign: 'left'
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+            >
+              <Trash2 size={12} /> Delete Tab
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Unlock Stream Tab Modal */}
+      {siteToUnlock && (
+        <div className="modal-backdrop" onClick={() => setSiteToUnlock(null)} style={{ zIndex: 100000 }}>
+          <div
+            className="glass-panel modal-content"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '420px',
+              maxWidth: '92vw',
+              borderRadius: '18px',
+              background: 'linear-gradient(155deg, #141424 0%, #0a0a14 100%)',
+              border: '1px solid rgba(234, 179, 8, 0.3)',
+              boxShadow: '0 30px 80px rgba(0,0,0,0.9), 0 0 40px rgba(234, 179, 8, 0.15)',
+              padding: '28px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '20px',
+              textAlign: 'center',
+              position: 'relative'
+            }}
+          >
+            {/* Top Lock Badge */}
+            <div style={{
+              width: '56px',
+              height: '56px',
+              borderRadius: '16px',
+              background: 'linear-gradient(135deg, rgba(234, 179, 8, 0.2) 0%, rgba(234, 179, 8, 0.05) 100%)',
+              border: '1px solid rgba(234, 179, 8, 0.4)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#eab308',
+              margin: '0 auto',
+              boxShadow: '0 8px 24px rgba(234, 179, 8, 0.2)'
+            }}>
+              <Lock size={26} />
+            </div>
+
+            <div>
+              <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#fff', margin: 0 }}>
+                Protected Streaming Site
+              </h3>
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '6px 0 0' }}>
+                Enter {siteToUnlock.lockType === 'archive' ? 'Master Archive PIN' : 'Tab PIN / Password'} to view{' '}
+                <strong style={{ color: '#fff' }}>{siteToUnlock.name}</strong>
+              </p>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!unlockPinInput.trim()) return;
+                setIsUnlocking(true);
+                setUnlockPinError('');
+
+                try {
+                  if (siteToUnlock.lockType === 'archive') {
+                    const storedMasterPin = localStorage.getItem('player_archive_pin') || '';
+                    if (!storedMasterPin) {
+                      setUnlockPinError('No Master Archive PIN is configured in Settings.');
+                      setIsUnlocking(false);
+                      return;
+                    }
+                    const verifyRes = await verifyPin(unlockPinInput.trim(), storedMasterPin);
+                    if (verifyRes.valid) {
+                      setUnlockedStreamUrls(prev => new Set(prev).add(siteToUnlock.url));
+                      const target = siteToUnlock.url;
+                      setSiteToUnlock(null);
+                      navigateBrowser(target);
+                    } else {
+                      setUnlockPinError('Incorrect PIN. Please try again.');
+                    }
+                  } else {
+                    const storedCustomPin = siteToUnlock.customPin || '';
+                    const verifyRes = await verifyPin(unlockPinInput.trim(), storedCustomPin);
+                    if (verifyRes.valid) {
+                      setUnlockedStreamUrls(prev => new Set(prev).add(siteToUnlock.url));
+                      const target = siteToUnlock.url;
+                      setSiteToUnlock(null);
+                      navigateBrowser(target);
+                    } else {
+                      setUnlockPinError('Incorrect PIN or Password. Please try again.');
+                    }
+                  }
+                } catch (err) {
+                  setUnlockPinError('Verification error.');
+                } finally {
+                  setIsUnlocking(false);
+                }
+              }}
+              style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}
+            >
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                background: 'rgba(0, 0, 0, 0.4)',
+                border: unlockPinError ? '1px solid #ef4444' : '1px solid rgba(255, 255, 255, 0.15)',
+                borderRadius: '10px',
+                padding: '2px 12px'
+              }}>
+                <KeyRound size={16} style={{ color: 'rgba(255, 255, 255, 0.4)', marginRight: '8px' }} />
+                <input
+                  type={showUnlockPin ? 'text' : 'password'}
+                  value={unlockPinInput}
+                  onChange={(e) => setUnlockPinInput(e.target.value)}
+                  placeholder="Enter PIN or Password"
+                  autoFocus
+                  style={{
+                    flex: 1,
+                    background: 'transparent',
+                    border: 'none',
+                    outline: 'none',
+                    color: '#fff',
+                    fontSize: '14px',
+                    padding: '10px 0',
+                    textAlign: 'center',
+                    letterSpacing: showUnlockPin ? '2px' : '4px'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowUnlockPin(!showUnlockPin)}
+                  style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', padding: '4px' }}
+                >
+                  {showUnlockPin ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+
+              {unlockPinError && (
+                <div style={{ fontSize: '11.5px', color: '#f87171', fontWeight: 500 }}>
+                  {unlockPinError}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => setSiteToUnlock(null)}
+                  className="btn-secondary"
+                  style={{ padding: '8px 18px', borderRadius: '8px', fontSize: '12px' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUnlocking || !unlockPinInput.trim()}
+                  style={{
+                    padding: '8px 22px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    background: 'linear-gradient(135deg, #eab308 0%, #ca8a04 100%)',
+                    color: '#000',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 16px rgba(234, 179, 8, 0.3)'
+                  }}
+                >
+                  Unlock & Browse
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* YouTube Playlist Modal */}

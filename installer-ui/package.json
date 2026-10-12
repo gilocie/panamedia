@@ -1,7 +1,8 @@
 {
-  "name": "panamedia-installer-ui",
+  "name": "panamedia-pro",
+  "productName": "Panamedia Pro",
   "version": "1.0.1",
-  "description": "Panamedia Custom Installer UI",
+  "description": "Panamedia Pro",
   "author": "Go Save Site",
   "main": "main.cjs",
   "private": true,

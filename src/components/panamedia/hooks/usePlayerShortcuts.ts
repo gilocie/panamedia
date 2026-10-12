@@ -224,17 +224,29 @@ export function usePlayerShortcuts({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Do not handle shortcuts if window is not focused (e.g. user is in Converter Pro or another window)
+      if (typeof document !== 'undefined' && typeof document.hasFocus === 'function' && !document.hasFocus()) {
+        return;
+      }
+
       const video = videoRef.current;
       if (!video) return;
 
       const activeEl = document.activeElement;
-      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.getAttribute('contenteditable') === 'true')) {
+      const isTypingField = activeEl && (
+        activeEl.tagName === 'TEXTAREA' ||
+        activeEl.getAttribute('contenteditable') === 'true' ||
+        (activeEl.tagName === 'INPUT' && ['text', 'search', 'password', 'email', 'number', 'tel', 'url'].includes(((activeEl as HTMLInputElement).type || 'text').toLowerCase()))
+      );
+
+      // Only suppress shortcuts if user is actively typing in a text field
+      if (isTypingField) {
         return;
       }
 
-      // If a button has DOM focus (e.g., user clicked Next, Prev, or Play), blur it
-      // so the browser never accidentally re-executes that button on Enter, Space, or Arrow keys
-      if (activeEl && activeEl.tagName === 'BUTTON') {
+      // If a button or range slider has DOM focus (e.g., user clicked Next, Prev, or dragged Volume), blur it
+      // so Space, Enter, and Arrow keys always control the player directly
+      if (activeEl && (activeEl.tagName === 'BUTTON' || (activeEl.tagName === 'INPUT' && (activeEl as HTMLInputElement).type === 'range') || activeEl.getAttribute('role') === 'button')) {
         (activeEl as HTMLElement).blur();
       }
 
@@ -453,8 +465,9 @@ export function usePlayerShortcuts({
     };
 
     const handleMouseUp = () => {
-      if (document.activeElement && document.activeElement.tagName === 'BUTTON') {
-        (document.activeElement as HTMLElement).blur();
+      const active = document.activeElement;
+      if (active && (active.tagName === 'BUTTON' || (active.tagName === 'INPUT' && (active as HTMLInputElement).type === 'range') || active.getAttribute('role') === 'button')) {
+        (active as HTMLElement).blur();
       }
     };
 

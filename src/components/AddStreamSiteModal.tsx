@@ -1,8 +1,9 @@
 import { useState, useMemo } from 'react';
 import {
   Globe, Film, Tv, PlaySquare, Music, Sparkles, Flame, Heart, Star, Video,
-  Slash, Palette
+  Slash, Palette, Lock, Unlock, ShieldCheck, KeyRound, Eye, EyeOff
 } from 'lucide-react';
+import { hashPin } from './panamedia/utils/pinSecurity';
 
 export interface NewStreamSiteData {
   name: string;
@@ -12,11 +13,16 @@ export interface NewStreamSiteData {
   customIcon: string;
   favicon?: string;
   color?: string;
+  isLocked?: boolean;
+  lockType?: 'archive' | 'custom';
+  customPin?: string;
 }
 
 export interface AddStreamSiteModalProps {
   onClose: () => void;
   onAddSite: (data: NewStreamSiteData) => void;
+  initialData?: NewStreamSiteData | null;
+  onEditSite?: (data: NewStreamSiteData) => void;
 }
 
 const PRESET_ICONS = [
@@ -32,15 +38,23 @@ const PRESET_ICONS = [
   { id: 'star', label: 'Star', Icon: Star, color: '#eab308' },
 ];
 
-export function AddStreamSiteModal({ onClose, onAddSite }: AddStreamSiteModalProps) {
-  const [newSiteUrl, setNewSiteUrl] = useState<string>('');
-  const [newSiteName, setNewSiteName] = useState<string>('');
+export function AddStreamSiteModal({ onClose, onAddSite, initialData, onEditSite }: AddStreamSiteModalProps) {
+  const isEditing = !!initialData;
+  const [newSiteUrl, setNewSiteUrl] = useState<string>(initialData?.url || '');
+  const [newSiteName, setNewSiteName] = useState<string>(initialData?.name || '');
+  const [isNameManuallyEdited, setIsNameManuallyEdited] = useState<boolean>(!!initialData?.name);
   // When true: use original site icon / favicon
   // When false: custom icon picker appears on the right side
-  const [useOriginalIcon, setUseOriginalIcon] = useState<boolean>(true);
-  const [selectedPreset, setSelectedPreset] = useState<string>('globe');
-  const [customTextOnly, setCustomTextOnly] = useState<boolean>(false);
+  const [useOriginalIcon, setUseOriginalIcon] = useState<boolean>(initialData ? initialData.iconType === 'favicon' : true);
+  const [selectedPreset, setSelectedPreset] = useState<string>(initialData?.customIcon || 'globe');
+  const [customTextOnly, setCustomTextOnly] = useState<boolean>(initialData ? initialData.showIcon === false : false);
   const [faviconError, setFaviconError] = useState<boolean>(false);
+
+  // Security Lock feature
+  const [isLocked, setIsLocked] = useState<boolean>(initialData?.isLocked ?? false);
+  const [lockType, setLockType] = useState<'archive' | 'custom'>(initialData?.lockType || 'archive');
+  const [customPin, setCustomPin] = useState<string>(initialData?.customPin || '');
+  const [showCustomPin, setShowCustomPin] = useState<boolean>(false);
 
   // Derive domain and favicon URL
   const { domain, faviconUrl } = useMemo(() => {
@@ -60,17 +74,29 @@ export function AddStreamSiteModal({ onClose, onAddSite }: AddStreamSiteModalPro
     return { domain: '', faviconUrl: '' };
   }, [newSiteUrl]);
 
-  // If user enters URL and site name is empty, auto-suggest name from domain
+  // If user enters URL and site name has not been manually edited, auto-suggest name ONLY when a real domain exists
   const handleUrlChange = (val: string) => {
     setNewSiteUrl(val);
     setFaviconError(false);
-    if (!newSiteName.trim()) {
+    if (!isNameManuallyEdited) {
       try {
         let raw = val.trim();
+        if (!raw) {
+          setNewSiteName('');
+          return;
+        }
         if (!/^https?:\/\//i.test(raw)) raw = 'https://' + raw;
         const u = new URL(raw);
-        const hostParts = u.hostname.replace(/^www\./, '').split('.');
-        if (hostParts[0]) {
+        const host = u.hostname.replace(/^www\./, '');
+        const hostParts = host.split('.');
+        // ONLY suggest name when there is a real domain and TLD (e.g., x.com, youtube.com)
+        // Never trigger on partial protocol typing like "h" or "ht"
+        if (
+          hostParts.length >= 2 &&
+          hostParts[0].length >= 1 &&
+          hostParts[1].length >= 2 &&
+          !['h', 'ht', 'http', 'https'].includes(hostParts[0].toLowerCase())
+        ) {
           const suggested = hostParts[0].charAt(0).toUpperCase() + hostParts[0].slice(1);
           setNewSiteName(suggested);
         }
@@ -78,7 +104,22 @@ export function AddStreamSiteModal({ onClose, onAddSite }: AddStreamSiteModalPro
     }
   };
 
-  const handleAdd = () => {
+  const handleUrlBlur = () => {
+    if (!newSiteName.trim() && newSiteUrl.trim()) {
+      try {
+        let raw = newSiteUrl.trim();
+        if (!/^https?:\/\//i.test(raw)) raw = 'https://' + raw;
+        const u = new URL(raw);
+        const host = u.hostname.replace(/^www\./, '');
+        const hostParts = host.split('.');
+        if (hostParts[0] && !['h', 'ht', 'http', 'https'].includes(hostParts[0].toLowerCase())) {
+          setNewSiteName(hostParts[0].charAt(0).toUpperCase() + hostParts[0].slice(1));
+        }
+      } catch {}
+    }
+  };
+
+  const handleAdd = async () => {
     const rawUrl = newSiteUrl.trim();
     if (!rawUrl) {
       return;
@@ -100,24 +141,46 @@ export function AddStreamSiteModal({ onClose, onAddSite }: AddStreamSiteModalPro
     }
     if (!finalName) finalName = 'Stream Site';
 
+    if (isLocked && lockType === 'custom' && !customPin.trim()) {
+      alert('Please enter a custom PIN / Password, or select "Use Archive PIN".');
+      return;
+    }
+
+    let finalCustomPinHashed: string | undefined = undefined;
+    if (isLocked && lockType === 'custom' && customPin.trim()) {
+      try {
+        finalCustomPinHashed = await hashPin(customPin.trim());
+      } catch {
+        finalCustomPinHashed = customPin.trim();
+      }
+    }
+
     const selectedPresetObj = PRESET_ICONS.find(p => p.id === selectedPreset);
+
+    const baseData = {
+      name: finalName,
+      url: formattedUrl,
+      isLocked,
+      lockType: isLocked ? lockType : undefined,
+      customPin: finalCustomPinHashed
+    };
+
+    const submitCallback = (isEditing && onEditSite) ? onEditSite : onAddSite;
 
     if (useOriginalIcon) {
       // Use original website icon
-      onAddSite({
-        name: finalName,
-        url: formattedUrl,
+      submitCallback({
+        ...baseData,
         showIcon: true,
         iconType: 'favicon',
         customIcon: 'globe',
-        favicon: faviconUrl && !faviconError ? faviconUrl : undefined,
+        favicon: faviconUrl && !faviconError ? faviconUrl : (initialData?.favicon || undefined),
         color: '#6366f1'
       });
     } else {
       // User toggled off original icon: use custom chosen icon or text only
-      onAddSite({
-        name: finalName,
-        url: formattedUrl,
+      submitCallback({
+        ...baseData,
         showIcon: !customTextOnly,
         iconType: 'preset',
         customIcon: selectedPreset,
@@ -153,8 +216,12 @@ export function AddStreamSiteModal({ onClose, onAddSite }: AddStreamSiteModalPro
               <Globe size={18} />
             </div>
             <div>
-              <h2 style={{ fontSize: '15.5px', fontWeight: 700, color: '#fff', margin: 0 }}>Add Streaming Site</h2>
-              <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0, marginTop: '2px' }}>Add any website tab to browse & stream in Panamedia</p>
+              <h2 style={{ fontSize: '15.5px', fontWeight: 700, color: '#fff', margin: 0 }}>
+                {isEditing ? 'Edit Streaming Site' : 'Add Streaming Site'}
+              </h2>
+              <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0, marginTop: '2px' }}>
+                {isEditing ? 'Modify website URL, tab title, icon or security PIN' : 'Add any website tab to browse & stream in Panamedia'}
+              </p>
             </div>
           </div>
           <button
@@ -192,6 +259,7 @@ export function AddStreamSiteModal({ onClose, onAddSite }: AddStreamSiteModalPro
                 placeholder="e.g. https://www.linkedin.com or vimeo.com"
                 value={newSiteUrl}
                 onChange={(e) => handleUrlChange(e.target.value)}
+                onBlur={handleUrlBlur}
                 className="text-input"
                 style={{
                   background: 'rgba(0, 0, 0, 0.35)',
@@ -216,7 +284,10 @@ export function AddStreamSiteModal({ onClose, onAddSite }: AddStreamSiteModalPro
                 type="text"
                 placeholder="e.g. LinkedIn or Vimeo"
                 value={newSiteName}
-                onChange={(e) => setNewSiteName(e.target.value)}
+                onChange={(e) => {
+                  setNewSiteName(e.target.value);
+                  setIsNameManuallyEdited(true);
+                }}
                 className="text-input"
                 style={{
                   background: 'rgba(0, 0, 0, 0.35)',
@@ -381,6 +452,7 @@ export function AddStreamSiteModal({ onClose, onAddSite }: AddStreamSiteModalPro
                     return <IconComp size={12} style={{ color: p.color }} />;
                   })() : null}
                   <span>{newSiteName.trim() || 'Site Name'}</span>
+                  {isLocked && <Lock size={11} style={{ color: '#eab308', marginLeft: '2px', flexShrink: 0 }} />}
                 </div>
               </div>
             </div>
@@ -526,6 +598,177 @@ export function AddStreamSiteModal({ onClose, onAddSite }: AddStreamSiteModalPro
               )}
             </div>
           </div>
+
+          {/* Privacy & Security Lock Section */}
+          <div style={{
+            background: isLocked ? 'linear-gradient(135deg, rgba(234, 179, 8, 0.08) 0%, rgba(99, 102, 241, 0.05) 100%)' : 'rgba(255, 255, 255, 0.02)',
+            border: isLocked ? '1px solid rgba(234, 179, 8, 0.35)' : '1px solid rgba(255, 255, 255, 0.06)',
+            borderRadius: '12px',
+            padding: '12px 14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+            transition: 'all 0.25s ease'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
+                <div style={{
+                  width: '28px',
+                  height: '28px',
+                  borderRadius: '8px',
+                  background: isLocked ? 'rgba(234, 179, 8, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: isLocked ? '#eab308' : 'rgba(255,255,255,0.4)',
+                  transition: 'all 0.2s'
+                }}>
+                  {isLocked ? <Lock size={15} /> : <Unlock size={15} />}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#fff' }}>Lock Tab Behind Password / PIN</span>
+                  <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                    {isLocked ? 'Require PIN verification whenever user clicks this tab' : 'Tab is public and open to browse freely'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Toggle Switch */}
+              <label style={{ position: 'relative', display: 'inline-block', width: '38px', height: '22px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={isLocked}
+                  onChange={(e) => setIsLocked(e.target.checked)}
+                  style={{ opacity: 0, width: 0, height: 0 }}
+                />
+                <span style={{
+                  position: 'absolute',
+                  top: 0, left: 0, right: 0, bottom: 0,
+                  background: isLocked ? 'linear-gradient(135deg, #eab308 0%, #ca8a04 100%)' : 'rgba(255,255,255,0.15)',
+                  borderRadius: '20px',
+                  transition: '0.2s',
+                  boxShadow: isLocked ? '0 0 10px rgba(234, 179, 8, 0.4)' : 'none'
+                }}>
+                  <span style={{
+                    position: 'absolute',
+                    height: '16px',
+                    width: '16px',
+                    left: isLocked ? '19px' : '3px',
+                    bottom: '3px',
+                    backgroundColor: '#fff',
+                    borderRadius: '50%',
+                    transition: '0.2s',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.4)'
+                  }} />
+                </span>
+              </label>
+            </div>
+
+            {isLocked && (
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px',
+                paddingTop: '8px',
+                borderTop: '1px solid rgba(255, 255, 255, 0.08)'
+              }}>
+                {/* Radio choices */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setLockType('archive')}
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: '8px',
+                      border: lockType === 'archive' ? '1.5px solid #eab308' : '1px solid rgba(255,255,255,0.08)',
+                      background: lockType === 'archive' ? 'rgba(234, 179, 8, 0.12)' : 'rgba(255,255,255,0.02)',
+                      color: lockType === 'archive' ? '#fff' : 'var(--text-muted)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      textAlign: 'left'
+                    }}
+                  >
+                    <ShieldCheck size={16} style={{ color: lockType === 'archive' ? '#eab308' : 'rgba(255,255,255,0.4)', flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontSize: '11px', fontWeight: 600 }}>Use Archive PIN</div>
+                      <div style={{ fontSize: '9px', opacity: 0.7 }}>Same as your Master Archive</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setLockType('custom')}
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: '8px',
+                      border: lockType === 'custom' ? '1.5px solid #6366f1' : '1px solid rgba(255,255,255,0.08)',
+                      background: lockType === 'custom' ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255,255,255,0.02)',
+                      color: lockType === 'custom' ? '#fff' : 'var(--text-muted)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      textAlign: 'left'
+                    }}
+                  >
+                    <KeyRound size={16} style={{ color: lockType === 'custom' ? '#a5b4fc' : 'rgba(255,255,255,0.4)', flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontSize: '11px', fontWeight: 600 }}>Set Custom PIN</div>
+                      <div style={{ fontSize: '9px', opacity: 0.7 }}>Special PIN for this tab</div>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Custom PIN input */}
+                {lockType === 'custom' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <label style={{ fontSize: '10px', fontWeight: 600, color: '#a5b4fc', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                      Tab Password or PIN
+                    </label>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      background: 'rgba(0, 0, 0, 0.35)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      borderRadius: '8px',
+                      padding: '0 10px'
+                    }}>
+                      <input
+                        type={showCustomPin ? 'text' : 'password'}
+                        placeholder="e.g. 1234 or mySecretPin"
+                        value={customPin}
+                        onChange={(e) => setCustomPin(e.target.value)}
+                        style={{
+                          flex: 1,
+                          background: 'transparent',
+                          border: 'none',
+                          outline: 'none',
+                          color: '#fff',
+                          fontSize: '12px',
+                          padding: '8px 0'
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowCustomPin(!showCustomPin)}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: showCustomPin ? '#a5b4fc' : 'rgba(255,255,255,0.35)',
+                          cursor: 'pointer',
+                          padding: '4px'
+                        }}
+                      >
+                        {showCustomPin ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Action Buttons: Anchored inside dialog footer */}
@@ -558,7 +801,7 @@ export function AddStreamSiteModal({ onClose, onAddSite }: AddStreamSiteModalPro
               fontWeight: 600
             }}
           >
-            Add Site
+            {isEditing ? 'Save Changes' : 'Add Site'}
           </button>
         </div>
       </div>

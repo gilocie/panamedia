@@ -1,10 +1,24 @@
 const { app, BrowserWindow, ipcMain, shell, dialog, Menu, Tray, clipboard, nativeImage, session, webContents } = require('electron');
 
-// Prevent any unhandled stream/file error (such as transient EMFILE) from crashing the application
+// Prevent any unhandled stream/file error from crashing the application silently
 process.on('uncaughtException', (err) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const logDir = path.join(process.env.APPDATA || process.env.USERPROFILE || '', 'panamedia');
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+    fs.appendFileSync(path.join(logDir, 'startup-crash.log'), `[${new Date().toISOString()}] uncaughtException: ${err && (err.stack || err.message || err)}\n`);
+  } catch (e) {}
   console.error('[Panamedia Main Process uncaughtException]:', err);
 });
 process.on('unhandledRejection', (reason) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const logDir = path.join(process.env.APPDATA || process.env.USERPROFILE || '', 'panamedia');
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+    fs.appendFileSync(path.join(logDir, 'startup-crash.log'), `[${new Date().toISOString()}] unhandledRejection: ${reason && (reason.stack || reason.message || reason)}\n`);
+  } catch (e) {}
   console.error('[Panamedia Main Process unhandledRejection]:', reason);
 });
 
@@ -25,8 +39,14 @@ app.commandLine.appendSwitch('disk-cache-size', String(256 * 1024 * 1024));
 
 const path = require('path');
 const fs = require('fs');
-const { pathToFileURL } = require('url');
+const { fileURLToPath, pathToFileURL } = require('url');
 const isDev = !app.isPackaged;
+
+const MEDIA_FILE_EXTENSIONS = [
+  '.mp4', '.mkv', '.webm', '.avi', '.mov', '.wmv', '.flv', '.m4v',
+  '.ts', '.mts', '.m2ts', '.vob', '.ogv', '.3gp',
+  '.mp3', '.m4a', '.flac', '.wav', '.ogg', '.aac', '.opus', '.wma'
+];
 
 function cleanArgPath(arg) {
   if (!arg || typeof arg !== 'string') return '';
@@ -34,10 +54,13 @@ function cleanArgPath(arg) {
   if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
     clean = clean.slice(1, -1).trim();
   }
-  if (clean.startsWith('file:///')) {
-    clean = decodeURIComponent(clean.replace(/^file:\/\/\//, ''));
-  } else if (clean.startsWith('file://')) {
-    clean = decodeURIComponent(clean.replace(/^file:\/\//, ''));
+  if (/^file:/i.test(clean)) {
+    try {
+      return fileURLToPath(clean);
+    } catch (err) {
+      console.warn('[Electron] Ignoring invalid media file URL:', clean, err);
+      return '';
+    }
   }
   return clean;
 }
@@ -45,7 +68,7 @@ function cleanArgPath(arg) {
 // ─── App UserModel ID & Data Dir (isolate dev from installed app) ────────────
 const isOpeningMediaAtLaunch = process.argv.some(arg => {
   const clean = cleanArgPath(arg).toLowerCase();
-  return ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.ts', '.m4v', '.net.ts', '.mpg', '.mpeg', '.3gp', '.flv', '.wmv', '.vob', '.mp3', '.m4a', '.wav', '.flac', '.ogg', '.aac', '.opus', '.wma'].some(ext => clean.endsWith(ext));
+  return MEDIA_FILE_EXTENSIONS.some(ext => clean.endsWith(ext));
 });
 const isPlayerLaunch = isOpeningMediaAtLaunch || process.argv.includes('--mode=player');
 
@@ -63,6 +86,30 @@ const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   console.log('[Electron] Another instance of Panamedia is already running. Quitting duplicate instance.');
   app.quit();
+} else {
+  try {
+    if (!app.isDefaultProtocolClient('panamedia')) {
+      app.setAsDefaultProtocolClient('panamedia');
+    }
+  } catch (e) {}
+
+  app.on('second-instance', (_event, commandLine) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+
+      const urlArg = commandLine.find(arg => /^https?:\/\//i.test(arg) || /^panamedia:\/\//i.test(arg));
+      if (urlArg) {
+        let targetUrl = urlArg;
+        if (/^panamedia:\/\//i.test(targetUrl)) {
+          targetUrl = targetUrl.replace(/^panamedia:\/\//i, '');
+          if (!/^https?:\/\//i.test(targetUrl)) targetUrl = 'https://' + targetUrl;
+        }
+        mainWindow.webContents.send('open-external-stream-url', targetUrl);
+      }
+    }
+  });
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -661,6 +708,11 @@ function handleCoreEvent(eventName, payload) {
 
 function startCoreEngine() {
   const possiblePaths = [
+    // Packaged app: extraResources copies bin/ into resources/bin/.
+    path.join(process.resourcesPath, 'bin', 'panamedia-core.exe'),
+    // Same location derived from the asar path (__dirname = resources/app.asar).
+    path.join(__dirname, '..', 'bin', 'panamedia-core.exe'),
+    // Dev runs from the repo:
     path.join(__dirname, 'src-cpp', 'build', 'bin', 'Release', 'panamedia-core.exe'),
     path.join(__dirname, 'src-cpp', 'build', 'bin', 'panamedia-core.exe'),
     path.join(__dirname, 'src-cpp', 'bin', 'Release', 'panamedia-core.exe'),
@@ -682,6 +734,7 @@ function startCoreEngine() {
       coreProcess = spawn(corePath, [], {
         cwd: path.dirname(corePath),
         env: { ...process.env, PATH: path.dirname(corePath) + ';' + (process.env.PATH || '') },
+        windowsHide: true,
         stdio: ['pipe', 'pipe', 'inherit']
       });
       
@@ -960,11 +1013,6 @@ function createSplashWindow() {
 
 function getMediaFileFromCommandLine(argv, workingDirectory) {
   if (!Array.isArray(argv)) return null;
-  const mediaExtensions = [
-    '.mp4', '.mkv', '.webm', '.avi', '.mov', '.ts', '.m4v', '.net.ts', '.dat',
-    '.mpeg', '.mpg', '.3gp', '.flv', '.wmv', '.vob', '.m2ts',
-    '.mp3', '.m4a', '.wav', '.flac', '.ogg', '.aac', '.opus', '.wma'
-  ];
   for (let i = 1; i < argv.length; i++) {
     const raw = argv[i];
     if (!raw) continue;
@@ -977,7 +1025,7 @@ function getMediaFileFromCommandLine(argv, workingDirectory) {
       clean = path.resolve(workingDirectory, clean);
     }
     const lower = clean.toLowerCase();
-    const hasMediaExtension = mediaExtensions.some(ext => lower.endsWith(ext));
+    const hasMediaExtension = MEDIA_FILE_EXTENSIONS.some(ext => lower.endsWith(ext));
     if (hasMediaExtension) {
       try {
         if (fs.existsSync(clean) && fs.statSync(clean).isFile()) {
@@ -1016,7 +1064,7 @@ function createWindow(forceMode = null) {
     let filePath = fileArg || '';
     const pathArgIndex = process.argv.findIndex(arg => arg.startsWith('--path='));
     if (pathArgIndex !== -1) {
-      filePath = process.argv[pathArgIndex].split('=')[1];
+      filePath = cleanArgPath(process.argv[pathArgIndex].slice('--path='.length));
     }
     const filename = filePath ? path.basename(filePath) : 'Media Player';
     openPlayerWindow(filePath, filename, { newWindow: true });
@@ -1203,25 +1251,33 @@ ipcMain.handle('open-converter-window', () => {
   return { success: true, windowId: converterWindow.id };
 });
 
-ipcMain.handle('select-directory', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
+ipcMain.handle('select-directory', async (event) => {
+  const parentWin = (event && event.sender) ? BrowserWindow.fromWebContents(event.sender) : (converterWindow || mainWindow);
+  const result = await dialog.showOpenDialog(parentWin || mainWindow, {
     properties: ['openDirectory']
   });
+  if (parentWin && !parentWin.isDestroyed()) {
+    parentWin.focus();
+  }
   if (result.canceled) {
     return null;
   }
   return result.filePaths[0];
 });
 
-ipcMain.handle('select-media-files', async () => {
+ipcMain.handle('select-media-files', async (event) => {
   try {
-    const result = await dialog.showOpenDialog(mainWindow, {
+    const parentWin = (event && event.sender) ? BrowserWindow.fromWebContents(event.sender) : (converterWindow || mainWindow);
+    const result = await dialog.showOpenDialog(parentWin || mainWindow, {
       properties: ['openFile', 'multiSelections'],
       filters: [
         { name: 'Media Files', extensions: ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', 'ts', 'm4v', 'mp3', 'm4a', 'wav', 'flac', 'aac', 'ogg', 'opus', 'wma'] },
         { name: 'All Files', extensions: ['*'] }
       ]
     });
+    if (parentWin && !parentWin.isDestroyed()) {
+      parentWin.focus();
+    }
     if (result.canceled) {
       return [];
     }
@@ -1278,34 +1334,50 @@ ipcMain.handle('archive-set-os-lock', async (event, { path: targetPath, shouldLo
   if (process.platform !== 'win32' || !targetPath || typeof targetPath !== 'string') return { success: false };
   try {
     if (!fs.existsSync(targetPath)) return { success: false, error: 'Path does not exist' };
-    let actualIsFolder = isFolder;
+    let actualIsFolder = false;
     try {
-      actualIsFolder = isFolder !== undefined ? isFolder : fs.statSync(targetPath).isDirectory();
-    } catch {}
+      actualIsFolder = fs.statSync(targetPath).isDirectory();
+    } catch {
+      actualIsFolder = isFolder || false;
+    }
 
     const { execFile } = require('child_process');
-    const args = [
-      shouldLock ? '+h' : '-h',
-      shouldLock ? '+s' : '-s',
-      targetPath
-    ];
+    const flags = shouldLock ? ['+h', '+s'] : ['-h', '-s', '-r', '-a'];
+    const targetArgs = [...flags, targetPath];
     if (actualIsFolder) {
-      args.push('/d');
+      targetArgs.push('/d');
     }
+
     return new Promise((resolve) => {
-      execFile('attrib', args, { windowsHide: true }, (err) => {
+      execFile('attrib', targetArgs, { windowsHide: true }, (err) => {
         if (err) {
-          console.error('[archive-set-os-lock] attrib error:', err);
-          resolve({ success: false, error: err.message });
+          console.error('[archive-set-os-lock] attrib error on target:', err);
+        }
+
+        const now = new Date();
+        const refreshExplorer = () => {
+          try {
+            fs.utimesSync(targetPath, now, now);
+            const parentDir = path.dirname(targetPath);
+            if (fs.existsSync(parentDir)) {
+              fs.utimesSync(parentDir, now, now);
+            }
+          } catch {}
+        };
+
+        if (actualIsFolder) {
+          // Recursively apply to all folder contents so child files/subfolders are completely unlocked/locked
+          const contentsArgs = [...flags, path.join(targetPath, '*'), '/s', '/d'];
+          execFile('attrib', contentsArgs, { windowsHide: true }, (err2) => {
+            if (err2) {
+              console.error('[archive-set-os-lock] attrib error on contents:', err2);
+            }
+            refreshExplorer();
+            resolve({ success: !err });
+          });
         } else {
-          // When releasing a folder to original visibility, also remove hidden/system from its files
-          if (!shouldLock && actualIsFolder) {
-            execFile('attrib', ['-h', '-s', path.join(targetPath, '*'), '/s', '/d'], { windowsHide: true }, () => {
-              resolve({ success: true });
-            });
-          } else {
-            resolve({ success: true });
-          }
+          refreshExplorer();
+          resolve({ success: !err });
         }
       });
     });
@@ -1589,7 +1661,7 @@ app.on('second-instance', (event, argv, workingDirectory) => {
     let filePath = '';
     const pathArgIndex = argv.findIndex(arg => arg.startsWith('--path='));
     if (pathArgIndex !== -1) {
-      filePath = cleanArgPath(argv[pathArgIndex].split('=')[1]);
+      filePath = cleanArgPath(argv[pathArgIndex].slice('--path='.length));
     }
     openPlayerWindow(filePath, filePath ? path.basename(filePath) : 'Media Player', { newWindow: false });
     return;
@@ -3152,13 +3224,26 @@ ipcMain.handle('check-binaries', () => {
   return checkBinaries();
 });
 
+let binaryInstallInFlight = null;
 ipcMain.handle('install-binaries', async (event) => {
   try {
-    await installBinaries((progressData) => {
-      if (mainWindow) {
-        mainWindow.webContents.send('binary-install-progress', progressData);
-      }
-    });
+    if (!binaryInstallInFlight) {
+      // Multiple windows (main app + player) can trigger the first-run
+      // install at the same time. Serialize them so a single download runs
+      // instead of two streams racing over the same files.
+      const sendProgress = (progressData) => {
+        const targets = [mainWindow, ...getActivePlayerWindows()];
+        for (const w of targets) {
+          if (w && !w.isDestroyed()) {
+            try { w.webContents.send('binary-install-progress', progressData); } catch (e) {}
+          }
+        }
+      };
+      binaryInstallInFlight = installBinaries(sendProgress).finally(() => {
+        binaryInstallInFlight = null;
+      });
+    }
+    await binaryInstallInFlight;
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };

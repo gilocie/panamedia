@@ -2,6 +2,7 @@ const { app, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { exec, spawn } = require('child_process');
+const crypto = require('crypto');
 const { SegmentedDownloader } = require('./downloader.cjs');
 const { downloadYoutubeVideo, compressVideo, cleanYoutubeUrl, isYoutubeUrl } = require('./youtube/youtubeDownloader.cjs');
 const { downloadWebStream } = require('./web-downloader/webStreamDownloader.cjs');
@@ -87,8 +88,19 @@ function extractVideoFrameThumbnail(filePath, duration = 0) {
     try {
       if (!filePath || !fs.existsSync(filePath)) return resolve('');
       const thumbDir = path.join(dataDir(), 'thumbnails');
-      if (!fs.existsSync(thumbDir)) fs.mkdirSync(thumbDir, { recursive: true });
-      const thumbFile = path.join(thumbDir, `thumb_${Date.now()}_${Math.round(Math.random() * 1000)}.jpg`);
+      if (!fs.existsSync(thumbDir)) {
+        try { fs.mkdirSync(thumbDir, { recursive: true }); } catch (e) {}
+      }
+
+      const streamUrl = `http://127.0.0.1:52322/thumbnail?path=${encodeURIComponent(filePath)}`;
+      const safeHash = crypto.createHash('md5').update(filePath).digest('hex');
+      const thumbFile = path.join(thumbDir, `thumb_${safeHash}.jpg`);
+
+      // If already cached on disk, return streaming URL directly without spawning ffmpeg
+      if (fs.existsSync(thumbFile) && fs.statSync(thumbFile).size > 500) {
+        return resolve(streamUrl);
+      }
+
       const seekSec = duration > 10 ? Math.min(10, Math.round(duration * 0.1)) : 1;
       const seekStr = `00:00:${seekSec < 10 ? '0' : ''}${seekSec}`;
       const proc = spawn(ffmpegPath, [
@@ -96,14 +108,14 @@ function extractVideoFrameThumbnail(filePath, duration = 0) {
         '-ss', seekStr,
         '-i', filePath,
         '-vframes', '1',
-        '-q:v', '2',
+        '-q:v', '3',
         thumbFile
       ], { windowsHide: true });
+
       proc.on('close', (code) => {
         if (code === 0 && fs.existsSync(thumbFile) && fs.statSync(thumbFile).size > 500) {
-          const b64 = fs.readFileSync(thumbFile).toString('base64');
-          try { fs.unlinkSync(thumbFile); } catch (e) {}
-          resolve(`data:image/jpeg;base64,${b64}`);
+          // Keep file on disk in AppData/thumbnails — never bloat JSON/RAM with base64!
+          resolve(streamUrl);
         } else {
           resolve('');
         }
@@ -214,8 +226,37 @@ function loadState() {
   try {
     if (!fs.existsSync(downloadsFile())) return;
     downloadsList = JSON.parse(fs.readFileSync(downloadsFile(), 'utf8'));
+    const thumbDir = path.join(dataDir(), 'thumbnails');
+    if (!fs.existsSync(thumbDir)) {
+      try { fs.mkdirSync(thumbDir, { recursive: true }); } catch (e) {}
+    }
+
+    let sanitizedAny = false;
     const thumbQueue = [];
     downloadsList = downloadsList.map(task => {
+      // Migrate heavy legacy base64 thumbnails to AppData/thumbnails on disk
+      if (task.thumbnail && task.thumbnail.startsWith('data:image')) {
+        try {
+          const match = task.thumbnail.match(/^data:image\/\w+;base64,(.+)$/);
+          if (match && task.filename && task.saveDir) {
+            const fullMedia = path.join(task.saveDir, task.filename);
+            const safeHash = crypto.createHash('md5').update(fullMedia).digest('hex');
+            const cachedDiskFile = path.join(thumbDir, `thumb_${safeHash}.jpg`);
+            if (!fs.existsSync(cachedDiskFile)) {
+              fs.writeFileSync(cachedDiskFile, Buffer.from(match[1], 'base64'));
+            }
+            task.thumbnail = `http://127.0.0.1:52322/thumbnail?path=${encodeURIComponent(fullMedia)}`;
+            sanitizedAny = true;
+          } else {
+            task.thumbnail = '';
+            sanitizedAny = true;
+          }
+        } catch (e) {
+          task.thumbnail = '';
+          sanitizedAny = true;
+        }
+      }
+
       if (isAdOrGifThumbnail(task.thumbnail)) {
         task.thumbnail = '';
       }
@@ -232,6 +273,10 @@ function loadState() {
       }
       return task;
     });
+
+    if (sanitizedAny) {
+      saveState();
+    }
     // Regenerate missing thumbnails with a bounded pool of 2 workers. This
     // used to fire one ffmpeg spawn per completed download at startup —
     // 20 stale entries meant 20 concurrent ffmpeg processes before the UI

@@ -17,7 +17,7 @@ const DIST_INSTALLER = path.join(ROOT, 'dist-installer');
 
 function run(cmd, cwd = ROOT) {
   console.log(`\n> [${path.basename(cwd)}] ${cmd}`);
-  execSync(cmd, { cwd, stdio: 'inherit', env: process.env });
+  execSync(cmd, { cwd, stdio: 'inherit', env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' } });
 }
 
 async function main() {
@@ -27,15 +27,24 @@ async function main() {
   const currentVersion = rootPkg.version || '1.0.1';
   console.log(`Building version: v${currentVersion}`);
 
-  // Sync version with installer-ui/package.json
+  // Sync version and branding with installer-ui/package.json and installer-ui/index.html
   const installerPkgPath = path.join(INSTALLER_UI, 'package.json');
   if (fs.existsSync(installerPkgPath)) {
     const installerPkg = JSON.parse(fs.readFileSync(installerPkgPath, 'utf8'));
-    if (installerPkg.version !== currentVersion) {
-      installerPkg.version = currentVersion;
-      fs.writeFileSync(installerPkgPath, JSON.stringify(installerPkg, null, 2) + '\n');
-      console.log(`✓ Synchronized version ${currentVersion} to installer-ui/package.json`);
-    }
+    installerPkg.version = currentVersion;
+    installerPkg.name = 'panamedia-pro';
+    installerPkg.productName = 'Panamedia Pro';
+    installerPkg.description = 'Panamedia Pro';
+    fs.writeFileSync(installerPkgPath, JSON.stringify(installerPkg, null, 2) + '\n');
+    console.log(`✓ Synchronized version ${currentVersion} to installer-ui/package.json`);
+  }
+
+  const installerHtmlPath = path.join(INSTALLER_UI, 'index.html');
+  if (fs.existsSync(installerHtmlPath)) {
+    let htmlContent = fs.readFileSync(installerHtmlPath, 'utf8');
+    htmlContent = htmlContent.replace(/Version\s+\d+\.\d+\.\d+/g, `Version ${currentVersion}`);
+    fs.writeFileSync(installerHtmlPath, htmlContent, 'utf8');
+    console.log(`✓ Synchronized version ${currentVersion} to installer-ui/index.html`);
   }
 
   // Sync latest C++ binaries to bin directory

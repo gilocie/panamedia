@@ -986,7 +986,11 @@ function tn({ filePath: e, title: t }) {
           if (!q.current) return;
           try {
             if (Number.isFinite(targetTime) && targetTime >= 0) {
-              if (Math.abs(q.current.currentTime - targetTime) > 0.3) {
+              const diff = targetTime - q.current.currentTime;
+              // If targetTime is behind the live playing frame by less than 3.5 seconds,
+              // don't jerk the playback backwards — continue seamlessly from current live frame!
+              const isSmallLagRewind = diff < 0 && Math.abs(diff) <= 3.5 && q.current.currentTime > 0;
+              if (!isSmallLagRewind && Math.abs(diff) > 0.5) {
                 q.current.currentTime = targetTime;
               }
             }

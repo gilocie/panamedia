@@ -160,6 +160,7 @@ export function VideoScreen({
   };
 
   const rafRef = useRef<number | null>(null);
+  const freqDataRef = useRef<Uint8Array | null>(null);
   const hasValidThumbnail = !!thumbnailToShow && !imgErrors[thumbnailToShow];
 
   React.useEffect(() => {
@@ -280,8 +281,11 @@ export function VideoScreen({
       if (!analyser) return;
 
       const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-      analyser.getByteFrequencyData(dataArray);
+      if (!freqDataRef.current || freqDataRef.current.length !== bufferLength) {
+        freqDataRef.current = new Uint8Array(bufferLength);
+      }
+      const dataArray = freqDataRef.current;
+      analyser.getByteFrequencyData(dataArray as any);
 
       const barCount = 64; // Draw 64 bars
       const barWidth = W / barCount;
@@ -291,6 +295,14 @@ export function VideoScreen({
       // Stretch lower 55% of bins across the symmetric halves so visualizer spans the full screen width
       const activeRange = Math.floor(bufferLength * 0.55);
 
+      // Single shared gradient and single path fill eliminates 3,840+ string allocations & context redraws per sec
+      const gradient = ctx2d.createLinearGradient(0, H, 0, Math.max(0, H - maxBarH));
+      gradient.addColorStop(0, '#c026d3');
+      gradient.addColorStop(0.5, '#ec4899');
+      gradient.addColorStop(1, '#a855f7');
+      ctx2d.fillStyle = gradient;
+
+      ctx2d.beginPath();
       for (let i = 0; i < barCount; i++) {
         const dist = Math.abs(i - centerIndex);
         const freqIndex = Math.min(
@@ -308,18 +320,8 @@ export function VideoScreen({
         const gap = Math.max(2, Math.floor(barWidth * 0.15));
         const drawWidth = barWidth - gap;
 
-        const pos = 1 - (dist / centerIndex);
-
-        const hue = 340 - pos * 80;
-        const sat = 80 + pos * 15;
-        const light = 55 + value * 15;
-        const alpha = 0.85 + value * 0.15;
-
-        ctx2d.fillStyle = `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
-
         const radius = Math.min(drawWidth * 0.45, barH * 0.45, 4);
         if (barH > 0) {
-          ctx2d.beginPath();
           ctx2d.moveTo(x + radius, y);
           ctx2d.lineTo(x + drawWidth - radius, y);
           ctx2d.quadraticCurveTo(x + drawWidth, y, x + drawWidth, y + radius);
@@ -327,10 +329,10 @@ export function VideoScreen({
           ctx2d.lineTo(x, H);
           ctx2d.lineTo(x, y + radius);
           ctx2d.quadraticCurveTo(x, y, x + radius, y);
-          ctx2d.closePath();
-          ctx2d.fill();
         }
       }
+      ctx2d.closePath();
+      ctx2d.fill();
     };
 
     const onVisibilityChange = () => {
@@ -1111,7 +1113,23 @@ export function VideoScreen({
             }}
           >
             {hasValidThumbnail && thumbLoaded && (
-              <img src={thumbnailToShow} style={{ position: 'absolute', width: '100%', height: '100%', objectFit: 'cover', filter: 'blur(50px) brightness(0.2) saturate(1.5)', opacity: 0.4 }} alt="background" />
+              <img
+                src={thumbnailToShow}
+                style={{
+                  position: 'absolute',
+                  width: '108%',
+                  height: '108%',
+                  left: '-4%',
+                  top: '-4%',
+                  objectFit: 'cover',
+                  filter: 'blur(18px) brightness(0.22) saturate(1.4)',
+                  opacity: 0.45,
+                  transform: 'translateZ(0)',
+                  willChange: 'transform',
+                  pointerEvents: 'none'
+                }}
+                alt="background"
+              />
             )}
 
             {/* Frequency visualizer canvas — sits at the bottom of the audio screen */}

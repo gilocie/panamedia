@@ -1080,7 +1080,7 @@ export function PlaylistPanel({
   }
 
   // ─── Folders View for Normal Library ──────────────────────────────
-  if (playerViewMode === 'folders' || sidebarTab === 'primary') {
+  if (playerViewMode === 'folders' && sidebarTab !== 'primary') {
     const groups: Record<string, typeof filtered> = {};
     const isDlFolder = (dirPath: string) => {
       if (!dirPath) return false;

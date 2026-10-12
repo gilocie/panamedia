@@ -5,7 +5,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { spawn, execSync } = require('child_process');
+const { spawn, execFile, execFileSync } = require('child_process');
 const os = require('os');
 
 // Disable GPU for installer (avoids driver issues on target machines)
@@ -20,6 +20,16 @@ const isUninstall = cliArgs.some(a => {
   const l = a.toLowerCase();
   return l === '--uninstall' || l === '/uninstall' || l === '-uninstall' || l.includes('uninstall');
 }) || path.basename(process.execPath).toLowerCase().includes('uninstall') || (portableExe && path.basename(portableExe).toLowerCase().includes('uninstall'));
+
+// Silent invocation. When the NSIS installer replaces an old version it runs
+// the previous install's registered uninstall string with NSIS silent flags
+// appended (typically `--uninstall /S _?=DIR`). In that case the old app must
+// be removed headlessly: the custom uninstaller GUI only appears when the user
+// deliberately uninstalls from Control Panel / the Start Menu shortcut.
+const isSilent = cliArgs.some(a => {
+  const l = a.toLowerCase();
+  return l === '/s' || l === '-s' || l === '--silent' || l === '--uninstall-silent' || l.startsWith('_?=');
+});
 
 let passedInstallDir = '';
 for (const arg of cliArgs) {
@@ -59,7 +69,7 @@ function resolveInstalledDir() {
 
 // In packaged uninstall mode, if running from inside the install directory, relocate to %TEMP%
 // so that the install folder is not locked and can be deleted cleanly.
-if (!isDev && isUninstall && !process.env.__PANAMEDIA_UNINSTALL_TEMP) {
+if (!isDev && isUninstall && !isSilent && !process.env.__PANAMEDIA_UNINSTALL_TEMP) {
   const actualExePath = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
   const currentExeDir = path.resolve(path.dirname(actualExePath)).toLowerCase();
   const targetDir = path.resolve(resolveInstalledDir()).toLowerCase();
@@ -134,7 +144,7 @@ function createInstallerWindow() {
     resizable: true,
     frame: false,
     center: true,
-    title: isUninstall ? 'Panamedia Uninstall' : 'Panamedia Setup',
+    title: isUninstall ? 'Panamedia Pro Uninstall' : 'Panamedia Pro Setup',
     backgroundColor: '#09090e',
     webPreferences: {
       nodeIntegration: true,
@@ -158,6 +168,14 @@ function createInstallerWindow() {
 }
 
 app.whenReady().then(() => {
+  if (isUninstall && isSilent) {
+    // The NSIS installer runs the previous install's registered uninstall
+    // string (with /S _?=DIR appended) while replacing an old version.
+    // Remove the old install headlessly -- never open the custom uninstaller
+    // GUI during an install; that UI is only for deliberate user uninstalls.
+    runSilentUninstall();
+    return;
+  }
   createInstallerWindow();
 });
 
@@ -213,6 +231,25 @@ ipcMain.handle('get-default-install-dir', () => {
   return getDefaultInstallDir();
 });
 
+// Return app version dynamically from package.json or runtime
+ipcMain.handle('get-app-version', () => {
+  try {
+    const pkgPath = path.join(__dirname, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      if (pkg.version) return pkg.version;
+    }
+  } catch (e) {}
+  try {
+    const rootPkgPath = path.join(__dirname, '..', 'package.json');
+    if (fs.existsSync(rootPkgPath)) {
+      const rootPkg = JSON.parse(fs.readFileSync(rootPkgPath, 'utf8'));
+      if (rootPkg.version) return rootPkg.version;
+    }
+  } catch (e) {}
+  return app.getVersion();
+});
+
 // Return NSIS installer existence
 ipcMain.handle('check-nsis-exists', () => {
   const nsisPath = getNsisExePath();
@@ -250,8 +287,9 @@ ipcMain.handle('get-disk-space', (event, dirPath) => {
   try {
     const driveLetter = (dirPath || 'C:').slice(0, 1);
     const { execSync } = require('child_process');
-    const out = execSync(
-      `powershell -NoProfile -Command "(Get-PSDrive '${driveLetter}').Free"`,
+    const out = execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', `(Get-PSDrive '${driveLetter}').Free`],
       { encoding: 'utf8', timeout: 3000, windowsHide: true }
     );
     const bytes = parseInt(out.trim(), 10);
@@ -264,12 +302,58 @@ ipcMain.handle('get-disk-space', (event, dirPath) => {
   return 'Unknown';
 });
 
+ipcMain.handle('confirm-replace-existing', async (_event, installDir) => {
+  const targetDir = installDir && installDir.trim()
+    ? path.resolve(installDir.trim())
+    : path.resolve(getDefaultInstallDir());
+  const existingInstall = fs.existsSync(path.join(targetDir, 'Panamedia.exe')) ||
+    fs.existsSync(path.join(targetDir, 'Uninstall Panamedia.exe'));
+
+  if (!existingInstall) return true;
+
+  const result = await dialog.showMessageBox(installerWindow, {
+    type: 'question',
+    title: 'Replace existing Panamedia?',
+    message: 'Panamedia is already installed in this location.',
+    detail: `Continue to remove the existing app and install this version?\n\nYour settings and personal media files will be kept.\n\n${targetDir}`,
+    buttons: ['Replace installation', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true
+  });
+
+  return result.response === 0;
+});
+
 // Run installation: launch NSIS silently, report progress via events
 ipcMain.handle('run-install', async (event, installDir) => {
   const nsisPath = getNsisExePath();
 
   if (!fs.existsSync(nsisPath)) {
     return { success: false, error: 'Installer package not found: ' + nsisPath };
+  }
+
+  // Upgrade safety: a legacy Panamedia install (especially one from an older
+  // custom installer) may register an uninstaller that cannot honour NSIS
+  // silent flags. If the NSIS installer invokes that legacy uninstaller mid-
+  // install it opens its GUI and can leave the app half-removed (the
+  // "Missing Shortcut" failure). When installing over an existing build,
+  // remove it headlessly with our own routine so NSIS starts from a clean
+  // state every time.
+  try {
+    const chosenDir = installDir && installDir.trim() ? path.resolve(installDir.trim()) : '';
+    const legacyDir = chosenDir || path.resolve(resolveInstalledDir());
+    const legacyPresent = fs.existsSync(path.join(legacyDir, 'Panamedia.exe')) ||
+      fs.existsSync(path.join(legacyDir, 'Uninstall Panamedia.exe'));
+    if (legacyPresent) {
+      const uninstallResult = await performUninstall({ targetDir: legacyDir, removeData: false, silent: true });
+      if (!uninstallResult.success) {
+        return { success: false, error: `Could not safely remove the existing Panamedia installation: ${uninstallResult.error}` };
+      }
+    }
+  } catch (preCleanErr) {
+    console.error('Pre-install legacy cleanup failed:', preCleanErr);
+    return { success: false, error: `Could not remove the existing Panamedia installation: ${preCleanErr.message}` };
   }
 
   return new Promise((resolve) => {
@@ -300,18 +384,21 @@ ipcMain.handle('run-install', async (event, installDir) => {
 
     proc.on('close', (code) => {
       clearInterval(progressInterval);
-      if (installerWindow && !installerWindow.isDestroyed()) {
-        installerWindow.webContents.send('install-progress', 100);
-      }
       if (code === 0) {
+        if (installerWindow && !installerWindow.isDestroyed()) {
+          installerWindow.webContents.send('install-progress', 100);
+        }
         // Stage custom uninstaller UI inside install folder and update Windows Registry
         try {
           const targetDir = installDir && installDir.trim() ? installDir.trim() : getDefaultInstallDir();
           if (fs.existsSync(targetDir)) {
             const uninstallerDest = path.join(targetDir, 'PanamediaUninstall.exe');
             try {
+              // Always refresh the custom uninstaller binary. A stale copy from an
+              // older build (which may not know NSIS silent flags) is exactly what
+              // caused the installer to pop the uninstaller GUI mid-install.
               const actualExe = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
-              if (!fs.existsSync(uninstallerDest) && fs.existsSync(actualExe)) {
+              if (fs.existsSync(actualExe)) {
                 fs.copyFileSync(actualExe, uninstallerDest);
               }
             } catch (copyErr) {
@@ -332,13 +419,13 @@ ipcMain.handle('run-install', async (event, installDir) => {
               foreach ($k in $keys) {
                 if (Test-Path $k) {
                   Set-ItemProperty -Path $k -Name 'UninstallString' -Value "\\"$dest\\" --uninstall";
-                  Set-ItemProperty -Path $k -Name 'QuietUninstallString' -Value "\\"$dest\\" --uninstall";
+                  Set-ItemProperty -Path $k -Name 'QuietUninstallString' -Value "\\"$dest\\" --uninstall --silent";
                   Set-ItemProperty -Path $k -Name 'ModifyPath' -Value "\\"$dest\\" --uninstall";
                 }
               }
               Get-ChildItem -Path @('HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall') -ErrorAction SilentlyContinue | Where-Object { $_.GetValue('DisplayName') -like '*Panamedia*' } | ForEach-Object {
                 Set-ItemProperty -Path $_.PSPath -Name 'UninstallString' -Value "\\"$dest\\" --uninstall";
-                Set-ItemProperty -Path $_.PSPath -Name 'QuietUninstallString' -Value "\\"$dest\\" --uninstall";
+                Set-ItemProperty -Path $_.PSPath -Name 'QuietUninstallString' -Value "\\"$dest\\" --uninstall --silent";
                 Set-ItemProperty -Path $_.PSPath -Name 'ModifyPath' -Value "\\"$dest\\" --uninstall";
               }
               $smDir = '${startMenuDir.replace(/'/g, "''")}';
@@ -351,8 +438,11 @@ ipcMain.handle('run-install', async (event, installDir) => {
                 $s.Save();
               }
             `.trim();
-            const { exec } = require('child_process');
-            exec(`powershell -NoProfile -Command "${psScript.replace(/\r?\n\s*/g, ' ')}"`, () => {});
+            execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', psScript], {
+              windowsHide: true
+            }, (error) => {
+              if (error) console.warn('Could not update the installed uninstaller shortcuts:', error.message);
+            });
           }
         } catch (stageErr) {
           console.warn('Failed to stage custom uninstaller:', stageErr);
@@ -381,18 +471,23 @@ ipcMain.handle('get-installed-dir', () => {
   return resolveInstalledDir();
 });
 
-// Run uninstallation: close app, invoke silent NSIS uninstaller, clean up shortcuts & data
-ipcMain.handle('run-uninstall', async (event, options = {}) => {
-  const targetDir = resolveInstalledDir();
-
+// Run uninstallation: close app, invoke silent NSIS uninstaller, clean up shortcuts & data.
+// Shared by the GUI path (IPC from the custom uninstaller window) and the headless
+// path used when the NSIS installer replaces an old version on upgrade.
+async function performUninstall({ targetDir, removeData = false, silent = false }) {
   // 1. Kill any running Panamedia processes
   if (process.platform === 'win32') {
-    try {
-      execSync('taskkill /F /IM Panamedia.exe /T 2>nul', { stdio: 'ignore' });
-    } catch (e) {}
-    try {
-      execSync('taskkill /F /IM "Panamedia Player.exe" /T 2>nul', { stdio: 'ignore' });
-    } catch (e) {}
+    for (const imageName of ['Panamedia.exe', 'Panamedia Player.exe', 'panamedia-core.exe', 'panamedia-suspend.exe', 'ffmpeg.exe', 'ffprobe.exe']) {
+      try {
+        execFileSync('taskkill.exe', ['/F', '/IM', imageName, '/T'], {
+          stdio: 'ignore',
+          windowsHide: true
+        });
+      } catch (err) {
+        // taskkill returns non-zero when that process is not running.
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, 800));
   }
 
   // 2. Find NSIS uninstaller executable
@@ -403,20 +498,33 @@ ipcMain.handle('run-uninstall', async (event, options = {}) => {
   ];
   const nsisUninstaller = uninstallerCandidates.find(c => fs.existsSync(c));
 
+  // Only send progress when a window exists (silent mode has none).
+  const sendProgress = (value) => {
+    if (installerWindow && !installerWindow.isDestroyed()) {
+      installerWindow.webContents.send('uninstall-progress', value);
+    }
+  };
+
   return new Promise((resolve) => {
     let progress = 0;
     const progressInterval = setInterval(() => {
       if (progress < 90) {
         progress += Math.random() * 4 + 2;
         if (progress > 90) progress = 90;
-        if (installerWindow && !installerWindow.isDestroyed()) {
-          installerWindow.webContents.send('uninstall-progress', Math.round(progress));
-        }
+        sendProgress(Math.round(progress));
       }
     }, 200);
 
-    const finishCleanup = (code) => {
+    const finishCleanup = async (code) => {
       clearInterval(progressInterval);
+
+      if (code !== 0) {
+        resolve({ success: false, error: `The existing Panamedia uninstaller exited with code ${code}.` });
+        return;
+      }
+
+      // Small delay to let Windows kernel fully release any handles closed by NSIS
+      await new Promise(r => setTimeout(r, 800));
 
       // Clean up desktop shortcuts
       try {
@@ -445,15 +553,22 @@ ipcMain.handle('run-uninstall', async (event, options = {}) => {
             Remove-Item -Path 'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\com.panamedia.app' -Recurse -Force -ErrorAction SilentlyContinue;
             Get-ChildItem -Path @('HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall') -ErrorAction SilentlyContinue | Where-Object { $_.GetValue('DisplayName') -like '*Panamedia*' } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue;
           `.trim();
-          execSync(`powershell -NoProfile -Command "${regCleanPs.replace(/\r?\n\s*/g, ' ')}"`, { stdio: 'ignore' });
+          execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', regCleanPs], {
+            stdio: 'ignore',
+            windowsHide: true
+          });
         } catch (regErr) {}
       } catch (e) {}
 
       // If user checked "remove personal data / settings"
-      if (options && options.removeData) {
+      if (removeData) {
         try {
-          const appDataDir = path.join(process.env['APPDATA'] || '', 'net-downloader');
+          const appDataDir = path.join(process.env['APPDATA'] || '', 'panamedia');
           if (fs.existsSync(appDataDir)) fs.rmSync(appDataDir, { recursive: true, force: true });
+        } catch (e) {}
+        try {
+          const legacyAppData = path.join(process.env['APPDATA'] || '', 'net-downloader');
+          if (fs.existsSync(legacyAppData)) fs.rmSync(legacyAppData, { recursive: true, force: true });
         } catch (e) {}
         try {
           const localDir = path.join(process.env['LOCALAPPDATA'] || '', 'panamedia');
@@ -461,9 +576,36 @@ ipcMain.handle('run-uninstall', async (event, options = {}) => {
         } catch (e) {}
       }
 
-      if (installerWindow && !installerWindow.isDestroyed()) {
-        installerWindow.webContents.send('uninstall-progress', 100);
+      // NSIS's silent uninstaller only removes files it installed itself, so
+      // our custom uninstaller binary and the install folder itself survive.
+      // Remove those leftovers safely:
+      try {
+        fs.unlinkSync(path.join(targetDir, 'PanamediaUninstall.exe'));
+      } catch (e) {}
+
+      const selfDir = path.resolve(path.dirname(process.execPath)).toLowerCase();
+      const targetLower = path.resolve(targetDir).toLowerCase();
+      if (selfDir !== targetLower && fs.existsSync(targetDir)) {
+        try {
+          fs.rmSync(targetDir, { recursive: true, force: true, maxRetries: 8, retryDelay: 600 });
+        } catch (e) {}
       }
+
+      // If folder still remains (e.g. explorer window was open or self process running),
+      // schedule an asynchronous background purge once this process terminates
+      if (fs.existsSync(targetDir)) {
+        try {
+          const cleanupScript = `timeout /t 2 /nobreak >nul & rmdir /s /q "${targetDir}"`;
+          const purgeProc = spawn('cmd.exe', ['/c', cleanupScript], {
+            detached: true,
+            stdio: 'ignore',
+            windowsHide: true
+          });
+          purgeProc.unref();
+        } catch (e) {}
+      }
+
+      sendProgress(100);
       resolve({ success: true });
     };
 
@@ -478,31 +620,85 @@ ipcMain.handle('run-uninstall', async (event, options = {}) => {
       proc.on('error', () => finishCleanup(1));
     } else {
       // Fallback: manually delete targetDir
+      let cleanupCode = 0;
       try {
         if (fs.existsSync(targetDir)) {
           fs.rmSync(targetDir, { recursive: true, force: true });
         }
-      } catch (e) {}
-      finishCleanup(0);
+      } catch (e) {
+        console.error('Could not remove existing Panamedia installation:', e);
+        cleanupCode = 1;
+      }
+      if (fs.existsSync(targetDir)) cleanupCode = 1;
+      finishCleanup(cleanupCode);
     }
   });
+}
+
+ipcMain.handle('run-uninstall', async (event, options = {}) => {
+  const result = await performUninstall({
+    targetDir: resolveInstalledDir(),
+    removeData: !!(options && options.removeData)
+  });
+  return result;
 });
+
+// Headless uninstall used when the NSIS installer replaces an old version.
+// The installer invokes the previous install's registered uninstall string
+// with NSIS silent flags (`--uninstall /S _?=DIR`); remove the old build
+// without showing any UI so the new install can proceed automatically.
+async function runSilentUninstall() {
+  const safetyTimer = setTimeout(() => {
+    console.warn('Silent uninstall timed out; forcing exit.');
+    app.exit(1);
+  }, 90000);
+  safetyTimer.unref();
+
+  let exitCode = 0;
+  try {
+    const result = await performUninstall({
+      targetDir: resolveInstalledDir(),
+      removeData: false,
+      silent: true
+    });
+    if (!result.success) {
+      console.error('Silent uninstall failed:', result.error);
+      exitCode = 1;
+    }
+  } catch (err) {
+    console.error('Silent uninstall failed:', err);
+    exitCode = 1;
+  }
+  clearTimeout(safetyTimer);
+  app.exit(exitCode);
+}
 
 // Launch Panamedia after install
 ipcMain.handle('launch-panamedia', (event, installDir) => {
   try {
-    const exePath = path.join(installDir || getDefaultInstallDir(), 'Panamedia.exe');
+    const targetDir = installDir && installDir.trim() ? installDir.trim() : getDefaultInstallDir();
+    let exePath = path.join(targetDir, 'Panamedia.exe');
+    if (!fs.existsSync(exePath)) {
+      exePath = path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Panamedia', 'Panamedia.exe');
+    }
     if (fs.existsSync(exePath)) {
-      shell.openPath(exePath);
-      return true;
+      const workingDir = path.dirname(exePath);
+      try {
+        const child = spawn(exePath, [], {
+          cwd: workingDir,
+          detached: true,
+          stdio: 'ignore'
+        });
+        child.unref();
+        return true;
+      } catch (spawnErr) {
+        shell.openPath(exePath);
+        return true;
+      }
     }
-    // Fallback: look in Program Files
-    const fallback = path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Panamedia', 'Panamedia.exe');
-    if (fs.existsSync(fallback)) {
-      shell.openPath(fallback);
-      return true;
-    }
-  } catch (e) {}
+  } catch (e) {
+    console.warn('Failed to launch Panamedia:', e);
+  }
   return false;
 });
 

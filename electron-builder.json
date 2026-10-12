@@ -11,6 +11,7 @@
     "dist/**/*",
     "electron.cjs",
     "preload.cjs",
+    "electron/**/*",
     "panamedia-downloader/**/*",
     "dev.cjs",
     "package.json"
@@ -69,6 +70,9 @@
     { "ext": "ogg", "name": "Panamedia Audio", "role": "Viewer", "icon": "public/player.ico" },
     { "ext": "aac", "name": "Panamedia Audio", "role": "Viewer", "icon": "public/player.ico" },
     { "ext": "m4v", "name": "Panamedia Video", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "mts", "name": "Panamedia Video", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "m2ts", "name": "Panamedia Video", "role": "Viewer", "icon": "public/player.ico" },
+    { "ext": "ogv", "name": "Panamedia Video", "role": "Viewer", "icon": "public/player.ico" },
     { "ext": "flv", "name": "Panamedia Video", "role": "Viewer", "icon": "public/player.ico" },
     { "ext": "wmv", "name": "Panamedia Video", "role": "Viewer", "icon": "public/player.ico" },
     { "ext": "vob", "name": "Panamedia Video", "role": "Viewer", "icon": "public/player.ico" },

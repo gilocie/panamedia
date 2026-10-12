@@ -230,18 +230,21 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
     };
   }, [currentFile]);
 
-  // Reset playback and stay paused by default when selecting another file
+  // Reset playback when selecting another file, unless an active play request is already targeted for it
   useEffect(() => {
     hasInitializedTime.current = false;
     setCurrentTime(0);
     setDuration(0);
-    setIsPlaying(false);
 
-    if (mediaRef.current) {
-      mediaRef.current.pause();
-      mediaRef.current.currentTime = 0;
-      mediaRef.current.volume = volume;
-      mediaRef.current.muted = isMuted;
+    const isExplicitPlayTarget = playbackRequest && playbackRequest.path === currentFile && playbackRequest.action === 'play';
+    if (!isExplicitPlayTarget) {
+      setIsPlaying(false);
+      if (mediaRef.current) {
+        mediaRef.current.pause();
+        mediaRef.current.currentTime = 0;
+        mediaRef.current.volume = volume;
+        mediaRef.current.muted = isMuted;
+      }
     }
 
     // Always ensure background player is paused when converter is active
@@ -265,17 +268,39 @@ export const PreviewMonitor: React.FC<PreviewMonitorProps> = ({
   }, [currentFile, keepsRange, trimStart, trimEnd]);
 
   useEffect(() => {
-    if (!playbackRequest || playbackRequest.id === lastPlayRequestRef.current || playbackRequest.path !== currentFile) return;
+    if (!playbackRequest || playbackRequest.id === 0 || playbackRequest.id === lastPlayRequestRef.current) return;
+    if (playbackRequest.path && playbackRequest.path !== currentFile) return;
     lastPlayRequestRef.current = playbackRequest.id;
+
     const media = mediaRef.current;
     if (!media) return;
+
     if (playbackRequest.action === 'pause') {
       media.pause();
       setIsPlaying(false);
       return;
     }
+
     if (electron) electron.ipcRenderer.send('player-remote-command', 'pause');
-    media.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+
+    const tryPlay = () => {
+      media.play().then(() => {
+        setIsPlaying(true);
+      }).catch((err) => {
+        console.warn('Preview monitor playback failed:', err);
+      });
+    };
+
+    if (media.readyState >= 2) {
+      tryPlay();
+    } else {
+      const onCanPlay = () => {
+        media.removeEventListener('canplay', onCanPlay);
+        tryPlay();
+      };
+      media.addEventListener('canplay', onCanPlay, { once: true });
+      setTimeout(tryPlay, 300);
+    }
   }, [currentFile, playbackRequest]);
 
   useEffect(() => {

@@ -17,6 +17,12 @@ export function useBinaryInstaller() {
     // Check binary availability on startup
     electron.ipcRenderer.invoke('check-binaries').then((installed: boolean) => {
       setBinariesInstalled(installed);
+      // Fresh install: the media engine needs ffmpeg/ffprobe/yt-dlp on disk
+      // to stream and probe files. Install them automatically so playback
+      // works out of the box instead of failing with "file not available".
+      if (!installed) {
+        startInstall();
+      }
     }).catch(() => setBinariesInstalled(true));
 
     const handleProgress = (_event: any, progressData: any) => {

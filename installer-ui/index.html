@@ -871,7 +871,7 @@
   <div id="titlebar">
     <div id="titlebar-name">
       <div id="header-logo-container" style="width:14px;height:14px;display:flex;opacity:0.85;"></div>
-      <span id="titlebar-text">Panamedia — Setup Wizard</span>
+      <span id="titlebar-text">Panamedia Pro — Setup Wizard</span>
     </div>
     <div class="titlebar-controls">
       <button class="titlebar-btn" id="minimize-btn" title="Minimize">
@@ -892,9 +892,9 @@
     <!-- Left panel -->
     <div id="left-panel">
       <div class="logo-container" id="main-logo-container"></div>
-      <div class="brand-name">Panamedia</div>
+      <div class="brand-name">Panamedia Pro</div>
       <div class="brand-tagline">All-in-One Media<br>Downloader & Player</div>
-      <div class="version-badge">Version 1.0.0</div>
+      <div class="version-badge" id="app-version-badge">Version 1.0.1</div>
 
       <!-- Step indicators -->
       <div class="step-list">
@@ -930,8 +930,8 @@
 
       <!-- PAGE 1: Welcome -->
       <div class="page active" id="page-welcome">
-        <div class="page-title">Welcome to Panamedia</div>
-        <div class="page-subtitle">This wizard will install Panamedia on your computer.<br>Please review the features
+        <div class="page-title">Welcome to Panamedia Pro</div>
+        <div class="page-subtitle">This wizard will install Panamedia Pro on your computer.<br>Please review the features
           below before continuing.</div>
 
         <div class="feature-list">
@@ -1249,6 +1249,14 @@
     let installDir = '';
     let appMode = 'install'; // 'install' | 'uninstall'
 
+    // ─── Dynamic App Version ─────────────────────────────────────────────────────
+    ipcRenderer.invoke('get-app-version').then(ver => {
+      if (ver) {
+        const badge = document.getElementById('app-version-badge') || document.querySelector('.version-badge');
+        if (badge) badge.textContent = `Version ${ver}`;
+      }
+    });
+
     // ─── Background Image ────────────────────────────────────────────────────────
     ipcRenderer.invoke('get-bg-image').then(dataUrl => {
       if (dataUrl) {
@@ -1448,9 +1456,21 @@
         return;
       }
       installDir = dir;
-      document.getElementById('error-msg').style.display = 'none';
-      showPage('progress');
-      startInstall(dir);
+      const installButton = document.getElementById('btn-install');
+      installButton.disabled = true;
+      try {
+        const confirmed = await ipcRenderer.invoke('confirm-replace-existing', dir);
+        if (!confirmed) return;
+        document.getElementById('error-msg').style.display = 'none';
+        showPage('progress');
+        startInstall(dir);
+      } catch (err) {
+        const errEl = document.getElementById('error-msg');
+        errEl.textContent = `Could not check for an existing installation: ${err.message || err}`;
+        errEl.style.display = 'block';
+      } finally {
+        installButton.disabled = false;
+      }
     });
 
     // ─── Progress ────────────────────────────────────────────────────────────────

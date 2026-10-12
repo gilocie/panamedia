@@ -815,6 +815,13 @@ namespace Panamedia {
         std::string thumbDir = findThumbnailCacheDir();
         std::string thumbPath = (std::filesystem::path(thumbDir) / (hashStr + ".jpg")).string();
 
+        std::string noThumbPath = thumbPath + ".none";
+        if (std::filesystem::exists(noThumbPath)) {
+            std::string response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n";
+            sendAll(client, response.c_str(), response.length());
+            return;
+        }
+
         if (std::filesystem::exists(thumbPath) && std::filesystem::file_size(thumbPath) > 0) {
             std::ifstream file(thumbPath, std::ios::binary);
             if (file.is_open()) {
@@ -843,19 +850,22 @@ namespace Panamedia {
             ext = decodedPath.substr(dotPos);
             std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
         }
-        bool isAudio = (ext == ".mp3" || ext == ".m4a" || ext == ".flac" || ext == ".wav" || ext == ".ogg" || ext == ".aac");
+        bool isAudio = (ext == ".mp3" || ext == ".m4a" || ext == ".flac" || ext == ".wav" || ext == ".ogg" || ext == ".aac" || ext == ".opus" || ext == ".wma");
 
-        // -threads 1 before -i caps the *decoder*: without it ffmpeg spawns
-        // one thread per logical core per thumbnail request, and mounting a
-        // queue of 30 rows fires one request per row.
+        // -threads 1 caps the decoder so mounting a queue does not overwhelm CPU.
+        // For audio files, embedded artwork (ID3 APIC / attached_pic) resides at time 0:
+        // DO NOT use -ss 00:00:01 because it skips past the attached picture.
+        // DO NOT use -vcodec copy because PNG artwork cannot be copied into a .jpg container.
         std::stringstream cmd;
-        cmd << escapeArg(ffmpegExe) << " -y -threads 1 -ss 00:00:01 -i " << escapeArg(decodedPath);
         if (isAudio) {
-            cmd << " -an -vcodec copy ";
+            cmd << escapeArg(ffmpegExe) << " -y -threads 1 -i " << escapeArg(decodedPath)
+                << " -an -vframes 1 -q:v 3 -vf \"scale='min(480,iw)':-2\" "
+                << escapeArg(thumbPath);
         } else {
-            cmd << " -vframes 1 -q:v 3 -vf \"scale='min(480,iw)':-2\" ";
+            cmd << escapeArg(ffmpegExe) << " -y -threads 1 -ss 00:00:01 -i " << escapeArg(decodedPath)
+                << " -vframes 1 -q:v 3 -vf \"scale='min(480,iw)':-2\" "
+                << escapeArg(thumbPath);
         }
-        cmd << escapeArg(thumbPath);
 
 #ifdef _WIN32
         std::wstring wcmd = utf8ToWide(cmd.str());
@@ -868,8 +878,7 @@ namespace Panamedia {
         ZeroMemory(&pi, sizeof(pi));
 
         if (CreateProcessW(NULL, &wcmd[0], NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-            // Kill on timeout instead of leaving the child running detached —
-            // repeated scrubs used to stack up orphaned ffmpeg processes.
+            // Kill on timeout instead of leaving the child running detached
             const DWORD waitResult = WaitForSingleObject(pi.hProcess, 8000);
             if (waitResult == WAIT_TIMEOUT) {
                 TerminateProcess(pi.hProcess, 1);
@@ -902,7 +911,14 @@ namespace Panamedia {
             }
         }
 
-        std::string response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        // Negative cache marker: prevents repeated ffmpeg invocations for files with no cover/video stream
+        try {
+            std::ofstream noneFile(noThumbPath);
+            noneFile << "0";
+            noneFile.close();
+        } catch (...) {}
+
+        std::string response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n";
         sendAll(client, response.c_str(), response.length());
     }
 

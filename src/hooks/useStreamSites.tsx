@@ -2,6 +2,7 @@ import { Film, Flame, Globe, Heart, Music, PlaySquare, Sparkles, Star, Tv, Video
 
 export const DEFAULT_STREAM_SITES = [
   { name: 'YouTube', url: 'https://www.youtube.com', color: '#ff0000' },
+  { name: 'Facebook', url: 'https://www.facebook.com/watch', color: '#1877f2' },
   { name: 'Moviebox', url: 'https://moviebox.ph/', color: '#fbbf24' },
   { name: 'TikTok', url: 'https://www.tiktok.com', color: '#010101' }
 ];
@@ -75,10 +76,28 @@ export function getSiteIcon(site: any) {
       </svg>
     );
   }
+  if (name.includes('facebook')) {
+    return (
+      <svg viewBox="0 0 24 24" width="12" height="12" fill={site.color || '#1877f2'} style={{ flexShrink: 0 }}>
+        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+      </svg>
+    );
+  }
   if (name.includes('tiktok')) {
     return (
       <svg viewBox="0 0 24 24" width="12" height="12" fill="#fff" style={{ flexShrink: 0, background: '#000', borderRadius: '2px', padding: '1px' }}>
         <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.97v7.57c0 2.21-.73 4.41-2.22 6.02-1.89 2.05-4.78 2.87-7.46 2.2-2.74-.68-4.99-2.79-5.74-5.52-.89-3.21.36-6.84 3.08-8.62 1.62-1.07 3.63-1.46 5.53-1.09v4.08c-1.2-.38-2.58-.2-3.62.53-1.12.78-1.68 2.21-1.39 3.56.27 1.31 1.41 2.37 2.74 2.53 1.75.21 3.51-.83 3.96-2.53.1-.38.13-.77.13-1.16V0z" />
+      </svg>
+    );
+  }
+  if (name.includes('moviebox')) {
+    return (
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" style={{ flexShrink: 0 }}>
+        <rect width="24" height="24" rx="5" fill="#f59e0b" />
+        <path d="M4 8.5h16v9.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8.5z" fill="#181826" />
+        <path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2.5H4V6z" fill="#d97706" />
+        <path d="M7 4l2 4.5M12 4l2 4.5M17 4l2 4.5" stroke="#fbbf24" strokeWidth="1.2" />
+        <polygon points="10.5,11.5 15.5,14 10.5,16.5" fill="#fbbf24" />
       </svg>
     );
   }
