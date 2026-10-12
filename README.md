@@ -48,13 +48,33 @@ The downloader is a fully self-contained download engine supporting YouTube, soc
 | **YouTube Playlist** | Paste a playlist URL to batch-download all videos in one go |
 | **Browser Extension** | Install the Panamedia Chrome/Edge extension — one-click download from any tab via native messaging bridge on port 52321 |
 
-#### In-App Browser
+#### Integrated In-App Browser & Stream Hub
 
-- Built-in Electron webview with navigation bar (back, forward, reload, URL input).
-- Pre-configured site shortcuts: **YouTube**, **MovieBox**, **TikTok** — plus any custom site you add.
-- Add custom streaming sites: set a name, URL, and choose between the site's own favicon or a preset icon.
-- **Download Video** button appears when a streamable page is detected.
-- **Download Playlist** button appears automatically when a YouTube playlist URL is detected.
+Panamedia Pro includes a specialized Chromium-powered embedded browser optimized for video discovery, stream extraction, and private browsing:
+
+- **Site Hub Shortcuts** - Instant one-click tabs for **YouTube**, **Facebook Watch**, **MovieBox**, and **TikTok**, plus custom streaming destinations added by the user.
+- **Full-View Immersion Mode** - Toggle seamlessly between standard dashboard mode and borderless full-window browsing with dedicated maximize/restore controls.
+- **Stream Sniffer Engine** - Automatically intercepts streaming URLs, audio/video elements, video player bounding rects, and official studio poster metadata.
+- **One-Click Video & Playlist Downloads** - Context-aware **Download Video** and **Download Playlist** triggers appear dynamically when downloadable media or YouTube playlists are detected.
+- **Modal Layering Architecture** - Extraction and format selection modals render at high z-index (`100005+`), ensuring full visibility across both standard and full-view window layouts without dark screen masking.
+- **Ad & Campaign Filtering** - Built-in navigation interceptors actively filter out intrusive third-party ad networks, pop-unders, and redirect loops.
+
+---
+
+#### Browser Tab Security & PIN Protection
+
+Panamedia Pro provides granular access control for web streams and personal bookmarks directly within the integrated browser:
+
+- **Per-Tab Security Locks** - Lock any individual site tab behind password/PIN protection. Unauthenticated users cannot view tab contents or stream audio/video until the passcode is entered.
+- **Dual Lock Modes**:
+  - **Master Archive PIN**: Synchronizes tab protection with your global Panamedia Master Archive PIN.
+  - **Custom Tab Password / PIN**: Assign a unique numeric passcode or text password exclusive to that specific site tab.
+- **Right-Click Quick-Lock Context Menu**:
+  - **Lock Tab Now**: Right-click any unlocked or unconfigured tab to immediately lock it using your pre-set passcode.
+  - **Unlock Tab**: Quickly open the passcode verification modal from the tab context menu.
+  - **Edit / Delete Tab**: Modify custom tab titles, URLs, custom icons, or remove user-added shortcuts.
+- **Session-Aware Unlock**: When authenticated, a tab stays unlocked for your working session. Users can instantly re-lock tabs at any time via right-click without opening settings.
+- **Cryptographic Security**: All tab passcodes and archive PINs are hashed using cryptographic SHA-256 before disk persistence, ensuring passwords are never stored in plain text.
 
 #### Supported Social Platforms
 
@@ -91,6 +111,16 @@ Before any download starts a format picker modal lets you choose:
 - Reads `Content-Disposition` headers to detect the correct filename automatically.
 - Merges segments seamlessly after all chunks complete.
 - Configurable connections per download: 2 · 4 · 8 (default) · 16 · 32.
+- **Throttled Chunk Progress**: Network packet progress events are throttled to a minimum 250ms cadence, preventing Node.js event-loop exhaustion during multi-gigabit transfers.
+
+---
+
+#### Smooth Simultaneous Playback & Download Architecture
+
+Panamedia Pro is architected to allow heavy background downloading while running high-definition video playback in the Panamedia Player without stuttering or lag:
+
+- **Below-Normal Process Priority**: All yt-dlp downloading and FFmpeg format-merging child processes are scheduled at `BELOW_NORMAL_PRIORITY_CLASS` on Windows. The OS scheduler always guarantees CPU and GPU priority to audio rendering and hardware video decoding.
+- **Player Window IPC Isolation**: Intermediate download progress updates are segregated and delivered exclusively to the main dashboard. The player window is shielded from live progress broadcasts, completely eliminating React re-render cascades while watching media.
 
 #### Auto-Compress on Download
 
@@ -285,11 +315,15 @@ The **Cut / Trim Studio** provides a non-linear, frame-accurate trimming and cut
 
 ---
 
-### Archive & PIN Protection
+### Archive & PIN Security Center
 
-- Mark any media file as "Archived" to hide it from the standard library view.
-- Set a custom PIN code to lock access to archived content.
-- OS-level hidden+system attribute applied via attrib to archived folders on Windows for extra protection.
+- **Master Archive Encryption** - Mark sensitive media files as "Archived" to conceal them from public library views.
+- **OS-Level Concealment** - Applies Windows `attrib +h +s` attributes to archived directories on disk for system-level privacy.
+- **Unified Privacy & PIN Management** - Located under **Settings ➔ Archive PIN & Privacy**:
+  - **Reset Target Selector**: A centralized dropdown selector in the form header allows users to switch between modifying the **Master Archive PIN** or any individual **Streaming Site Tab**.
+  - **Single Form Workflow**: Setting or changing passcodes for the Master Archive or any protected site tab is performed on the same unified form with live confirmation matching.
+  - **One-Click Lock Removal**: Remove protection or reset passcodes for any site tab directly from the central settings console.
+  - **Synchronized Playback Security**: Master PIN updates instantly synchronize across the main dashboard and player window via Electron IPC.
 
 ---
 
@@ -419,6 +453,16 @@ npm run dist
 ## Release Notes
 
 
+
+### Version 1.0.2 — Windows Only
+- **Integrated Browser Tab Security** - Added individual site tab locking with Master Archive PIN and Custom Tab PIN options.
+- **Right-Click Quick-Lock** - Instant context menu action to lock any browser tab immediately with your pre-set passcode.
+- **Unified PIN Reset Center** - Added Reset Target selector in Settings ➔ Archive PIN & Privacy to configure both Archive PIN and site tab passwords in a single form.
+- **Full-View Browser Modal Fix** - Raised modal backdrop z-index (`100005+`) ensuring stream extraction dialogs render above full-screen webviews.
+- **Smooth Playback During Downloads** - Eliminated player stuttering by setting below-normal process priorities on downloader workers and isolating player IPC from live download progress churn.
+- **Webview DOM Lifecycle Guards** - Added strict attachment and dom-ready lifecycle checks to eliminate runtime error boundary crashes during webview initialization.
+
+---
 
 ### Version 1.0.1 — Windows Only
 - **Self-Healing Library** - Missing files are automatically removed from the playlist, favourites, archive, download index, and Settings sync folders. Playback skips to the next available track.

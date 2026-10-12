@@ -63,3 +63,5 @@ Thumbs.db
 *.temp
 
 extension/key.pem
+
+scratch/
