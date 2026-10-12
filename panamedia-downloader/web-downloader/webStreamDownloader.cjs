@@ -388,6 +388,12 @@ function downloadHlsStream(url, output, opts = {}, onProgress) {
           args.push('-movflags', '+faststart', output);
 
           ffmpegProc = spawn(ffmpegPath, args, { windowsHide: true });
+          try {
+            const os = require('os');
+            if (ffmpegProc && ffmpegProc.pid && os.constants?.priority?.PRIORITY_BELOW_NORMAL) {
+              os.setPriority(ffmpegProc.pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
+            }
+          } catch (e) {}
           let lastStderr = '';
 
           ffmpegProc.stderr.on('data', (data) => {

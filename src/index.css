@@ -403,7 +403,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 10000;
+  z-index: 100005;
   animation: fadeIn 0.25s ease-out;
 }
 

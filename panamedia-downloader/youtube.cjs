@@ -464,6 +464,15 @@ function resumeInstall() {
   }
 }
 
+function setBelowNormalPriority(proc) {
+  try {
+    const os = require('os');
+    if (proc && proc.pid && os.constants?.priority?.PRIORITY_BELOW_NORMAL) {
+      os.setPriority(proc.pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
+    }
+  } catch (e) {}
+}
+
 function runYtdlp(args) {
   return new Promise((resolve, reject) => {
     const finalArgs = args.includes('--no-update') ? [...args] : ['--no-update', ...args];
@@ -471,6 +480,7 @@ function runYtdlp(args) {
       finalArgs.push('--js-runtimes', `node:${nodePath}`);
     }
     const proc = spawn(ytdlpPath, finalArgs, { windowsHide: true });
+    setBelowNormalPriority(proc);
     const timeout = setTimeout(() => {
       proc.kill('SIGKILL');
       reject(new Error('yt-dlp operation timed out (120s)'));
@@ -754,6 +764,7 @@ function downloadYoutubeVideo(url, output, opts, onProgress) {
 
   const startTime = Date.now();
   const proc = spawn(ytdlpPath, args, { windowsHide: true });
+  setBelowNormalPriority(proc);
 
   const promise = new Promise((resolve, reject) => {
     let lastStderr = '';

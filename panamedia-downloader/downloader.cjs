@@ -291,19 +291,23 @@ class SegmentedDownloader extends EventEmitter {
         stream.write(chunk);
         seg.downloaded += chunk.length;
 
-        this.downloadedBytes = this.segments.reduce((a, s) => a + s.downloaded, 0);
-        if (this.totalBytes > 0 && this.downloadedBytes >= this.totalBytes) {
-          this.downloadedBytes = this.totalBytes;
-        }
+        const now = Date.now();
+        if (!this._lastProgressEmit || (now - this._lastProgressEmit) > 250) {
+          this._lastProgressEmit = now;
+          this.downloadedBytes = this.segments.reduce((a, s) => a + s.downloaded, 0);
+          if (this.totalBytes > 0 && this.downloadedBytes >= this.totalBytes) {
+            this.downloadedBytes = this.totalBytes;
+          }
 
-        if (this.status === 'downloading') {
-          this.emit('progress', {
-            downloadedBytes: this.downloadedBytes,
-            totalBytes: this.totalBytes,
-            speed: this.speed,
-            eta: this.eta,
-            segments: this.segments
-          });
+          if (this.status === 'downloading') {
+            this.emit('progress', {
+              downloadedBytes: this.downloadedBytes,
+              totalBytes: this.totalBytes,
+              speed: this.speed,
+              eta: this.eta,
+              segments: this.segments
+            });
+          }
         }
       });
 

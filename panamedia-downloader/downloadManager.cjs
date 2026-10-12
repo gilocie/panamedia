@@ -141,27 +141,35 @@ let broadcastTimer = null;
 let broadcastPending = false;
 const completionToastSentKeys = new Set(); // dedup: 'filename|completedAt'
 
-function broadcast() {
+function broadcast(includePlayer = false) {
   const main = getMainWindow();
-  const player = getPlayerWindow();
   if (main && !main.isDestroyed()) main.webContents.send('downloads-updated', downloadsList);
-  if (player && !player.isDestroyed()) player.webContents.send('downloads-updated', downloadsList);
+  if (includePlayer) {
+    const player = getPlayerWindow();
+    if (player && !player.isDestroyed()) player.webContents.send('downloads-updated', downloadsList);
+  }
 }
 
 function notifyDownloadCompleted(task) {
   const main = getMainWindow();
-  if (!main || main.isDestroyed() || !task) return;
-  // Deduplicate: same download task or filename completing within 10 seconds should only show one toast
-  const normFilename = (task.filename || '').toLowerCase().trim();
-  const key = task.id ? `id:${task.id}` : `file:${normFilename}`;
-  if (completionToastSentKeys.has(key) || (normFilename && completionToastSentKeys.has(`file:${normFilename}`))) return;
-  completionToastSentKeys.add(key);
-  if (normFilename) completionToastSentKeys.add(`file:${normFilename}`);
-  setTimeout(() => {
-    completionToastSentKeys.delete(key);
-    if (normFilename) completionToastSentKeys.delete(`file:${normFilename}`);
-  }, 10000);
-  main.webContents.send('download-completed-toast', task.filename);
+  if (task && main && !main.isDestroyed()) {
+    // Deduplicate: same download task or filename completing within 10 seconds should only show one toast
+    const normFilename = (task.filename || '').toLowerCase().trim();
+    const key = task.id ? `id:${task.id}` : `file:${normFilename}`;
+    if (!completionToastSentKeys.has(key) && (!normFilename || !completionToastSentKeys.has(`file:${normFilename}`))) {
+      completionToastSentKeys.add(key);
+      if (normFilename) completionToastSentKeys.add(`file:${normFilename}`);
+      setTimeout(() => {
+        completionToastSentKeys.delete(key);
+        if (normFilename) completionToastSentKeys.delete(`file:${normFilename}`);
+      }, 10000);
+      main.webContents.send('download-completed-toast', task.filename);
+    }
+  }
+  const player = getPlayerWindow();
+  if (player && !player.isDestroyed()) {
+    player.webContents.send('downloads-updated', downloadsList);
+  }
 }
 
 function broadcastThrottled() {

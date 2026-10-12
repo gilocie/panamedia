@@ -237,6 +237,60 @@ export default function App() {
   const [siteResetShowPin, setSiteResetShowPin] = useState<boolean>(false);
   const [siteResetFeedback, setSiteResetFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [siteToUnlockConfirm, setSiteToUnlockConfirm] = useState<any | null>(null);
+  const [settingsPinTarget, setSettingsPinTarget] = useState<string>('archive');
+
+  const handleQuickLockTab = (site: any) => {
+    if (site.isLocked) {
+      if (unlockedStreamUrls.has(site.url)) {
+        setUnlockedStreamUrls((prev: Set<string>) => {
+          const next = new Set(prev);
+          next.delete(site.url);
+          return next;
+        });
+        addToast(`${site.name} tab is now locked.`);
+        try {
+          const host = new URL(site.url).hostname.replace('www.', '').toLowerCase();
+          if (currentBrowserUrl.toLowerCase().includes(host)) {
+            setSiteToUnlock(site);
+          }
+        } catch (e) {}
+      }
+      setStreamTabContextMenu(null);
+      return;
+    }
+
+    const masterPin = settingsArchivePin || localStorage.getItem('player_archive_pin');
+    const existingCustomSite = streamSites.find((s: any) => s.isLocked && s.lockType === 'custom' && s.customPin);
+
+    let updatedSite: any = null;
+    if (masterPin) {
+      updatedSite = { ...site, isLocked: true, lockType: 'archive' };
+    } else if (existingCustomSite) {
+      updatedSite = { ...site, isLocked: true, lockType: 'custom', customPin: existingCustomSite.customPin };
+    }
+
+    if (updatedSite) {
+      const nextSites = streamSites.map((s: any) => s.url === site.url ? updatedSite : s);
+      setStreamSites(nextSites);
+      try { localStorage.setItem('stream_sites', JSON.stringify(nextSites)); } catch (e) {}
+      setUnlockedStreamUrls((prev: Set<string>) => {
+        const next = new Set(prev);
+        next.delete(site.url);
+        return next;
+      });
+      addToast(`${site.name} locked using your set passcode.`);
+      try {
+        const host = new URL(site.url).hostname.replace('www.', '').toLowerCase();
+        if (currentBrowserUrl.toLowerCase().includes(host)) {
+          setSiteToUnlock(updatedSite);
+        }
+      } catch (e) {}
+    } else {
+      setSiteToEdit({ ...site, isLocked: true });
+      setShowAddSiteModal(true);
+    }
+    setStreamTabContextMenu(null);
+  };
 
   const handleOpenResetSitePin = (site: any) => {
     setSiteToResetPin(site);
@@ -3028,12 +3082,51 @@ export default function App() {
                           </div>
                           <div>
                             <div style={{ fontSize: '14px', fontWeight: 700, color: '#fff' }}>
-                              {settingsArchivePin ? 'Change Archive PIN' : 'Set New Archive PIN'}
+                              {settingsPinTarget === 'archive'
+                                ? (settingsArchivePin ? 'Change Archive PIN' : 'Set New Archive PIN')
+                                : `Change PIN: ${streamSites.find((s: any) => s.url === settingsPinTarget)?.name || 'Site Tab'}`}
                             </div>
                             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '1px' }}>
-                              4–8 digit numeric passcode
+                              {settingsPinTarget === 'archive'
+                                ? '4–8 digit numeric passcode for Master Archive'
+                                : `4–8 digit passcode for ${streamSites.find((s: any) => s.url === settingsPinTarget)?.name || 'this tab'}`}
                             </div>
                           </div>
+                        </div>
+
+                        {/* Reset Target Selector (choose Archive or any Site Tab) */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>Reset Target:</span>
+                          <select
+                            value={settingsPinTarget}
+                            onChange={(e) => {
+                              setSettingsPinTarget(e.target.value);
+                              setNewSettingsPin('');
+                              setConfirmSettingsPin('');
+                              setPinFeedbackMsg(null);
+                            }}
+                            style={{
+                              background: 'rgba(255, 255, 255, 0.05)',
+                              border: '1px solid rgba(234, 179, 8, 0.4)',
+                              borderRadius: '8px',
+                              color: '#fff',
+                              padding: '5px 10px',
+                              fontSize: '11.5px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              outline: 'none',
+                              boxShadow: '0 2px 8px rgba(0,0,0,0.4)'
+                            }}
+                          >
+                            <option value="archive" style={{ background: '#141422', color: '#fff' }}>
+                              🔒 Master Archive PIN
+                            </option>
+                            {streamSites.map((site: any) => (
+                              <option key={site.url} value={site.url} style={{ background: '#141422', color: '#fff' }}>
+                                🌐 {site.name} {site.isLocked ? '(Protected)' : '(Unprotected)'}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                       </div>
 
@@ -3249,63 +3342,108 @@ export default function App() {
                         </div>
 
                         {/* Save/Update Button (right side) */}
-                        <button
-                          type="button"
-                          disabled={!newSettingsPin || newSettingsPin.length < 4 || newSettingsPin !== confirmSettingsPin}
-                          onClick={async () => {
-                            setPinFeedbackMsg(null);
-                            if (!newSettingsPin || newSettingsPin.length < 4) {
-                              setPinFeedbackMsg({ type: 'error', text: 'PIN must be at least 4 digits.' });
-                              return;
-                            }
-                            if (newSettingsPin !== confirmSettingsPin) {
-                              setPinFeedbackMsg({ type: 'error', text: 'PINs do not match. Please re-enter.' });
-                              return;
-                            }
-                            try {
-                              const hashedPin = await hashPin(newSettingsPin);
-                              localStorage.setItem('player_archive_pin', hashedPin);
-                              setSettingsArchivePin(hashedPin);
-                              setNewSettingsPin('');
-                              setConfirmSettingsPin('');
-                              if (electron) {
-                                electron.ipcRenderer.send('archive-pin-updated', hashedPin);
-                                electron.ipcRenderer.invoke('save-archive-data', { archivePin: hashedPin }).catch(() => { });
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          {settingsPinTarget !== 'archive' && streamSites.find((s: any) => s.url === settingsPinTarget)?.isLocked && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const targetSite = streamSites.find((s: any) => s.url === settingsPinTarget);
+                                if (!targetSite) return;
+                                const nextSites = streamSites.map((s: any) => s.url === settingsPinTarget ? { ...s, isLocked: false, customPin: undefined } : s);
+                                setStreamSites(nextSites);
+                                try { localStorage.setItem('stream_sites', JSON.stringify(nextSites)); } catch (e) {}
+                                setPinFeedbackMsg({ type: 'success', text: `Protection removed from ${targetSite.name}.` });
+                                setNewSettingsPin('');
+                                setConfirmSettingsPin('');
+                              }}
+                              className="btn-danger"
+                              style={{
+                                padding: '9px 18px',
+                                borderRadius: '10px',
+                                fontSize: '12px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                fontWeight: 600,
+                                cursor: 'pointer'
+                              }}
+                            >
+                              <Unlock size={13} /> Remove Lock
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            disabled={!newSettingsPin || newSettingsPin.length < 4 || newSettingsPin !== confirmSettingsPin}
+                            onClick={async () => {
+                              setPinFeedbackMsg(null);
+                              if (!newSettingsPin || newSettingsPin.length < 4) {
+                                setPinFeedbackMsg({ type: 'error', text: 'PIN must be at least 4 digits.' });
+                                return;
                               }
-                              setPinFeedbackMsg({ type: 'success', text: 'Archive PIN updated and synchronized with Player!' });
-                            } catch {
-                              setPinFeedbackMsg({ type: 'error', text: 'Failed to securely hash PIN.' });
-                            }
-                          }}
-                          style={{
-                            padding: '9px 22px',
-                            borderRadius: '10px',
-                            fontSize: '12.5px',
-                            background: (!newSettingsPin || newSettingsPin.length < 4 || newSettingsPin !== confirmSettingsPin)
-                              ? 'rgba(255,255,255,0.05)'
-                              : 'linear-gradient(135deg, #eab308 0%, #ca8a04 100%)',
-                            color: (!newSettingsPin || newSettingsPin.length < 4 || newSettingsPin !== confirmSettingsPin)
-                              ? 'rgba(255,255,255,0.25)'
-                              : '#000',
-                            fontWeight: 700,
-                            cursor: (!newSettingsPin || newSettingsPin.length < 4 || newSettingsPin !== confirmSettingsPin) ? 'not-allowed' : 'pointer',
-                            boxShadow: (!newSettingsPin || newSettingsPin.length < 4 || newSettingsPin !== confirmSettingsPin)
-                              ? 'none'
-                              : '0 4px 16px rgba(234, 179, 8, 0.35)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '7px',
-                            border: (!newSettingsPin || newSettingsPin.length < 4 || newSettingsPin !== confirmSettingsPin)
-                              ? '1px solid rgba(255,255,255,0.06)'
-                              : 'none',
-                            transition: 'all 0.3s ease',
-                            whiteSpace: 'nowrap',
-                            flexShrink: 0
-                          }}
-                        >
-                          <Lock size={13} />
-                          {settingsArchivePin ? 'Update PIN' : 'Save PIN'}
-                        </button>
+                              if (newSettingsPin !== confirmSettingsPin) {
+                                setPinFeedbackMsg({ type: 'error', text: 'PINs do not match. Please re-enter.' });
+                                return;
+                              }
+                              try {
+                                const hashedPin = await hashPin(newSettingsPin);
+                                if (settingsPinTarget === 'archive') {
+                                  localStorage.setItem('player_archive_pin', hashedPin);
+                                  setSettingsArchivePin(hashedPin);
+                                  if (electron) {
+                                    electron.ipcRenderer.send('archive-pin-updated', hashedPin);
+                                    electron.ipcRenderer.invoke('save-archive-data', { archivePin: hashedPin }).catch(() => { });
+                                  }
+                                  setPinFeedbackMsg({ type: 'success', text: 'Archive PIN updated and synchronized with Player!' });
+                                } else {
+                                  const targetSite = streamSites.find((s: any) => s.url === settingsPinTarget);
+                                  const nextSites = streamSites.map((s: any) => {
+                                    if (s.url === settingsPinTarget) {
+                                      return { ...s, isLocked: true, lockType: 'custom', customPin: hashedPin };
+                                    }
+                                    return s;
+                                  });
+                                  setStreamSites(nextSites);
+                                  try { localStorage.setItem('stream_sites', JSON.stringify(nextSites)); } catch (e) {}
+                                  setPinFeedbackMsg({ type: 'success', text: `PIN for "${targetSite?.name || 'Tab'}" updated successfully!` });
+                                }
+                                setNewSettingsPin('');
+                                setConfirmSettingsPin('');
+                              } catch {
+                                setPinFeedbackMsg({ type: 'error', text: 'Failed to securely hash PIN.' });
+                              }
+                            }}
+                            style={{
+                              padding: '9px 22px',
+                              borderRadius: '10px',
+                              fontSize: '12.5px',
+                              background: (!newSettingsPin || newSettingsPin.length < 4 || newSettingsPin !== confirmSettingsPin)
+                                ? 'rgba(255,255,255,0.05)'
+                                : 'linear-gradient(135deg, #eab308 0%, #ca8a04 100%)',
+                              color: (!newSettingsPin || newSettingsPin.length < 4 || newSettingsPin !== confirmSettingsPin)
+                                ? 'rgba(255,255,255,0.25)'
+                                : '#000',
+                              fontWeight: 700,
+                              cursor: (!newSettingsPin || newSettingsPin.length < 4 || newSettingsPin !== confirmSettingsPin) ? 'not-allowed' : 'pointer',
+                              boxShadow: (!newSettingsPin || newSettingsPin.length < 4 || newSettingsPin !== confirmSettingsPin)
+                                ? 'none'
+                                : '0 4px 16px rgba(234, 179, 8, 0.35)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '7px',
+                              border: (!newSettingsPin || newSettingsPin.length < 4 || newSettingsPin !== confirmSettingsPin)
+                                ? '1px solid rgba(255,255,255,0.06)'
+                                : 'none',
+                              transition: 'all 0.3s ease',
+                              whiteSpace: 'nowrap',
+                              flexShrink: 0
+                            }}
+                          >
+                            <Lock size={13} />
+                            {settingsPinTarget === 'archive'
+                              ? (settingsArchivePin ? 'Update PIN' : 'Save PIN')
+                              : (streamSites.find((s: any) => s.url === settingsPinTarget)?.isLocked ? 'Update Tab PIN' : 'Lock Tab with PIN')}
+                          </button>
+                        </div>
                       </div>
 
                       {/* Feedback Message (full width below) */}
@@ -4730,7 +4868,7 @@ export default function App() {
             position: 'fixed',
             top: streamTabContextMenu.y,
             left: streamTabContextMenu.x,
-            zIndex: 100001,
+            zIndex: 100010,
             background: 'rgba(20, 20, 32, 0.96)',
             backdropFilter: 'blur(16px)',
             WebkitBackdropFilter: 'blur(16px)',
@@ -4747,6 +4885,83 @@ export default function App() {
           <div style={{ padding: '5px 8px', fontSize: '10px', color: 'var(--text-muted)', borderBottom: '1px solid rgba(255,255,255,0.06)', fontWeight: 600 }}>
             {streamTabContextMenu.site.name}
           </div>
+
+          {/* Quick Lock / Unlock Tab Option */}
+          {streamTabContextMenu.site.isLocked ? (
+            unlockedStreamUrls.has(streamTabContextMenu.site.url) ? (
+              <button
+                onClick={() => handleQuickLockTab(streamTabContextMenu.site)}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#eab308',
+                  fontSize: '11.5px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '7px',
+                  textAlign: 'left',
+                  fontWeight: 600
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(234, 179, 8, 0.15)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+              >
+                <Lock size={12} /> Lock Tab Now
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  setSiteToUnlock(streamTabContextMenu.site);
+                  setUnlockPinInput('');
+                  setUnlockPinError('');
+                  setShowUnlockPin(false);
+                  setStreamTabContextMenu(null);
+                }}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#4ade80',
+                  fontSize: '11.5px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '7px',
+                  textAlign: 'left',
+                  fontWeight: 600
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(74, 222, 128, 0.15)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+              >
+                <Unlock size={12} /> Unlock Tab
+              </button>
+            )
+          ) : (
+            <button
+              onClick={() => handleQuickLockTab(streamTabContextMenu.site)}
+              style={{
+                padding: '6px 10px',
+                borderRadius: '6px',
+                border: 'none',
+                background: 'transparent',
+                color: '#eab308',
+                fontSize: '11.5px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '7px',
+                textAlign: 'left'
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(234, 179, 8, 0.15)')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+            >
+              <Lock size={12} /> Lock Tab
+            </button>
+          )}
+
           <button
             onClick={() => {
               setSiteToEdit(streamTabContextMenu.site);
@@ -4801,7 +5016,7 @@ export default function App() {
 
       {/* Unlock Stream Tab Modal */}
       {siteToUnlock && (
-        <div className="modal-backdrop" onClick={() => setSiteToUnlock(null)} style={{ zIndex: 100000 }}>
+        <div className="modal-backdrop" onClick={() => setSiteToUnlock(null)} style={{ zIndex: 100020 }}>
           <div
             className="glass-panel modal-content"
             onClick={(e) => e.stopPropagation()}
@@ -5257,7 +5472,7 @@ export default function App() {
 
       {/* Custom Delete Confirmation Modal */}
       {deleteConfirmTarget && (
-        <div className="modal-backdrop" style={{ zIndex: 11000 }}>
+        <div className="modal-backdrop" style={{ zIndex: 100020 }}>
           <div className="glass-panel modal-content" style={{ width: '400px' }}>
             <div className="modal-header">
               <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

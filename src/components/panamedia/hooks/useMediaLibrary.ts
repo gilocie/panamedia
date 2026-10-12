@@ -339,7 +339,14 @@ export function useMediaLibrary({
 
     electron.ipcRenderer.invoke('get-downloads').then((list: any[]) => setDownloads(list));
 
-    const handleDownloadsUpdated = (_event: any, list: any[]) => setDownloads(list);
+    let lastCompletedCount = -1;
+    const handleDownloadsUpdated = (_event: any, list: any[]) => {
+      const completedCount = Array.isArray(list) ? list.filter(t => t?.status === 'completed').length : 0;
+      if (completedCount !== lastCompletedCount) {
+        lastCompletedCount = completedCount;
+        setDownloads(list);
+      }
+    };
     electron.ipcRenderer.on('downloads-updated', handleDownloadsUpdated);
 
     const handlePlayerOpenFile = (_event: any, { filePath, filename }: { filePath: string, filename?: string }) => {
