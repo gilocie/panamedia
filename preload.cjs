@@ -51,7 +51,7 @@ if (isTrustedAppDocument) {
     'converter-restore-request', 'converter-resume-request', 'converter-run-request',
     'converter-state-changed', 'copy-progress', 'download-completed-toast',
     'downloads-updated', 'library-synced', 'media-path-removed', 'native-download-received',
-    'network-speed-update', 'player-control-mute', 'player-control-play-pause',
+    'network-speed-update', 'open-external-stream-url', 'player-control-mute', 'player-control-play-pause',
     'player-fullscreen-changed', 'player-open-file', 'player-remote-command',
     'player-state-changed', 'release-media-file', 'settings-changed', 'streaming-port-ready',
     'synced-folders-updated', 'update-download-progress'

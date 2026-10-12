@@ -210,9 +210,15 @@ export default function App() {
         navigateBrowser(url);
       }
     };
-    electron.ipcRenderer.on('open-external-stream-url', handleExternalUrl);
+    try {
+      electron.ipcRenderer.on('open-external-stream-url', handleExternalUrl);
+    } catch (e) {
+      console.warn('[IPC] open-external-stream-url error:', e);
+    }
     return () => {
-      electron.ipcRenderer.removeListener('open-external-stream-url', handleExternalUrl);
+      try {
+        electron.ipcRenderer.removeListener('open-external-stream-url', handleExternalUrl);
+      } catch (e) { }
     };
   }, [navigateBrowser]);
 
@@ -222,6 +228,104 @@ export default function App() {
     window.addEventListener('click', handleGlobalClick);
     return () => window.removeEventListener('click', handleGlobalClick);
   }, []);
+
+  // Site Tab Password Reset & Management states in Settings -> Privacy & Security
+  const [siteToResetPin, setSiteToResetPin] = useState<any | null>(null);
+  const [siteResetLockType, setSiteResetLockType] = useState<'archive' | 'custom'>('custom');
+  const [siteResetNewPin, setSiteResetNewPin] = useState<string>('');
+  const [siteResetConfirmPin, setSiteResetConfirmPin] = useState<string>('');
+  const [siteResetShowPin, setSiteResetShowPin] = useState<boolean>(false);
+  const [siteResetFeedback, setSiteResetFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [siteToUnlockConfirm, setSiteToUnlockConfirm] = useState<any | null>(null);
+
+  const handleOpenResetSitePin = (site: any) => {
+    setSiteToResetPin(site);
+    setSiteResetLockType(site.lockType || (site.customPin ? 'custom' : 'archive'));
+    setSiteResetNewPin('');
+    setSiteResetConfirmPin('');
+    setSiteResetShowPin(false);
+    setSiteResetFeedback(null);
+  };
+
+  const handleSaveSitePinReset = async () => {
+    if (!siteToResetPin) return;
+    setSiteResetFeedback(null);
+
+    if (siteResetLockType === 'custom') {
+      const pin = siteResetNewPin.trim();
+      if (!pin || pin.length < 4) {
+        setSiteResetFeedback({ type: 'error', text: 'Password or PIN must be at least 4 characters.' });
+        return;
+      }
+      if (pin !== siteResetConfirmPin.trim()) {
+        setSiteResetFeedback({ type: 'error', text: 'Passwords do not match. Please re-enter.' });
+        return;
+      }
+      try {
+        const hashed = await hashPin(pin);
+        setStreamSites((prev: any[]) => {
+          const next = prev.map((s: any) => {
+            if (s.url === siteToResetPin.url) {
+              return {
+                ...s,
+                isLocked: true,
+                lockType: 'custom',
+                customPin: hashed
+              };
+            }
+            return s;
+          });
+          try { localStorage.setItem('stream_sites', JSON.stringify(next)); } catch (e) { }
+          return next;
+        });
+        setSiteResetFeedback({ type: 'success', text: `Successfully updated password for "${siteToResetPin.name}"!` });
+        setTimeout(() => {
+          setSiteToResetPin(null);
+        }, 1100);
+      } catch {
+        setSiteResetFeedback({ type: 'error', text: 'Failed to securely encrypt PIN.' });
+      }
+    } else {
+      // Switched to Master Archive PIN
+      setStreamSites((prev: any[]) => {
+        const next = prev.map((s: any) => {
+          if (s.url === siteToResetPin.url) {
+            return {
+              ...s,
+              isLocked: true,
+              lockType: 'archive',
+              customPin: undefined
+            };
+          }
+          return s;
+        });
+        try { localStorage.setItem('stream_sites', JSON.stringify(next)); } catch (e) { }
+        return next;
+      });
+      setSiteResetFeedback({ type: 'success', text: `"${siteToResetPin.name}" is now secured using the Master Archive PIN!` });
+      setTimeout(() => {
+        setSiteToResetPin(null);
+      }, 1100);
+    }
+  };
+
+  const handleRemoveSiteLock = (site: any) => {
+    setStreamSites((prev: any[]) => {
+      const next = prev.map((s: any) => {
+        if (s.url === site.url) {
+          return {
+            ...s,
+            isLocked: false,
+            customPin: undefined
+          };
+        }
+        return s;
+      });
+      try { localStorage.setItem('stream_sites', JSON.stringify(next)); } catch (e) { }
+      return next;
+    });
+    setSiteToUnlockConfirm(null);
+  };
 
   // Archive + PIN 
   const {
@@ -3224,6 +3328,554 @@ export default function App() {
                       )}
                     </div>
                   </div>
+
+                  {/* ── Section 2: Protected Streaming Site Tabs & Passwords ── */}
+                  <div className="glass-panel" style={{
+                    padding: '24px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '18px',
+                    background: 'rgba(255,255,255,0.015)',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                    borderRadius: '16px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div style={{
+                          width: '44px',
+                          height: '44px',
+                          borderRadius: '12px',
+                          background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(168, 85, 247, 0.1) 100%)',
+                          border: '1px solid rgba(99, 102, 241, 0.35)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#a5b4fc'
+                        }}>
+                          <Globe size={22} />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '15px', fontWeight: 700, color: '#fff' }}>
+                            Streaming Site Tab Passwords
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                            Choose which site tab's password to reset, switch lock types, or remove protection
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '4px 12px',
+                          borderRadius: '20px',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.5px',
+                          background: streamSites.some((s: any) => s.isLocked) ? 'rgba(234, 179, 8, 0.12)' : 'rgba(255, 255, 255, 0.05)',
+                          color: streamSites.some((s: any) => s.isLocked) ? '#fde047' : 'var(--text-muted)',
+                          border: '1px solid ' + (streamSites.some((s: any) => s.isLocked) ? 'rgba(234, 179, 8, 0.25)' : 'rgba(255, 255, 255, 0.08)')
+                        }}>
+                          {streamSites.filter((s: any) => s.isLocked).length} Protected {streamSites.filter((s: any) => s.isLocked).length === 1 ? 'Tab' : 'Tabs'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Site Tabs List */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '6px' }}>
+                      {streamSites.map((site: any, idx: number) => {
+                        const isLocked = !!site.isLocked;
+                        const isArchiveType = site.lockType === 'archive';
+                        return (
+                          <div
+                            key={idx}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '12px 16px',
+                              borderRadius: '12px',
+                              background: isLocked ? 'rgba(234, 179, 8, 0.04)' : 'rgba(255, 255, 255, 0.02)',
+                              border: isLocked ? '1px solid rgba(234, 179, 8, 0.2)' : '1px solid rgba(255, 255, 255, 0.05)',
+                              transition: 'all 0.2s ease',
+                              gap: '12px',
+                              flexWrap: 'wrap'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: '220px' }}>
+                              <div style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '8px',
+                                background: 'rgba(255, 255, 255, 0.04)',
+                                border: '1px solid rgba(255, 255, 255, 0.08)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                              }}>
+                                {getSiteIcon(site)}
+                              </div>
+                              <div>
+                                <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  {site.name}
+                                  {isLocked && <Lock size={12} style={{ color: '#eab308' }} />}
+                                </div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-muted)', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {site.url}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Status Badge */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              {isLocked ? (
+                                <span style={{
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  padding: '3px 10px',
+                                  borderRadius: '6px',
+                                  background: isArchiveType ? 'rgba(234, 179, 8, 0.15)' : 'rgba(99, 102, 241, 0.15)',
+                                  color: isArchiveType ? '#fde047' : '#a5b4fc',
+                                  border: isArchiveType ? '1px solid rgba(234, 179, 8, 0.3)' : '1px solid rgba(99, 102, 241, 0.3)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '5px'
+                                }}>
+                                  <KeyRound size={11} />
+                                  {isArchiveType ? 'Master Archive PIN' : 'Custom Tab Password'}
+                                </span>
+                              ) : (
+                                <span style={{
+                                  fontSize: '11px',
+                                  fontWeight: 500,
+                                  padding: '3px 10px',
+                                  borderRadius: '6px',
+                                  background: 'rgba(255, 255, 255, 0.04)',
+                                  color: 'rgba(255, 255, 255, 0.4)',
+                                  border: '1px solid rgba(255, 255, 255, 0.06)'
+                                }}>
+                                  Unprotected
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+                              {isLocked ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenResetSitePin(site)}
+                                    className="btn-secondary"
+                                    style={{
+                                      padding: '6px 12px',
+                                      borderRadius: '8px',
+                                      fontSize: '11.5px',
+                                      fontWeight: 600,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '6px',
+                                      background: 'rgba(234, 179, 8, 0.12)',
+                                      borderColor: 'rgba(234, 179, 8, 0.35)',
+                                      color: '#fde047'
+                                    }}
+                                    title="Choose to reset password or switch lock type"
+                                  >
+                                    <KeyRound size={12} /> Reset Password
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSiteToUnlockConfirm(site)}
+                                    style={{
+                                      padding: '6px 10px',
+                                      borderRadius: '8px',
+                                      fontSize: '11.5px',
+                                      fontWeight: 600,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '5px',
+                                      background: 'rgba(239, 68, 68, 0.1)',
+                                      border: '1px solid rgba(239, 68, 68, 0.25)',
+                                      color: '#f87171',
+                                      cursor: 'pointer'
+                                    }}
+                                    title="Remove password protection from this tab"
+                                  >
+                                    <Unlock size={12} /> Remove Lock
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenResetSitePin(site)}
+                                  className="btn-secondary"
+                                  style={{
+                                    padding: '6px 14px',
+                                    borderRadius: '8px',
+                                    fontSize: '11.5px',
+                                    fontWeight: 600,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px'
+                                  }}
+                                  title="Add password protection to this tab"
+                                >
+                                  <Lock size={12} /> Lock Tab
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* ── Site Tab Password Reset Modal ── */}
+                  {siteToResetPin && (
+                    <div
+                      style={{
+                        position: 'fixed',
+                        inset: 0,
+                        zIndex: 100000,
+                        background: 'rgba(0, 0, 0, 0.82)',
+                        backdropFilter: 'blur(14px)',
+                        WebkitBackdropFilter: 'blur(14px)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '20px'
+                      }}
+                      onClick={() => setSiteToResetPin(null)}
+                    >
+                      <div
+                        style={{
+                          background: 'linear-gradient(155deg, #18182b 0%, #0d0d18 100%)',
+                          border: '1px solid rgba(234, 179, 8, 0.3)',
+                          boxShadow: '0 32px 80px rgba(0, 0, 0, 0.9), 0 0 40px rgba(234, 179, 8, 0.1)',
+                          borderRadius: '20px',
+                          padding: '30px',
+                          maxWidth: '480px',
+                          width: '100%',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '20px',
+                          position: 'relative'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {/* Top Icon & Title */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                          <div style={{
+                            width: '48px',
+                            height: '48px',
+                            borderRadius: '14px',
+                            background: 'linear-gradient(135deg, rgba(234, 179, 8, 0.2) 0%, rgba(234, 179, 8, 0.05) 100%)',
+                            border: '1px solid rgba(234, 179, 8, 0.35)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#eab308'
+                          }}>
+                            <KeyRound size={22} />
+                          </div>
+                          <div>
+                            <h3 style={{ fontSize: '17px', fontWeight: 700, color: '#fff', margin: 0 }}>
+                              Reset Password for {siteToResetPin.name}
+                            </h3>
+                            <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '4px 0 0' }}>
+                              Choose which type of security password to use for this site tab
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Lock Type Selection */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          <label
+                            onClick={() => setSiteResetLockType('archive')}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '12px 14px',
+                              borderRadius: '10px',
+                              background: siteResetLockType === 'archive' ? 'rgba(234, 179, 8, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+                              border: siteResetLockType === 'archive' ? '1px solid rgba(234, 179, 8, 0.35)' : '1px solid rgba(255, 255, 255, 0.06)',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <ShieldCheck size={18} style={{ color: siteResetLockType === 'archive' ? '#eab308' : 'rgba(255,255,255,0.4)' }} />
+                              <div>
+                                <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#fff' }}>Use Master Archive PIN</div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                  Protected with your main app Archive PIN
+                                </div>
+                              </div>
+                            </div>
+                            <input
+                              type="radio"
+                              name="siteResetLockType"
+                              checked={siteResetLockType === 'archive'}
+                              onChange={() => setSiteResetLockType('archive')}
+                              style={{ accentColor: '#eab308' }}
+                            />
+                          </label>
+
+                          <label
+                            onClick={() => setSiteResetLockType('custom')}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '12px 14px',
+                              borderRadius: '10px',
+                              background: siteResetLockType === 'custom' ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+                              border: siteResetLockType === 'custom' ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid rgba(255, 255, 255, 0.06)',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <KeyRound size={18} style={{ color: siteResetLockType === 'custom' ? '#a5b4fc' : 'rgba(255,255,255,0.4)' }} />
+                              <div>
+                                <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#fff' }}>Set Custom Tab Password / PIN</div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                  Create a dedicated password unique to this tab
+                                </div>
+                              </div>
+                            </div>
+                            <input
+                              type="radio"
+                              name="siteResetLockType"
+                              checked={siteResetLockType === 'custom'}
+                              onChange={() => setSiteResetLockType('custom')}
+                              style={{ accentColor: '#6366f1' }}
+                            />
+                          </label>
+                        </div>
+
+                        {/* Custom PIN Input Fields */}
+                        {siteResetLockType === 'custom' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(0,0,0,0.25)', padding: '14px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              <label style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>New Password / PIN</label>
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                background: 'rgba(0, 0, 0, 0.35)',
+                                border: '1px solid rgba(255, 255, 255, 0.12)',
+                                borderRadius: '8px',
+                                padding: '2px 10px'
+                              }}>
+                                <input
+                                  type={siteResetShowPin ? 'text' : 'password'}
+                                  value={siteResetNewPin}
+                                  onChange={(e) => setSiteResetNewPin(e.target.value)}
+                                  placeholder="Enter new password (min 4 chars)"
+                                  style={{
+                                    flex: 1,
+                                    background: 'transparent',
+                                    border: 'none',
+                                    outline: 'none',
+                                    color: '#fff',
+                                    fontSize: '13px',
+                                    padding: '8px 0'
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setSiteResetShowPin(!siteResetShowPin)}
+                                  style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', padding: '4px' }}
+                                >
+                                  {siteResetShowPin ? <EyeOff size={14} /> : <Eye size={14} />}
+                                </button>
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              <label style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>Confirm Password / PIN</label>
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                background: 'rgba(0, 0, 0, 0.35)',
+                                border: '1px solid rgba(255, 255, 255, 0.12)',
+                                borderRadius: '8px',
+                                padding: '2px 10px'
+                              }}>
+                                <input
+                                  type={siteResetShowPin ? 'text' : 'password'}
+                                  value={siteResetConfirmPin}
+                                  onChange={(e) => setSiteResetConfirmPin(e.target.value)}
+                                  placeholder="Re-enter password to confirm"
+                                  style={{
+                                    flex: 1,
+                                    background: 'transparent',
+                                    border: 'none',
+                                    outline: 'none',
+                                    color: '#fff',
+                                    fontSize: '13px',
+                                    padding: '8px 0'
+                                  }}
+                                />
+                              </div>
+                            </div>
+
+                            {/* Match indicator */}
+                            {siteResetConfirmPin.length > 0 && (
+                              <div style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '5px', color: siteResetNewPin === siteResetConfirmPin && siteResetNewPin.length >= 4 ? '#4ade80' : '#f59e0b' }}>
+                                {siteResetNewPin === siteResetConfirmPin && siteResetNewPin.length >= 4 ? (
+                                  <>
+                                    <Check size={12} /> Passwords match
+                                  </>
+                                ) : (
+                                  <>
+                                    <X size={12} /> Passwords do not match
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Feedback message */}
+                        {siteResetFeedback && (
+                          <div style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            background: siteResetFeedback.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                            color: siteResetFeedback.type === 'success' ? '#4ade80' : '#f87171',
+                            border: '1px solid ' + (siteResetFeedback.type === 'success' ? 'rgba(34, 197, 94, 0.25)' : 'rgba(239, 68, 68, 0.25)')
+                          }}>
+                            {siteResetFeedback.type === 'success' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+                            <span>{siteResetFeedback.text}</span>
+                          </div>
+                        )}
+
+                        {/* Modal Action Buttons */}
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
+                          <button
+                            type="button"
+                            onClick={() => setSiteToResetPin(null)}
+                            className="btn-secondary"
+                            style={{ padding: '8px 16px', borderRadius: '8px', fontSize: '12px' }}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleSaveSitePinReset}
+                            style={{
+                              padding: '8px 20px',
+                              borderRadius: '8px',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              background: 'linear-gradient(135deg, #eab308 0%, #ca8a04 100%)',
+                              color: '#000',
+                              border: 'none',
+                              cursor: 'pointer',
+                              boxShadow: '0 4px 14px rgba(234, 179, 8, 0.3)'
+                            }}
+                          >
+                            Save & Update Password
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Remove Site Lock Confirmation Modal ── */}
+                  {siteToUnlockConfirm && (
+                    <div
+                      style={{
+                        position: 'fixed',
+                        inset: 0,
+                        zIndex: 100000,
+                        background: 'rgba(0, 0, 0, 0.82)',
+                        backdropFilter: 'blur(14px)',
+                        WebkitBackdropFilter: 'blur(14px)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '20px'
+                      }}
+                      onClick={() => setSiteToUnlockConfirm(null)}
+                    >
+                      <div
+                        style={{
+                          background: 'linear-gradient(155deg, #18182b 0%, #0d0d18 100%)',
+                          border: '1px solid rgba(239, 68, 68, 0.3)',
+                          boxShadow: '0 32px 80px rgba(0, 0, 0, 0.9), 0 0 40px rgba(239, 68, 68, 0.15)',
+                          borderRadius: '20px',
+                          padding: '30px',
+                          maxWidth: '440px',
+                          width: '100%',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '18px',
+                          textAlign: 'center',
+                          position: 'relative'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div style={{
+                          width: '52px',
+                          height: '52px',
+                          borderRadius: '16px',
+                          background: 'rgba(239, 68, 68, 0.12)',
+                          border: '1px solid rgba(239, 68, 68, 0.3)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#f87171',
+                          margin: '0 auto'
+                        }}>
+                          <Unlock size={24} />
+                        </div>
+
+                        <div>
+                          <h3 style={{ fontSize: '17px', fontWeight: 700, color: '#fff', margin: 0 }}>
+                            Remove Protection for {siteToUnlockConfirm.name}?
+                          </h3>
+                          <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '8px 0 0', lineHeight: 1.5 }}>
+                            Anyone using this application will be able to access the <strong>{siteToUnlockConfirm.name}</strong> tab without entering a PIN or password.
+                          </p>
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '6px' }}>
+                          <button
+                            type="button"
+                            onClick={() => setSiteToUnlockConfirm(null)}
+                            className="btn-secondary"
+                            style={{ padding: '8px 18px', borderRadius: '8px', fontSize: '12px' }}
+                          >
+                            Keep Protected
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveSiteLock(siteToUnlockConfirm)}
+                            style={{
+                              padding: '8px 20px',
+                              borderRadius: '8px',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                              color: '#fff',
+                              border: 'none',
+                              cursor: 'pointer',
+                              boxShadow: '0 4px 16px rgba(239, 68, 68, 0.35)'
+                            }}
+                          >
+                            Yes, Remove Lock
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* ── Reset PIN Confirmation Modal ── */}
                   {showResetPinModal && (

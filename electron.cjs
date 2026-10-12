@@ -1107,6 +1107,14 @@ function createWindow(forceMode = null) {
         event.preventDefault();
       }
     });
+
+    if (isDev) {
+      mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+        if (level >= 2) {
+          console.warn(`[Renderer Warn/Err (${level})]: ${message} (${sourceId}:${line})`);
+        }
+      });
+    }
     
     mainWindow.setIcon(getIconPath('panamedia.ico'));
 
